@@ -6,7 +6,7 @@
 
 | 디렉토리 | 내용 |
 |---|---|
-| [academy-platform/](./academy-platform/) | NEXT Academy AI SaaS — 멀티테넌트 DB 설계 (identity/billing/academy 멀티스키마) |
+| [academy-platform/](./academy-platform/) | Academy AI SaaS — 멀티테넌트 DB 설계 (identity/billing/academy 멀티스키마) |
 
 ## 단독 문서
 

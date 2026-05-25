@@ -1,24 +1,47 @@
-# NEXT Academy AI Platform — DB 설계 핸드북
+# Academy AI Platform — DB 설계 핸드북
 
 > 작성일: 2026-05-25  
 > 상태: v0.1 MVP 설계 완료 / v0.5~v2.0 확장 설계 포함
 
-학원 AI 플랫폼(NEXT Academy)의 **멀티테넌트 DB 설계** 전체 문서 모음.  
+학원 AI 플랫폼(Academy)의 **멀티테넌트 DB 설계** 전체 문서 모음.  
 STT → Claude → YouTube 자동 파이프라인 + RAG 기반 학원장 Q&A를 MVP로 하는 SaaS 제품.
 
 ---
 
 ## 문서 구조
 
+### 핵심 설계 문서
 | 파일 | 내용 | 우선순위 |
 |---|---|---|
 | [platform-data-design.md](./platform-data-design.md) | 플랫폼 전체 DB 스키마 (identity/billing/academy) | **필독** |
 | [data-model.md](./data-model.md) | Academy 도메인 데이터 모델 (lecture, chunk, video 등) | **필독** |
 | [db-design-decisions.md](./db-design-decisions.md) | 설계 결정 이유 & 트레이드오프 기록 | **필독** |
-| [auth-and-policy.md](./auth-and-policy.md) | 인증/인가 레이어 (3-gate canXXX() 구조) | 참고 |
-| [identity-policy.md](./identity-policy.md) | Identity 정책 (HUMAN/SERVICE 분리, perm_version) | 참고 |
-| [rag-strategy.md](./rag-strategy.md) | RAG 아키텍처 (Qdrant + Neo4j, org 네임스페이스) | 참고 |
-| [bdd-scenarios.md](./bdd-scenarios.md) | BDD 시나리오 F1~F51 (Gherkin 형식) | 검증용 |
+| [auth-and-policy.md](./auth-and-policy.md) | 인증/인가 레이어 (3-gate canXXX() 구조) | **필독** |
+
+### 정책 & 전략
+| 파일 | 내용 |
+|---|---|
+| [identity-policy.md](./identity-policy.md) | Identity 정책 (HUMAN/SERVICE 분리, perm_version) |
+| [rag-strategy.md](./rag-strategy.md) | RAG 아키텍처 (Qdrant + Neo4j, org 네임스페이스) |
+| [pipeline.md](./pipeline.md) | STT→Claude→TTS→YouTube 파이프라인 설계 |
+| [tech-stack.md](./tech-stack.md) | 기술 스택 선택 이유 |
+
+### 제품 & 비즈니스
+| 파일 | 내용 |
+|---|---|
+| [vision.md](./vision.md) | 제품 비전 & 미션 |
+| [personas.md](./personas.md) | 페르소나 (학원장/강사/학생/학부모) |
+| [features.md](./features.md) | 기능 목록 F1~F47 |
+| [mvp-scope.md](./mvp-scope.md) | MVP 스코프 & 졸업 조건 |
+| [phase-roadmap.md](./phase-roadmap.md) | v0.1→v0.5→v1.0→v2.0 Phase 로드맵 |
+| [business-model.md](./business-model.md) | 수익 모델 & 플랜 구조 |
+| [competitive-edge.md](./competitive-edge.md) | 경쟁 우위 분석 |
+| [risks.md](./risks.md) | 리스크 & 대응 전략 |
+
+### 검증
+| 파일 | 내용 |
+|---|---|
+| [bdd-scenarios.md](./bdd-scenarios.md) | BDD 시나리오 F1~F51 (Gherkin 형식) |
 
 ---
 

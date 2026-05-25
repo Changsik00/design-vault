@@ -1,6 +1,6 @@
 # 플랫폼 데이터 설계 제안 — Identity / Org / Authorization / Billing
 
-> 대상: NEXT Platform (academy / market / agent / future services 공통 기반)
+> 대상: Academy Platform (academy / market / agent / future services 공통 기반)
 > 전제: 단일 MySQL 8 서버 + 스키마(DB) 분리, NestJS, Drizzle, Firebase Auth(인증 전용)
 > 원칙: **완성형 스키마를 한 번에 그리되, "지금 만들 것"과 "미룰 것"을 §11에서 명확히 분리한다.**
 
