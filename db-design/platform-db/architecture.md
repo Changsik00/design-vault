@@ -6,10 +6,11 @@
 >
 > **누구를 위한 것인가**: 이 코드베이스를 새로 맡는 엔지니어 / 보안·컴플라이언스 검토자 / 다음 서비스(agent·market·store·fitness)를 붙일 개발자
 >
-> **문서 지도 (총 3개, 이 문서가 진입점)**:
-> - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R7)·결정(D1~D12)·AI 검토 반영·운영 플레이북·부록 ADR
-> - [`schema-reference.md`](schema-reference.md) — ERD·스키마·3-gate·billing 흐름·consent 모델
-> - [`requirements.md`](requirements.md) — 요구사항 추적표·BDD 시나리오
+> **문서 지도 (총 4개, 이 문서가 진입점)**:
+> - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R8)·결정(D1~D12)·AI 검토 반영·운영 플레이북
+> - [[schema-reference|schema-reference.md]] — ERD·스키마·3-gate·billing 흐름·consent 모델
+> - [[requirements|requirements.md]] — 요구사항 추적표·BDD 시나리오
+> - [[adr-log|adr-log.md]] — ADR-044/041/042/032/035/036/025 배경·결정·이유·기각
 
 ---
 
@@ -46,11 +47,11 @@
 
 ## 2. 설계 여정 — 왜 이렇게 됐나
 
-이 설계는 8라운드의 AI 검토를 거쳐 수렴했다.
+이 설계는 8라운드의 검토를 거쳐 수렴했다.
 
 | 라운드 | 무엇을 물었나 | 무엇이 바뀌었나 |
 |---|---|---|
-| **R0** 기존 설계 | identity/billing/권한 골격 (ADR-044/041/042/032) | platform_db(공통)+서비스 DB, entitlement=런타임 권위, 3-gate, 결제 단일 트랜잭션 |
+| **R0** 기존 설계 | identity/billing/권한 골격 ([[adr-log|ADR-044/041/042/032]]) | platform_db(공통)+서비스 DB, entitlement=런타임 권위, 3-gate, 결제 단일 트랜잭션 |
 | **R1** 멀티테넌시 | RDB/Qdrant/Neo4j 격리 충분? | org_pk 행 격리 + 분리 트리거 T1~T4. RLS 부재→CI 린트, Qdrant `is_tenant`, Neo4j 멀티홉 강제 |
 | **R2** BDD/사용성 | 요구사항을 다 수용하나? | 골격 수용. **최대 갭 발견: 권한 어휘가 academy에 묶임** |
 | **R3** cross-service 권한 | role/capability를 어떻게 일반화? | **role 2단 분리** + capability 네임스페이스 + role→action 코드 상수 |
@@ -71,16 +72,16 @@
 1. **Firebase = 인증, 인가 = 우리 DB.** `firebase_uid`는 조회 키일 뿐 PK/FK 아님.
 2. **내부 PK는 BIGINT, 외부 노출은 ULID(`public_id`).** 시퀀셜 PK를 URL·API에 노출 금지.
 3. **모든 도메인 테이블은 `org_pk NOT NULL`.** 예외 없음 — 테넌트 경계는 불변식.
-4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. `org_entitlement`는 billing의 authorization projection이며 Gate B의 유일한 진실 원천.
+4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. `org_entitlement`는 billing의 authorization projection이며 [[gate-b-entitlement|Gate B]]의 유일한 진실 원천.
 5. **`service`는 `VARCHAR(50)` + `CHECK`.** ENUM 아님. 새 서비스 추가 = CHECK 목록 1줄 추가. 현재 허용: `ACADEMY`, `MARKET`, `AGENT`, `YOUTUBE`, `STORE`.
 6. **cross-DB는 아래로만.** `service_db → platform_db` 읽기 OK. 옆으로(`academy_db → store_db`) 금지.
-7. **strong consistency = 단일 서버 트랜잭션. async = outbox.**
+7. **strong consistency = 단일 서버 트랜잭션. async = [[outbox-pattern|outbox]].**
 8. **`checkGateB(orgPk, service)`는 서비스를 명시한다.** 기본값 `"ACADEMY"`. 신규 서비스는 `service` 파라미터를 명시적으로 전달.
 9. **Gate B는 `status + valid_until` 복합 체크.** `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > NOW())`. status만 보면 배치 실패 시 영구 무료 위험.
 10. **`org_entitlement.feature_limits`가 런타임 한도의 최종 권위.** `product_feature`·`plan_definition.default_limits`는 entitlement 생성 시 초기값 복사용. 런타임 한도 판단 시 이 두 테이블 직접 조회 금지.
 11. **구독은 N:M.** `subscription_item(subscription_pk, sku_pk)`이 진실 원천. `org_subscription`은 구독 헤더(billing canonical truth)만 담고 sku_pk 단일 FK 보유 금지.
 
-파생 표준: `public_id`는 외부 노출 테이블만 · soft-delete 3종(status / deleted_at / append-only) · 금액은 정수 minor unit(float 금지).
+파생 표준: [[pk-ulid-strategy|`public_id`]]는 외부 노출 테이블만 · soft-delete 3종(status / deleted_at / append-only) · 금액은 정수 minor unit(float 금지).
 
 ### 3.2 설계 목표 — 단계적 마이그레이션 진행 중
 
@@ -103,7 +104,7 @@
 
 ## 4. 핵심 결정 12건 (D1~D12)
 
-AI 검토 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 했고, 무엇을 기각했나*를 함께 적는다.
+검토 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 했고, 무엇을 기각했나*를 함께 적는다.
 
 | ID | 결정 | 구현 상태 | 왜 | 기각/대안 |
 |---|---|---|---|---|
@@ -120,11 +121,11 @@ AI 검토 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 �
 | **D11** | 표준보안: BOLA 프레임워크화 / NIST 환경속성 / 감사 해시체이닝→WORM | 🟡 BOLA ✅, 해시체이닝·WORM P1 | 위협모델 기반(OWASP API Top10, ISMS-P) | audit 트리거(root가 DROP 가능→무력), JSON 권한블롭, 복합 UNIQUE 불요 |
 | **D12** | 운영보강: 논리 소유권·secret cadence·break-glass·데이터분류·perm 전파 | 🟡 정책 명시 ✅, break-glass·암호화 P1 | platform_db 비대화·운영자 통제·키 cadence | phone/email 전면암호화, 휴면 법의무(2023 폐지) |
 
-> **D6 미적용 사례(R8 AI 리뷰)**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(org_subscription·payment_ledger·billing_event·pg_webhook_event 4곳)와 `billing_event.event_type`에 미일관 적용. 특히 `pg_provider`는 대형 테이블에 중복 — PG 추가 시 `ALTER MODIFY COLUMN` 잠금이 D6가 피하려던 바로 그것. → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상 추가.
+> **D6 미적용 사례(R8 AI 리뷰)**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(org_subscription·payment_ledger·billing_event·pg_webhook_event 4곳)와 `billing_event.event_type`에 미일관 적용. 특히 `pg_provider`는 대형 테이블에 중복 — PG 추가 시 `ALTER MODIFY COLUMN` 잠금이 D6가 피하려던 바로 그것. → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상 추가. (스키마 상세: [[schema-reference]])
 
 ---
 
-## 5. 권한 모델 (3-gate)
+## 5. 권한 모델 ([[gate-abc-flow|3-gate]])
 
 ### 5.1 3-Layer 구조
 
@@ -148,16 +149,16 @@ Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 → A ∧ B ∧ C → ALLOW, audit_log 기록
 ```
 
-- 평가기 단일(CASL). 캐싱은 *입력 블록*(membership/grants/entitlement)만 TTL 60s, **최종 can() 캐싱 금지**.
-- `perm_version` self-healing: 권한 변경→bump→`X-Perm-Version` 불일치→snapshot 재요청. **개인=user_pv / org 전체=org_pv 분리**(thundering herd 회피).
+- 평가기 단일(CASL). 캐싱은 *입력 블록*([[role-capability|membership]]/grants/[[gate-b-entitlement|org_entitlement]])만 TTL 60s, **최종 can() 캐싱 금지**.
+- [[role-capability|`perm_version`]] self-healing: 권한 변경→bump→`X-Perm-Version` 불일치→snapshot 재요청. **개인=user_pv / org 전체=org_pv 분리**(thundering herd 회피).
 
-### 5.3 RBAC / ABAC / ReBAC 정의
+### 5.3 [[role-capability|RBAC / ABAC / ReBAC]] 정의
 
 | 모델 | 의미 | 저장 |
 |---|---|---|
 | RBAC | 직책/소속 | `service_membership.role_code` + 코드 `ROLE_PERMISSION` |
 | ABAC | 속성(소유·테넌트·한도·환경) | 리소스 컬럼 + `org_entitlement.feature_limits` + client_ip |
-| ReBAC | 관계/위임 | `delegation_grant.capability_code`(임퍼소네이션 금지) |
+| ReBAC | 관계/위임 | [[role-capability|`delegation_grant`]]`.capability_code`(임퍼소네이션 금지) |
 | 계층 | 조직 위계 | `org_relation`(HQ_BRANCH/HOLDING) — **권한 근거 아님, 명시적 membership만** |
 
 ### 5.4 구현 현황
@@ -195,11 +196,11 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지
 ```
 
 **왜 분리하나**:
-- `org_subscription`은 billing semantics(provider, invoice, retry 등)가 복잡. Gate B는 "이 org가 지금 서비스를 쓸 수 있나?"만 궁금.
+- [[subscription-lifecycle|`org_subscription`]]은 billing semantics(provider, invoice, retry 등)가 복잡. Gate B는 "이 org가 지금 서비스를 쓸 수 있나?"만 궁금.
 - 권한 체크마다 billing을 직접 읽으면: auth 느려짐 + billing 장애 전파 + 캐싱 복잡.
-- `org_entitlement`를 projection으로 분리하면: auth는 단일 테이블 조회, billing 장애 격리, JWT/Redis 캐시 단순화.
+- [[gate-b-entitlement|`org_entitlement`]]를 projection으로 분리하면: auth는 단일 테이블 조회, billing 장애 격리, JWT/Redis 캐시 단순화.
 
-**eventual consistency 수용**: PG webhook → entitlement 투영 사이 수 초 지연 허용. 취소 직후 짧은 창에 권한이 살아있을 수 있음 — SaaS 표준 베스트 프랙티스.
+**eventual consistency 수용**: [[webhook-processing|PG Webhook]] → entitlement 투영 사이 수 초 지연 허용. 취소 직후 짧은 창에 권한이 살아있을 수 있음 — SaaS 표준 베스트 프랙티스.
 
 **영수증 검증 역할**: 최초 구매 직후 point-in-time 검증, webhook 누락 시 fallback, 사용자 수동 복구("구매 복원") 용도. 구독 lifecycle의 continuous synchronization 역할은 webhook.
 
@@ -217,15 +218,15 @@ COMMIT;
 ```
 
 - 단일 InnoDB라 **"결제됐는데 권한 미반영" 창이 0** (2PC·Kafka 불필요). SaaS 최악 UX를 구조적으로 차단.
-- 멱등 2중: webhook `event_id` UNIQUE + payment `idempotency_key` UNIQUE.
+- 멱등 2중: webhook `event_id` UNIQUE + payment [[idempotency-key|`idempotency_key`]] UNIQUE.
 - 환불은 append-only(REFUND row, 기존 UPDATE 금지). PG는 adapter 추상화(Toss/Stripe/PayPal/Manual).
-- async 부수효과(영수증·알림·검색 인덱싱)만 outbox → eventual consistency.
+- async 부수효과(영수증·알림·검색 인덱싱)만 [[outbox-pattern|outbox_event]] → eventual consistency.
 
 ---
 
 ## 7. 정책 & 동의
 
-- **`user_consent_event` append-only**: `user × consent_type × terms_version × action(GRANTED/REVOKED) × meta_json × prev_hash/row_hash`. 반복 on/off 이력 전부 보존.
+- **[[pipa-consent|`user_consent_event`]] append-only**: `user × consent_type × terms_version × action(GRANTED/REVOKED) × meta_json × prev_hash/row_hash`. 반복 on/off 이력 전부 보존.
 - **consent_type 네임스페이스**: `platform.*`(계정) / `pg.*`(결제 제3자) / 서비스 `*`(도메인 DB).
 - **전자서명법 §3**: 약관 체크박스 동의 = 전자서명으로서 서면 서명과 동일한 법적 효력. `user_consent_event` row가 그 기록이며 법적 증거로 사용 가능.
 - **`platform.content_ownership`**: TEACHER role 취득 시 표시. "내가 플랫폼에서 만든 콘텐츠의 소유권은 나에게 있으며 이전할 수 있다"에 동의. 미동의 시 admin 데이터 이전 처리 불가.
@@ -266,7 +267,7 @@ COMMIT;
 
 분리 단계: Read replica → 고속 테이블 분리 → DB-per-large-tenant. `org_pk` 단위라 org 무중단 마이그레이션 가능.
 
-cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` 서비스) — **Admin role 금지**(ADR-042, 공격 표면 0).
+cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` 서비스) — **Admin role 금지**([[adr-log|ADR-042]], 공격 표면 0).
 
 ---
 
@@ -274,10 +275,10 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 
 - **OWASP BOLA**: org_pk 질의 강제를 Drizzle base repo로 **프레임워크화**(복합 UNIQUE 불요 — 실체는 질의 필터).
 - **NIST SP 800-162 환경속성**: api_key `allowed_ip_cidr` 컨텍스트 + Gateway/WAF IP 강제.
-- **감사 불변성(ISMS-P/SOC2)**: app 계정 UPDATE/DELETE 권한 제거 + **해시 체이닝** → **외부 WORM**(S3 Object Lock). *트리거는 root가 DROP 가능해 채택 안 함.*
+- **감사 불변성(ISMS-P/SOC2)**: app 계정 UPDATE/DELETE 권한 제거 + **[[audit-hash-chain|해시 체이닝]]** → **[[audit-hash-chain|WORM]]**(S3 Object Lock). *트리거는 root가 DROP 가능해 채택 안 함.*
 - **Secret/Key**: KMS(refresh_token·서명PDF), 평문/`.env` git 금지. rotation cadence(§12.3). **Firebase: Web API Key=공개(App Check+도메인제한), Admin SDK 키=회전 대상.**
 - **데이터 분류**: PII / 민감(fitness health) / 미성년(guardian) / 결제연계 → 차등 보호. 선별 app-level 암호화(secret·guardian만, phone/email은 KMS+접근통제).
-- **Break-glass**: §12.4 참조.
+- **[[break-glass|Break-glass]]**: §12.4 참조.
 
 ---
 
@@ -306,7 +307,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 | api_key `allowed_environments JSON` 블롭 | **거부** | 불변식 #6(임의 JSON 권한 금지) 충돌. 구조화 scopes로 |
 | phone/email **전면** app-level 암호화 | **거부(선별로)** | 인덱스·유니크·검색 파괴. secret/guardian만 암호화, phone/email은 KMS+접근통제 |
 | 휴면계정(1년) 법적 의무 대응 | **정정** | 정보통신망법 유효기간제 **2023 폐지** → 법 의무 아님. DORMANT는 선택적 제품정책 |
-| Debezium/Kafka CDC 지금 도입 | **연기(P2)** | "MQ는 outbox 위에 나중에" 방침. 컴플라이언스 트리거(T4) 시 |
+| [[outbox-pattern|Kafka/Debezium]] CDC 지금 도입 | **연기(P2)** | "MQ는 outbox 위에 나중에" 방침. 컴플라이언스 트리거(T4) 시 |
 
 > 이 표가 보여주는 것: 표준·비교 분석을 *맹종*하지 않고 **우리 원칙·위협모델·규모**에 비춰 걸렀다.
 
@@ -342,7 +343,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 - **마이그레이션 소유권**: 컨텍스트별 디렉토리 + 리뷰 오너. 한 PR이 여러 컨텍스트 스키마 동시 변경 → 리뷰 reject.
 - 컨텍스트 간 직접 FK 최소화 → 모듈 인터페이스 경유 (= 나중 물리 분리 **절단선**).
 
-**확장 단계**: 논리 분리(지금) → 트래픽/팀 분리 시 컨텍스트 단위 schema/DB 분리(ADR-041 패턴 재사용) → Option B(`platform-api` HTTP 서비스).
+**확장 단계**: 논리 분리(지금) → 트래픽/팀 분리 시 컨텍스트 단위 schema/DB 분리([[adr-log|ADR-041]] 패턴 재사용) → Option B(`platform-api` HTTP 서비스).
 
 ### 12.2 멀티테넌시 분리 트리거 운영
 
@@ -369,7 +370,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 | Firebase Web API Key | 회전 불요(공개) | App Check + authorized domains로 방어 |
 | DB 계정 비밀번호 | 180일 rotation. least-privilege per service | 즉시 변경 + 접속 이력 감사 |
 
-### 12.4 Break-glass (긴급 운영 접근)
+### 12.4 [[break-glass|Break-glass]] (긴급 운영 접근)
 
 임퍼소네이션(위임)과 **다름** — 승인된 예외 경로:
 1. 운영자가 사유(reason) + 대상 + 짧은 만료로 요청 → **승인자(approver)** 결재.
@@ -379,7 +380,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 
 ### 12.5 감사 무결성 운영
 
-- 월 1회 배치: `audit_log`·`user_consent_event` 해시 사슬 처음부터 재계산 → 불일치 시 보안 알림.
+- 월 1회 배치: `audit_log`·`user_consent_event` [[audit-hash-chain|해시 사슬]] 처음부터 재계산 → 불일치 시 보안 알림.
   > ⚠️ **P1 미구현**: `prev_hash`/`row_hash` 컬럼이 아직 DDL에 없음. 해시 체이닝은 phase-17에서 컬럼 추가 후 활성화. 현재는 append-only + DB 계정 권한으로만 무결성 보장.
 - 앱 DB 계정에서 UPDATE/DELETE 권한 제거(DDL 단계 GRANT 점검).
 - T4 도달 시 외부 WORM(S3 Object Lock) 적재로 root 위협까지 차단.
@@ -405,7 +406,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` �
 ```
 1. payment_ledger에서 idempotency_key로 SUCCEEDED 확인
 2. outbox_event.status='PENDING'인 subscription.activated 이벤트 조회
-3. outbox 워커 재시도 또는 수동 org_entitlement UPDATE + perm_version 갱신
+3. [[outbox-pattern|outbox]] 워커 재시도 또는 수동 org_entitlement UPDATE + perm_version 갱신
 ```
 
 #### PG webhook 중복 처리 방지
@@ -419,7 +420,7 @@ status='RECEIVED' → 처리 성공 후 'PROCESSED'
 ### 12.8 권한 변경 운영
 
 - 역할 *배정* 변경 = DB UPDATE(즉시, perm_version bump).
-- 역할 *룰*(ROLE_PERMISSION) 변경 = **코드 배포**.
+- 역할 *룰*([[role-capability|ROLE_PERMISSION]]) 변경 = **코드 배포**.
 - ⚠️ **열린 결정**: ROLE_PERMISSION 변경 배포 SLA(hot-fix vs weekly) — 명문화 필요.
 
 ### 12.9 인시던트 대응
@@ -491,11 +492,11 @@ status='RECEIVED' → 처리 성공 후 'PROCESSED'
 
 | 근거 | 설계 상태 | 구현 상태 | 비고 |
 |---|---|---|---|
-| PIPA §15 (보유) | ✅ 설계 | ⚠️ phase-17 | user_consent_event 5년 보존 — 미구현 |
-| PIPA §17~18 (제3자 제공) | ✅ 설계 | ⚠️ phase-17 | 4요건 meta_json 정형화 — 미구현(CON-4) |
-| PIPA §22 (14세 미만) | ✅ 설계 | ⚠️ **법적 필수** phase-17 | guardian 동의 로직 미구현(CON-3) |
-| PIPA §35 (열람) | 🟡 설계 중 | ⚠️ phase-17 | fan-out 조회 미구현 |
-| PIPA §37 (철회) | ✅ 설계 | ⚠️ phase-17 | REVOKED 이벤트 미구현(CON-6) |
+| [[pipa-consent|PIPA]] §15 (보유) | ✅ 설계 | ⚠️ phase-17 | [[pipa-consent|`user_consent_event`]] 5년 보존 — 미구현 |
+| [[pipa-consent|PIPA]] §17~18 (제3자 제공) | ✅ 설계 | ⚠️ phase-17 | 4요건 meta_json 정형화 — 미구현(CON-4) |
+| [[pipa-consent|PIPA]] §22 (14세 미만) | ✅ 설계 | ⚠️ **법적 필수** phase-17 | guardian 동의 로직 미구현(CON-3) |
+| [[pipa-consent|PIPA]] §35 (열람) | 🟡 설계 중 | ⚠️ phase-17 | fan-out 조회 미구현 |
+| [[pipa-consent|PIPA]] §37 (철회) | ✅ 설계 | ⚠️ phase-17 | REVOKED 이벤트 미구현(CON-6) |
 | 정보통신망법 §50 (수신거부) | ✅ 설계 | ⚠️ phase-17 | 마케팅 옵트아웃 미구현(CON-5) |
 | 정보통신망법 국외이전 고지 | ✅ 설계 | ⚠️ phase-17 | `platform.third_party_firebase` 동의 미구현 |
 | (구)유효기간제 (휴면) | ⛔ | ⛔ | **2023 폐지 — 법 의무 아님** |
@@ -525,17 +526,17 @@ status='RECEIVED' → 처리 성공 후 'PROCESSED'
 | `platform_db` | identity+billing+product+consent+audit 공통 코어 단일 DB |
 | `membership.platform_role` | 테넌트 소속 + 플랫폼 권위(OWNER/ADMIN/MEMBER/SERVICE) |
 | `service_membership.role_code` | 서비스별 도메인 역할(`academy.director`, `market.seller` 등) |
-| `org_entitlement` | 런타임 권위 access 상태 — canXXX Gate B의 유일 진실 원천 |
-| `delegation_grant.capability_code` | 위임 capability(`<service>.<action>`), ReBAC |
+| `org_entitlement` | 런타임 권위 access 상태 — canXXX Gate B의 유일 진실 원천. → [[gate-b-entitlement]] |
+| `delegation_grant.capability_code` | 위임 capability(`<service>.<action>`), ReBAC. → [[role-capability]] |
 | `org_relation` | 조직 계층(HQ_BRANCH/HOLDING). **권한 근거 아님** — 명시적 membership만 |
-| `user_consent_event` | append-only 동의 이벤트(PIPA/정보통신망법) |
-| `outbox_event` | async 부수효과 발행원(결제 부수효과·fan-out 등) |
+| `user_consent_event` | append-only 동의 이벤트(PIPA/정보통신망법). → [[pipa-consent]] |
+| `outbox_event` | async 부수효과 발행원(결제 부수효과·fan-out 등). → [[outbox-pattern]] |
 | `perm_version` | 권한 변경 전파 카운터(user_pv / org_pv 분리) |
-| 3-gate canXXX | A 소속 · B 이용권 · C 정책(RBAC/ABAC/ReBAC) |
-| Pool 모델 | 공유 DB + org_pk 행 격리. 테넌트마다 별도 DB 없음 |
+| 3-gate canXXX | A 소속 · B 이용권 · C 정책(RBAC/ABAC/ReBAC). → [[gate-abc-flow]] |
+| Pool 모델 | 공유 DB + org_pk 행 격리. 테넌트마다 별도 DB 없음. → [[multitenancy-rls]] |
 | Option A→B | 공유 패키지(`db-platform`) → HTTP 서비스(`platform-api`) 전환 |
 | 비대칭 분리 | 공통(platform_db)은 묶고, 도메인은 별도 DB로 분리하는 전략 |
-| Break-glass | 승인된 긴급 운영 접근. 임퍼소네이션과 다름 |
+| Break-glass | 승인된 긴급 운영 접근. 임퍼소네이션과 다름. → [[break-glass]] |
 
 ---
 
@@ -552,49 +553,6 @@ status='RECEIVED' → 처리 성공 후 'PROCESSED'
 
 ## 18. 부록 A — ADR 통합 기록
 
-> 본문이 참조하는 ADR의 **원문 핵심(배경·결정·이유·기각)을 한 곳에 통합**. 외부 문서를 열 필요 없이 이 문서로 완결된다.
+→ [[adr-log]] 로 분리됨.
 
-### ADR-044 — `platform_db` 경계: identity + billing + product 통합
-
-- **배경**: DB 분리 3안 검토 — (A)`identity_db`/`billing_db`/서비스별 세분화, (B)`platform_db`(identity만)+서비스별 billing, (C)`platform_db`(identity+billing+product)+서비스별 DB. 트리거: "market에서 academy·agent·store 상품을 한 곳에서 구매."
-- **결정**: **안 C 채택** — `platform_db` 하나에 identity+billing+product 통합, 서비스 도메인만 분리.
-- **이유**: ① market이 cross-service 단일 상품 카탈로그 필요(N개 DB 조회 회피) ② 각 서비스가 한 곳(platform_db)만 보고 entitlement 확인 ③ 구매 트랜잭션이 단일 DB 내 완결(분산 트랜잭션 없음) ④ 현 규모엔 완전 MSA보다 모듈형 모놀리스가 적합.
-- **기각**: 안A(같은 서비스가 identity/billing 두 커넥션·cross-DB 조인 불가·운영복잡 대비 실익 없음), 안B(cross-service 카탈로그/통합 구독현황 조회 불가).
-
-### ADR-041 — 멀티테넌시 DB 전략: 단일 DB 행 격리 + 분리 트리거
-
-- **배경**: SaaS, 테넌트=`organization`. 고속 증가 테이블(homework_chat, usage_log, notification, audit_log) 존재.
-- **결정**: **단일 DB + `org_pk` 행 격리.** 모든 도메인 테이블 `org_pk NOT NULL` 불변식. 미래 분리를 위해 앱이 항상 org_pk 전달.
-- **분리 트리거**: T1(단일 org가 고속 테이블 20%+) · T2(조회 P99>500ms) · T3(usage_log 월 500만/50GB+) · T4(ISMS-P/GDPR). 단계: Read replica → 고속 테이블 분리(chat_db/analytics_db) → DB-per-large-tenant.
-- **기각**: schema-per-tenant(MySQL은 db=schema, 테넌트마다 DB면 connection pool 복잡), 즉시 DB-per-tenant(현 규모 운영비만↑), NoSQL 전환(MySQL+Drizzle 투자 보호).
-
-### ADR-042 — cross-tenant 조회: Admin Role 거부 + 아키텍처 분리
-
-- **배경**: 운영 집계(전 테넌트 가로지르는 학원수·강의수·사용량) 필요. MySQL/Qdrant/Neo4j 모두 org 격리 중.
-- **결정**: **Admin role 방식 거부.** cross-tenant 조회는 전용 모듈(`internal/`) 또는 별도 서비스(`*-admin`)에서만 — raw SQL로 의도를 코드 *위치*로 드러냄.
-- **이유**: Admin role = ① 단일 장애점(탈취 시 전 테넌트 노출) ② 비즈니스 로직에 보안우회 혼재 ③ role 남용 확산 ④ 격리 불변식이 런타임 조건에 의존하게 됨.
-- **규칙**: 일반 모듈은 `org_pk`/`org_id` 필수 타입, 위반 PR reject, `internal/` 컨트롤러는 외부 라우팅 노출 금지(내부망/별도 인증).
-
-### ADR-032 — identity/billing 접근: 공유 패키지(Option A) + 분리 서비스(Option B) 전환 준비
-
-- **배경**: academy-api 외 agent/market도 동일 identity/billing 인프라 공유 필요. "어떤 앱이 어떻게 접근하나"를 초기에 결정해야(잘못하면 앱 증가 시 마이그레이션 비용 지수증가).
-- **결정**: **Option A 채택**(`@aiagent/db-platform` 공유 패키지로만 접근, Drizzle 직접 금지). 단 **인터페이스를 Option B처럼 설계**해 전환 비용 최소화 — 마이그레이션 비용의 실체는 "A vs B"가 아니라 "경계가 있나 없나".
-- **Option B 전환 트리거**(`platform-api` HTTP 서비스): 소비 앱 3개 이상 동시 / platform 전담 팀 분리 / SOC2·PCI-DSS. 전환 시 소비 앱 0 변경(`getPermissionContext()` 시그니처 유지, 구현만 HTTP로 교체).
-- **기각**: Option C(각 앱이 Drizzle 직접 — 스키마 변경 시 전 앱 동시 수정·통제 불가), 즉시 Option B(소비 앱 1개 단계에 ROI 음수).
-
-### ADR-035 — Qdrant 멀티테넌시: shared collection + payload 필터
-
-- **결정**: 단일 collection + payload 필터(`org_id`). collection-per-tenant 아님(인덱스가 RAM 상주 → 메모리 비용 폭탄). 대규모 시 `org_id` payload **인덱스 + `is_tenant` 최적화**(동일 테넌트 벡터 디스크 co-locate). Qdrant는 filterable HNSW라 post-filter recall 저하가 덜함.
-- **현재 구현**: 색인(`qdrant-index.adapter.ts`)과 검색(`qdrant-search.service.ts`) 모두 `org_id` must 필터 강제. `is_tenant` 마커는 P1 추가 예정.
-
-### ADR-036 — Neo4j 격리: orgId 속성 + Cypher 강제
-
-- **결정**: 단일 그래프 + 모든 노드 `org_id` 속성 + Cypher `WHERE org_id` 자동 주입. 동적 라벨(`:TenantA`) 아님(테넌트 수백~수천 → 라벨 카디널리티 폭발). **멀티홉 경로는 anchor만이 아니라 경로 전체 노드 org_id 강제**, 쓰기측 교차 관계 차단(APOC 트리거 P1 검토).
-- **현재 구현**: `neo4j-concept.adapter.ts` — `LectureChunk`, `Concept` 노드 생성 시 `orgId`를 MERGE key에 포함. 모든 읽기 쿼리에 `{ orgId: $orgId }` 강제. 멀티홉 관계(`RELATED_TO`) 양 끝 노드 모두 orgId 필터. APOC 쓰기측 차단은 P1.
-
-### ADR-025 — 도메인 바운디드 컨텍스트 / YAGNI 원칙
-
-- **결정(원래 academy content-api 맥락)**: `domain/` 레이어 경계 명확화(content/stt/upload), 첫 사용처 없는 디렉토리 안 만듦(YAGNI), dispatch 신호(SourceType)는 단일 출처, `shared/`는 순수 cross-cutting만.
-- **platform 계승**: "컨텍스트 경계를 코드로 강하게, 빈 추상 미리 만들지 않기"가 platform_db **논리 소유권(§12.1)**·**YAGNI 보류 목록(§11)**의 뿌리.
-
-> 참고: `agent_db` 관련 ADR-038(video pipeline nodejs)·ADR-039(3pod worker/qdrant chunking)·ADR-043(lecture ownership)은 서비스 도메인 영역이라 본 platform 핸드북 범위 밖.
+ADR-044 · ADR-041 · ADR-042 · ADR-032 · ADR-035 · ADR-036 · ADR-025 의 배경·결정·이유·기각을 담고 있습니다.
