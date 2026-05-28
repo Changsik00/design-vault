@@ -158,7 +158,7 @@ PostgreSQL RLS와 비교하면 분명 약합니다. 하지만 MySQL이 회사 �
 
 ## Q4. SUPER_ADMIN은 여러 org 데이터를 봐야 하는데, 격리를 어떻게 하나요?
 
-`platform_db`는 SUPER_ADMIN role 자체를 거부합니다(ADR-042). 대신 **아키텍처 분리** 방식을 씁니다.
+`platform_db`는 SUPER_ADMIN role 자체를 거부합니다([[architecture|ADR-042 — §18 부록 A]]). 대신 **아키텍처 분리** 방식을 씁니다.
 
 일반 비즈니스 로직과 운영 집계를 **코드 위치로 분리**합니다:
 

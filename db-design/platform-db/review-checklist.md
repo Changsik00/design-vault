@@ -40,6 +40,9 @@
 | P2-5 | **`org_subscription.external_sub_id` 인덱스 없음** — PG webhook이 external_sub_id로 구독 조회 시 풀스캔 (R8 AI 리뷰) | ✅ `INDEX idx_org_subscription_external_sub_id (external_sub_id)` 추가 | schema-reference D.13 |
 | P2-6 | **`pg_webhook_event.status` 인덱스 없음** — 재처리 워커 WHERE status='FAILED' 풀스캔. outbox_event와 비대칭 (R8 AI 리뷰) | ✅ `INDEX idx_pg_webhook_status (status, created_at)` 추가 | schema-reference D.18 |
 | P2-7 | **Gate B 핫패스 인덱스 valid_until 누락** — 모든 요청마다 도는 Gate B 지연에 직접 영향. E.2에 "추가 필요" 명시됐으나 DDL 미수정 (R8 AI 확인) | ✅ `idx_org_service_status (org_pk, service, status, valid_until)` DDL 수정 | schema-reference D.12, E.2 |
+| P2-8 | **PG webhook 완전 소실 시 복구 수단 없음** — webhook이 배포 중 유실되거나 PG 재시도가 모두 소진되면 `pg_webhook_event`에 기록 자체가 없어 재처리 워커도 무력. PG API 대사 조회(reconciliation) 잡 미설계 | 🔴 `GET /subscriptions/{id}` 주기적 폴링으로 DB 상태와 대조하는 잡 필요 | architecture §5; schema-reference D.13 D.18 |
+| P2-9 | **배포 중 in-flight webhook 유실 위험** — K8s rolling update 시 `terminationGracePeriodSeconds` 부족하면 처리 중 트랜잭션이 강제 종료됨. 트랜잭션 롤백 → PG non-200 수신 → PG 재시도로 대부분 복구되지만, LB 해제 타이밍 갭에서 수신 후 응답 전 kill 시 PG가 성공으로 오인하고 재시도 안 할 수 있음. graceful shutdown 설정 전략 미문서화 | 🔴 K8s `preStop` + `terminationGracePeriodSeconds` 설정 명문화, 근본 해결은 MQ 도입 검토 (P2-10 참조) | architecture §17 배포 SLA |
+| P2-10 | **outbox_event · pg_webhook_event 데이터 무한 누적** — PROCESSED/SKIPPED 레코드 삭제 전략 없음. outbox_event는 모든 트랜잭션마다 1행씩 생성되어 가장 빠르게 증가 | 🔴 sweeper 잡 설계 필요 (예: PROCESSED + 30일 경과 → DELETE) | schema-reference D.19 D.18 |
 
 ---
 
@@ -92,11 +95,11 @@
 |------|------|------|------|
 | P0 | 3 | **1** | 2 |
 | P1 | 6 | **5** | 1 |
-| P2 | 7 | **6** | 1 |
+| P2 | 11 | **6** | 5 |
 | P3 | 5 | **2** | 3 |
 | P4 | 9 | **1** | 8 |
 | P5 | 8 | **8** | 0 |
-| **합계** | **38** | **23** | **15** |
+| **합계** | **42** | **23** | **19** |
 
 > R8 AI 리뷰(2026-05-28) 반영: +6개 항목 추가, 5개 즉시 완료(DDL 수정), 1개 진행 중(P1-6 ENUM 마이그레이션)
 

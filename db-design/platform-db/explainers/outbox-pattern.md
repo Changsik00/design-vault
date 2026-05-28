@@ -483,6 +483,68 @@ case 'your.event.type':
 
 ---
 
+## Q7. MQ(Kafka/SQS/RabbitMQ)를 쓰면 outbox가 필요 없어지지 않나요?
+
+아니요, **outbox는 MQ가 있어도 사라지지 않습니다.** 오히려 "outbox → MQ → 컨슈머" 구조가 됩니다.
+
+**MQ가 실제로 해결하는 것:**
+
+| 문제 | outbox 단독 | MQ 도입 후 |
+|---|---|---|
+| 배포 중 webhook 유실 | LB 타이밍에 의존 | MQ가 메시지 보관, 컨슈머만 재배포 |
+| 워커 폴링 부하 | DB를 주기적으로 SELECT | MQ push, DB 조회 불필요 |
+| `outbox_event` 무한 누적 | sweeper 잡 별도 필요 | MQ TTL로 자동 관리 |
+| 워커 스케일 아웃 | 중복 실행 방지 로직 복잡 | 파티션/컨슈머 그룹으로 자연 해결 |
+
+**그런데 MQ를 도입해도 outbox가 여전히 필요한 이유:**
+
+DB 쓰기와 MQ 발행은 서로 다른 시스템이라 원자적으로 처리할 수 없습니다:
+
+```
+시나리오: DB commit 성공 → MQ publish 실패
+  결과: DB는 변경됐지만 이벤트 소실 → downstream 미반영
+
+시나리오: MQ publish 성공 → DB rollback
+  결과: 이벤트는 나갔는데 DB에는 아무것도 없음 → 유령 이벤트
+```
+
+그래서 "DB에만 쓰는 outbox"가 MQ의 신뢰할 수 있는 입구 역할을 합니다:
+
+```
+현재 구조 (outbox = DB 기반 큐)
+  DB 트랜잭션
+    ├── 본 작업 (entitlement UPDATE 등)
+    └── outbox_event INSERT  ← 큐에 넣는 것과 동일한 효과
+  폴링 워커
+    └── outbox_event 읽어서 외부 서비스 호출
+
+MQ 도입 후 구조
+  DB 트랜잭션
+    ├── 본 작업
+    └── outbox_event INSERT  ← 여전히 필요 (원자성 보장)
+  CDC 워커 (Debezium 등)
+    └── outbox_event 변경 감지 → Kafka topic으로 relay
+  컨슈머
+    └── Kafka에서 구독하여 처리
+```
+
+outbox가 없으면 MQ에도 at-least-once 보장이 깨집니다.
+
+**언제 MQ 도입을 고려하나:**
+
+아래 트리거 중 하나가 충족될 때 검토합니다:
+
+- 초당 이벤트 수십 건 이상 → 폴링 워커가 병목
+- 컨슈머(이메일/알림/인덱스)가 5개 이상 독립 확장 필요
+- 배포 중 이벤트 유실이 실제 장애로 이어진 경험
+- 팀이 Kafka 같은 별도 인프라를 운영할 여력이 생긴 시점
+
+현재 규모에서는 outbox 단독으로 충분하고, MQ는 나중에 outbox 위에 CDC로 얹는 방식으로 자연스럽게 확장할 수 있습니다.
+
+> 💡 **한 줄 요약**: MQ는 outbox를 대체하는 게 아니라 outbox를 더 잘 소비하는 수단입니다. DB-MQ 원자성 문제 때문에 outbox는 MQ가 있어도 필요합니다.
+
+---
+
 ## 연결된 개념
 
 - [[idempotency-key|멱등성 키]] — at-least-once 발행과 멱등 소비의 조합
