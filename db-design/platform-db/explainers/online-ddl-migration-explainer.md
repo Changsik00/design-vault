@@ -328,6 +328,6 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 - [[index-design-explainer|인덱스 설계]] — 인덱스 추가 DDL의 온라인 여부
 - [[partitioning-explainer|DB 파티셔닝]] — 파티션 추가 운영과 DDL 특성
 > 소스 문서
-- [[architecture]] — §4 D6 결정, D6 미적용 사례 (R8 외부 자문)
+- [[architecture]] — §4 D6 결정, D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.13 org_subscription, D.17 payment_ledger (pg_provider 마이그레이션 대상)
 - [[review-checklist]] — P1-6 ENUM → VARCHAR+CHECK 마이그레이션 계획

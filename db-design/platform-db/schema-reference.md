@@ -406,7 +406,7 @@ CREATE TABLE org_entitlement (
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   CONSTRAINT chk_entitlement_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
   UNIQUE KEY uq_org_product (org_pk, product_code),
-  INDEX idx_org_service_status (org_pk, service, status, valid_until),  -- Gate B 핫패스 (R8 외부 자문 반영)
+  INDEX idx_org_service_status (org_pk, service, status, valid_until),  -- Gate B 핫패스 (R8 AI 리뷰 반영)
   INDEX idx_entitlement_expiry (valid_until, status),  -- 만료 배치: WHERE valid_until < NOW() AND status='ACTIVE'
   CONSTRAINT fk_ent_org FOREIGN KEY (org_pk) REFERENCES organization(pk)
 );
@@ -495,7 +495,7 @@ CREATE TABLE billing_event (
 ```
 
 **설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only.
-- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 외부 자문). 현재 ENUM 유지, phase-17+ 마이그레이션.
+- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 AI 리뷰). 현재 ENUM 유지, phase-17+ 마이그레이션.
 - **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.17 payment_ledger
@@ -520,7 +520,7 @@ CREATE TABLE payment_ledger (
 ```
 
 **설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지.
-- `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 외부 자문). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
+- `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 AI 리뷰). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
 - **FK 없음(의도적)**: billing 고write·append-only 패턴상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.18 pg_webhook_event
@@ -536,13 +536,13 @@ CREATE TABLE pg_webhook_event (
   processed_at TIMESTAMP,
   created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE KEY uq_provider_event (pg_provider, event_id),  -- 멱등 보장
-  INDEX idx_pg_webhook_status (status, created_at)       -- 재처리 워커: WHERE status='FAILED' (R8 외부 자문)
+  INDEX idx_pg_webhook_status (status, created_at)       -- 재처리 워커: WHERE status='FAILED' (R8 AI 리뷰)
 );
 ```
 
 **설계 포인트**:
 - `pg_provider ENUM`: `MANUAL` 제외 — 수동 결제는 webhook이 없으므로 의도적 제외 (org_subscription·payment_ledger와 달리 MANUAL 항목 없음)
-- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 외부 자문). phase-17+ 마이그레이션.
+- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 AI 리뷰). phase-17+ 마이그레이션.
 - **FK 없음(의도적)**: billing 고write 패턴상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.19 outbox_event
@@ -609,7 +609,7 @@ if (!pass) throw PaymentRequiredException();
 
 **구현**: `checkGateB(orgPk, service: EntitlementService = "ACADEMY")` — service 파라미터로 다중 서비스(ACADEMY/MARKET/AGENT/YOUTUBE/STORE) 지원. 미전달 시 ACADEMY 기본값. 신규 서비스는 service 파라미터를 명시적으로 전달해야 함.
 
-**인덱스**: `idx_org_service_status (org_pk, service, status, valid_until)` — R8 외부 자문 반영, valid_until 포함 확정(불변식 #9). DDL §D.12 수정 완료.
+**인덱스**: `idx_org_service_status (org_pk, service, status, valid_until)` — R8 AI 리뷰 반영, valid_until 포함 확정(불변식 #9). DDL §D.12 수정 완료.
 
 ### Gate C — 정책 (CASL)
 
@@ -888,7 +888,7 @@ CREATE TABLE user_consent_event (
 
 > **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 phase-17 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
 
-> **파티셔닝 검토(P2, R8 외부 자문)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
+> **파티셔닝 검토(P2, R8 AI 리뷰)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
 
 **현재 상태 쿼리** (최신 동의 상태):
 ```sql

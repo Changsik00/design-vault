@@ -25,7 +25,7 @@
 | P1-3 | **GRACE 이중 관리 모순** — org_subscription.grace_until ↔ org_entitlement.grace_until, Gate B 판정 기준 미정의 | ✅ org_entitlement.grace_until이 Gate B 기준 | architecture §5.4; schema-reference E.2 |
 | P1-4 | **Gate B vs valid_until 관계 미정의** — status만 보면 배치 실패 시 영구 무료, valid_until 실시간 검사하면 배치 불필요 | ✅ status + valid_until 복합 체크 확정(불변식 #9) | architecture §5.4; schema-reference E.2 |
 | P1-5 | **audit_log PK DDL 결함** — AUTO_INCREMENT 없음, 파티션 복합 PK 없음 → INSERT 불가 | ✅ AUTO_INCREMENT 추가, PRIMARY KEY(pk, created_at) | schema-reference §F |
-| P1-6 | **`pg_provider`·`billing_event.event_type` ENUM — D6 원칙 미일관 적용** — service를 VARCHAR+CHECK로 바꾼 동일 논리를 billing 4개 테이블에 미적용. PG 추가 시 대형 테이블 MODIFY COLUMN 잠금 발생 (R8 외부 자문) | 🔴 phase-17+ 마이그레이션 대상 추가 | architecture §4 D6 노트; schema-reference D.16/17/18 |
+| P1-6 | **`pg_provider`·`billing_event.event_type` ENUM — D6 원칙 미일관 적용** — service를 VARCHAR+CHECK로 바꾼 동일 논리를 billing 4개 테이블에 미적용. PG 추가 시 대형 테이블 MODIFY COLUMN 잠금 발생 (R8 AI 리뷰) | 🔴 phase-17+ 마이그레이션 대상 추가 | architecture §4 D6 노트; schema-reference D.16/17/18 |
 
 ---
 
@@ -37,9 +37,9 @@
 | P2-2 | **org_entitlement 만료 인덱스 없음** — WHERE valid_until < NOW() AND status='ACTIVE' 풀스캔 | ✅ `INDEX idx_entitlement_expiry (valid_until, status)` 추가 | schema-reference §E DDL |
 | P2-3 | **audit_log 파티션 자동 추가 없음** — p_future 단일 파티션 3개월 후 과부하 | 🔴 | schema-reference §F |
 | P2-4 | **§12.5 "월 1회 해시 재계산" 플레이북 ↔ audit_log hash 컬럼 부재 모순** — 실행 불가한 절차 기재 | ✅ §12.5에 "P1 미구현" 경고 추가; user_consent_event에 prev_hash/row_hash 컬럼 추가(DDL) | architecture.md §12.5; schema-reference §I.2 |
-| P2-5 | **`org_subscription.external_sub_id` 인덱스 없음** — PG webhook이 external_sub_id로 구독 조회 시 풀스캔 (R8 외부 자문) | ✅ `INDEX idx_org_subscription_external_sub_id (external_sub_id)` 추가 | schema-reference D.13 |
-| P2-6 | **`pg_webhook_event.status` 인덱스 없음** — 재처리 워커 WHERE status='FAILED' 풀스캔. outbox_event와 비대칭 (R8 외부 자문) | ✅ `INDEX idx_pg_webhook_status (status, created_at)` 추가 | schema-reference D.18 |
-| P2-7 | **Gate B 핫패스 인덱스 valid_until 누락** — 모든 요청마다 도는 Gate B 지연에 직접 영향. E.2에 "추가 필요" 명시됐으나 DDL 미수정 (R8 확인) | ✅ `idx_org_service_status (org_pk, service, status, valid_until)` DDL 수정 | schema-reference D.12, E.2 |
+| P2-5 | **`org_subscription.external_sub_id` 인덱스 없음** — PG webhook이 external_sub_id로 구독 조회 시 풀스캔 (R8 AI 리뷰) | ✅ `INDEX idx_org_subscription_external_sub_id (external_sub_id)` 추가 | schema-reference D.13 |
+| P2-6 | **`pg_webhook_event.status` 인덱스 없음** — 재처리 워커 WHERE status='FAILED' 풀스캔. outbox_event와 비대칭 (R8 AI 리뷰) | ✅ `INDEX idx_pg_webhook_status (status, created_at)` 추가 | schema-reference D.18 |
+| P2-7 | **Gate B 핫패스 인덱스 valid_until 누락** — 모든 요청마다 도는 Gate B 지연에 직접 영향. E.2에 "추가 필요" 명시됐으나 DDL 미수정 (R8 AI 확인) | ✅ `idx_org_service_status (org_pk, service, status, valid_until)` DDL 수정 | schema-reference D.12, E.2 |
 
 ---
 
@@ -66,8 +66,8 @@
 | P4-5 | proration 단가 컬럼 없음 | 🔴 |
 | P4-6 | payment_ledger 부분환불 self-referencing FK 없음 | 🔴 |
 | P4-7 | subscription CANCELED → 기간 만료까지 서비스 유지 전이 미설계 | 🔴 |
-| P4-8 | billing 도메인 FK 전무 — **의도적 설계 결정으로 명시 완료** (고write·append-only 패턴, FK 잠금 회피). D.13/16/17/18 설계 포인트에 명기 (R8 외부 자문 반영) | 🟡 의도 명시됨 |
-| P4-9 | **`user_consent_event` 파티셔닝 미설계** — 5년 보존 후 파기 요건. audit_log 동일 월별 RANGE 파티션 패턴 적용 검토 (R8 외부 자문) | 🔴 P2 검토 대상 |
+| P4-8 | billing 도메인 FK 전무 — **의도적 설계 결정으로 명시 완료** (고write·append-only 패턴, FK 잠금 회피). D.13/16/17/18 설계 포인트에 명기 (R8 AI 리뷰 반영) | 🟡 의도 명시됨 |
+| P4-9 | **`user_consent_event` 파티셔닝 미설계** — 5년 보존 후 파기 요건. audit_log 동일 월별 RANGE 파티션 패턴 적용 검토 (R8 AI 리뷰) | 🔴 P2 검토 대상 |
 
 ---
 
@@ -82,7 +82,7 @@
 | P5-5 | SEC-6 ID 중복 — A.9와 A.13에 동일 ID 중복 기재 | ✅ A.13 → OPS-4 변경 | requirements.md |
 | P5-6 | checkGateB 설명 stale — arch §5.4, schema E.2에 service 파라미터 반영 안 됨 | ✅ | architecture.md, schema-reference.md |
 | P5-7 | D-table 구현 상태 컬럼 없음 — D1/D2/D5가 "결정"으로 단정 기재, 실제 aspirational | ✅ 구현상태 컬럼 추가 | architecture.md |
-| P5-8 | **`membership` PK 선언 오류** — `UNIQUE KEY pk_membership` 대신 `PRIMARY KEY` 선언이 의미상 올바름 (R8 외부 자문) | ✅ `PRIMARY KEY (user_pk, org_pk)`로 변경 | schema-reference D.4 |
+| P5-8 | **`membership` PK 선언 오류** — `UNIQUE KEY pk_membership` 대신 `PRIMARY KEY` 선언이 의미상 올바름 (R8 AI 리뷰) | ✅ `PRIMARY KEY (user_pk, org_pk)`로 변경 | schema-reference D.4 |
 
 ---
 
@@ -98,7 +98,7 @@
 | P5 | 8 | **8** | 0 |
 | **합계** | **38** | **23** | **15** |
 
-> R8 외부 자문(2026-05-28) 반영: +6개 항목 추가, 5개 즉시 완료(DDL 수정), 1개 진행 중(P1-6 ENUM 마이그레이션)
+> R8 AI 리뷰(2026-05-28) 반영: +6개 항목 추가, 5개 즉시 완료(DDL 수정), 1개 진행 중(P1-6 ENUM 마이그레이션)
 
 ---
 

@@ -7,7 +7,7 @@
 > **누구를 위한 것인가**: 이 코드베이스를 새로 맡는 엔지니어 / 보안·컴플라이언스 검토자 / 다음 서비스(agent·market·store·fitness)를 붙일 개발자
 >
 > **문서 지도 (총 3개, 이 문서가 진입점)**:
-> - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R7)·결정(D1~D12)·자문처리·운영 플레이북·부록 ADR
+> - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R7)·결정(D1~D12)·AI 검토 반영·운영 플레이북·부록 ADR
 > - [`schema-reference.md`](schema-reference.md) — ERD·스키마·3-gate·billing 흐름·consent 모델
 > - [`requirements.md`](requirements.md) — 요구사항 추적표·BDD 시나리오
 
@@ -46,7 +46,7 @@
 
 ## 2. 설계 여정 — 왜 이렇게 됐나
 
-이 설계는 8라운드의 검토·자문을 거쳐 수렴했다.
+이 설계는 8라운드의 AI 검토를 거쳐 수렴했다.
 
 | 라운드 | 무엇을 물었나 | 무엇이 바뀌었나 |
 |---|---|---|
@@ -58,7 +58,7 @@
 | **R5** 정책·동의 | PIPA/정보통신망법은? | `user_consent_event` append-only, 14세 미만, 제3자 제공 4요건, 철회권 |
 | **R6** 자체 비교 분석 A | 누락은? | 15건 보완(rate-limit·webhook·fan-out·meta schema·perm 전파·SLA·delegation 경계·JWT·키 cadence). **휴면 법폐지 정정** |
 | **R7** 자체 비교 분석 B | 장기 리스크는? | **platform_db 비대화** 경고 → 논리 소유권. break-glass·데이터분류·암호화·Admin SDK 키 |
-| **R8** 외부 자문 | awesome-database-design 분류 기준 전체 항목 점검 | membership PK 선언 정정 · Gate B valid_until 인덱스 확정 · pg_provider ENUM 불일치 식별 · external_sub_id·pg_webhook status 인덱스 추가 · billing FK 비대칭 의도 명시 · user_consent_event 파티셔닝 검토 |
+| **R8** AI 리뷰 | awesome-database-design 분류 기준 전체 항목 점검 | membership PK 선언 정정 · Gate B valid_until 인덱스 확정 · pg_provider ENUM 불일치 식별 · external_sub_id·pg_webhook status 인덱스 추가 · billing FK 비대칭 의도 명시 · user_consent_event 파티셔닝 검토 |
 
 > **핵심 전환점은 R2→R3**: "데이터 구조는 멀티서비스 준비됐는데 권한 *언어*가 academy MVP에 고정돼 있다"를 발견하고 role을 2단으로 끌어올린 것이 이 설계의 가장 큰 통찰이다.
 
@@ -103,7 +103,7 @@
 
 ## 4. 핵심 결정 12건 (D1~D12)
 
-자문 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 했고, 무엇을 기각했나*를 함께 적는다.
+AI 검토 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 했고, 무엇을 기각했나*를 함께 적는다.
 
 | ID | 결정 | 구현 상태 | 왜 | 기각/대안 |
 |---|---|---|---|---|
@@ -120,7 +120,7 @@
 | **D11** | 표준보안: BOLA 프레임워크화 / NIST 환경속성 / 감사 해시체이닝→WORM | 🟡 BOLA ✅, 해시체이닝·WORM P1 | 위협모델 기반(OWASP API Top10, ISMS-P) | audit 트리거(root가 DROP 가능→무력), JSON 권한블롭, 복합 UNIQUE 불요 |
 | **D12** | 운영보강: 논리 소유권·secret cadence·break-glass·데이터분류·perm 전파 | 🟡 정책 명시 ✅, break-glass·암호화 P1 | platform_db 비대화·운영자 통제·키 cadence | phone/email 전면암호화, 휴면 법의무(2023 폐지) |
 
-> **D6 미적용 사례(R8 외부 자문)**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(org_subscription·payment_ledger·billing_event·pg_webhook_event 4곳)와 `billing_event.event_type`에 미일관 적용. 특히 `pg_provider`는 대형 테이블에 중복 — PG 추가 시 `ALTER MODIFY COLUMN` 잠금이 D6가 피하려던 바로 그것. → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상 추가.
+> **D6 미적용 사례(R8 AI 리뷰)**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(org_subscription·payment_ledger·billing_event·pg_webhook_event 4곳)와 `billing_event.event_type`에 미일관 적용. 특히 `pg_provider`는 대형 테이블에 중복 — PG 추가 시 `ALTER MODIFY COLUMN` 잠금이 D6가 피하려던 바로 그것. → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상 추가.
 
 ---
 
@@ -546,7 +546,7 @@ status='RECEIVED' → 처리 성공 후 'PROCESSED'
 - 결제↔권한을 단일 트랜잭션으로 묶어 SaaS 최악 UX("결제됐는데 권한 미반영")를 구조적으로 없앴다.
 - 권한 어휘를 academy 종속에서 서비스 네임스페이스(`<service>.<action>`)로 끌어올려 5개+ 서비스 확장을 열었다.
 - 동의를 append-only 이벤트로 PIPA 분쟁을 법적으로 방어했다.
-- **무엇보다, 표준·자문을 맹종하지 않고 우리 원칙·위협모델·규모에 비춰 걸러냈고(§10.2), 일부러 안 한 것과 그 도입 트리거를 명시했으며(§11), 비대화 같은 장기 리스크의 운영 전략을 미리 적어뒀다(§12).** 차단성 미해결은 1건(배포 SLA)뿐이다.
+- **무엇보다, 표준·AI 리서치를 맹종하지 않고 우리 원칙·위협모델·규모에 비춰 걸러냈고(§10.2), 일부러 안 한 것과 그 도입 트리거를 명시했으며(§11), 비대화 같은 장기 리스크의 운영 전략을 미리 적어뒀다(§12).** 차단성 미해결은 1건(배포 SLA)뿐이다.
 
 ---
 

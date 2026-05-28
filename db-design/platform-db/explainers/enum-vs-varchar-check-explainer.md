@@ -195,7 +195,7 @@ billing_cycle ENUM('MONTHLY','ANNUAL','ONE_TIME','USAGE') NOT NULL
 
 솔직히 말하면, **실수로 누락된 것**입니다.
 
-`service` 컬럼에 D6 원칙을 적용하면서 `pg_provider`와 `billing_event.event_type`에는 같은 원칙을 적용하지 않았습니다. 외부 자문(R8) 리뷰에서 이 불일치가 지적되었습니다:
+`service` 컬럼에 D6 원칙을 적용하면서 `pg_provider`와 `billing_event.event_type`에는 같은 원칙을 적용하지 않았습니다. AI 리뷰(R8)에서 이 불일치가 지적되었습니다:
 
 ```
 "D6 원칙이 service 컬럼에는 적용됐지만,
@@ -275,6 +275,6 @@ ALTER TABLE product
 - [[online-ddl-migration-explainer|온라인 DDL & 마이그레이션]] — 테이블 락이 서비스에 미치는 영향 상세
 - [[index-design-explainer|인덱스 설계]] — CHECK constraint와 인덱스의 조합
 > 소스 문서
-- [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 외부 자문)
+- [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.9 product (service 컬럼 예시), D.16-D.18 (pg_provider ENUM 미적용 사례)
 - [[review-checklist]] — P1-6 pg_provider ENUM → VARCHAR+CHECK 마이그레이션 계획
