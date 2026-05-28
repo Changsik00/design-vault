@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-billing-grace.md",
+                "file": "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "gate-b-billing-grace"
+              "title": "gate-b-entitlement-explainer"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-billing-grace.md",
+                "file": "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "gate-b-billing-grace 의 백링크"
+              "title": "gate-b-entitlement-explainer 의 백링크"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-billing-grace.md",
+                "file": "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "gate-b-billing-grace 의 나가는 링크"
+              "title": "gate-b-entitlement-explainer 의 나가는 링크"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-billing-grace.md",
+                "file": "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "gate-b-billing-grace 의 개요"
+              "title": "gate-b-entitlement-explainer 의 개요"
             }
           }
         ]
@@ -185,13 +185,15 @@
   },
   "active": "81fed65598edfe27",
   "lastOpenFiles": [
+    "db-design/platform-db/explainers/gate-b-billing-grace-explainer.md",
+    "db-design/platform-db/explainers/gate-b-billing-grace.md.tmp.70921.aebe39e47c7a",
+    "db-design/platform-db/explainers/gate-b-billing-grace.md",
     "db-design/platform-db/explainers/gate-abc-flow-explainer.md",
     "db-design/platform-db/explainers/feature-limits-explainer.md",
     "db-design/platform-db/explainers/enum-vs-varchar-check-explainer.md",
     "db-design/platform-db/explainers/break-glass-explainer.md",
     "db-design/platform-db/explainers/audit-hash-chain-explainer.md",
     "db-design/platform-db/requirements.md",
-    "db-design/platform-db/explainers/gate-b-billing-grace.md",
     "db-design/platform-db/explainers/pk-ulid-strategy-explainer.md.tmp.70921.fdef5f134dc9",
     "db-design/platform-db/explainers/role-capability-explainer.md.tmp.70921.93d146171fe9",
     "db-design/platform-db/migration-ops.md",
@@ -202,7 +204,6 @@
     "db-design/platform-db/explainers/pk-ulid-strategy-explainer.md",
     "db-design/platform-db/explainers/pipa-consent-explainer.md",
     "db-design/platform-db/explainers/README.md",
-    "db-design/platform-db/explainers/gate-b-billing-grace-explainer.md",
     "README.md",
     "db-design/platform-db/explainers/idempotency-key-explainer.md",
     "db-design/platform-db/explainers/online-ddl-migration-explainer.md",
@@ -212,7 +213,6 @@
     "db-design/platform-db/explainers/partitioning-explainer.md",
     "db-design/platform-db/explainers/multitenancy-rls-explainer.md",
     "db-design/platform-db/explainers/webhook-processing-explainer.md",
-    "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
     "db-design/platform-db/explainers",
     "db-design/platform-db"
   ]
