@@ -12,11 +12,11 @@
 
 | # | 파일 | 주제 | 핵심 질문 | 상태 |
 |---|------|------|-----------|------|
-| 1 | [gate-abc-flow-explainer.md](./gate-abc-flow-explainer.md) | Gate A/B/C 전체 흐름 | API 요청 하나가 DB에서 어떤 3단계를 거치나요? | ✅ |
-| 2 | [gate-b-entitlement-explainer.md](./gate-b-entitlement-explainer.md) | Gate B & 엔타이틀먼트 개념 | 결제 상태랑 서비스 접근이 왜 다른 테이블인가요? | ✅ |
-| 3 | [role-capability-explainer.md](./role-capability-explainer.md) | role 2단 분리 + capability | platform_role이 뭐고 service_role이 뭔가요? 왜 둘이 있나요? | ✅ |
-| 4 | [pk-ulid-strategy-explainer.md](./pk-ulid-strategy-explainer.md) | BIGINT pk + ULID public_id | 테이블마다 pk랑 public_id가 두 개인데, 뭘 쓰면 되나요? | ✅ |
-| 5 | [multitenancy-rls-explainer.md](./multitenancy-rls-explainer.md) | Pool 모델 + RLS 개념 | MySQL은 RLS가 없는데 다른 org 데이터를 어떻게 못 보게 막나요? | ✅ |
+| 1 | [gate-abc-flow.md](./gate-abc-flow.md) | Gate A/B/C 전체 흐름 | API 요청 하나가 DB에서 어떤 3단계를 거치나요? | ✅ |
+| 2 | [gate-b-entitlement.md](./gate-b-entitlement.md) | Gate B & 엔타이틀먼트 개념 | 결제 상태랑 서비스 접근이 왜 다른 테이블인가요? | ✅ |
+| 3 | [role-capability.md](./role-capability.md) | role 2단 분리 + capability | platform_role이 뭐고 service_role이 뭔가요? 왜 둘이 있나요? | ✅ |
+| 4 | [pk-ulid-strategy.md](./pk-ulid-strategy.md) | BIGINT pk + ULID public_id | 테이블마다 pk랑 public_id가 두 개인데, 뭘 쓰면 되나요? | ✅ |
+| 5 | [multitenancy-rls.md](./multitenancy-rls.md) | Pool 모델 + RLS 개념 | MySQL은 RLS가 없는데 다른 org 데이터를 어떻게 못 보게 막나요? | ✅ |
 
 ---
 
@@ -24,15 +24,15 @@
 
 | # | 파일 | 주제 | 핵심 질문 | 상태 |
 |---|------|------|-----------|------|
-| 6 | [gate-b-billing-grace-explainer.md](./gate-b-billing-grace-explainer.md) | Gate B + 유예 기간 설계 결정 | status만 보면 안 되고 validUntil도 같이 봐야 하는 이유가 뭔가요? | ✅ |
-| 7 | [enum-vs-varchar-check-explainer.md](./enum-vs-varchar-check-explainer.md) | ENUM vs VARCHAR+CHECK (D6) | ENUM 쓰면 편한데 왜 VARCHAR+CHECK를 쓰나요? | ✅ |
-| 8 | [subscription-lifecycle-explainer.md](./subscription-lifecycle-explainer.md) | 구독 상태 머신 | TRIALING→ACTIVE→CANCELED→EXPIRED 각 상태에서 무슨 일이 생기나요? | ✅ |
-| 9 | [feature-limits-explainer.md](./feature-limits-explainer.md) | feature_limits 3중 정의 우선순위 | product_feature, plan_definition, org_entitlement 중 뭘 읽으면 되나요? | ✅ |
-| 10 | [idempotency-key-explainer.md](./idempotency-key-explainer.md) | 멱등성 키 (payment_ledger) | 결제 요청을 두 번 보내면 어떻게 되나요? 멱등성이 왜 필요하죠? | ✅ |
-| 11 | [outbox-pattern-explainer.md](./outbox-pattern-explainer.md) | Outbox 패턴 | 이벤트를 그냥 Kafka/메시지큐로 바로 보내면 안 되나요? | ✅ |
-| 12 | [webhook-processing-explainer.md](./webhook-processing-explainer.md) | PG 웹훅 수신·처리 흐름 | Toss/Stripe 결제 결과가 DB에 어떻게 반영되나요? | ✅ |
-| 13 | [index-design-explainer.md](./index-design-explainer.md) | 인덱스 설계 원리 | 인덱스가 없으면 뭐가 문제인가요? 복합 인덱스는 어떻게 작동하나요? | ✅ |
-| 14 | [pipa-consent-explainer.md](./pipa-consent-explainer.md) | PIPA 동의 요건 | 개인정보 동의가 왜 테이블이 따로 있고, 철회를 즉시 반영해야 하나요? | ✅ |
+| 6 | [gate-b-billing-grace.md](./gate-b-billing-grace.md) | Gate B + 유예 기간 설계 결정 | status만 보면 안 되고 validUntil도 같이 봐야 하는 이유가 뭔가요? | ✅ |
+| 7 | [enum-vs-varchar-check.md](./enum-vs-varchar-check.md) | ENUM vs VARCHAR+CHECK (D6) | ENUM 쓰면 편한데 왜 VARCHAR+CHECK를 쓰나요? | ✅ |
+| 8 | [subscription-lifecycle.md](./subscription-lifecycle.md) | 구독 상태 머신 | TRIALING→ACTIVE→CANCELED→EXPIRED 각 상태에서 무슨 일이 생기나요? | ✅ |
+| 9 | [feature-limits.md](./feature-limits.md) | feature_limits 3중 정의 우선순위 | product_feature, plan_definition, org_entitlement 중 뭘 읽으면 되나요? | ✅ |
+| 10 | [idempotency-key.md](./idempotency-key.md) | 멱등성 키 (payment_ledger) | 결제 요청을 두 번 보내면 어떻게 되나요? 멱등성이 왜 필요하죠? | ✅ |
+| 11 | [outbox-pattern.md](./outbox-pattern.md) | Outbox 패턴 | 이벤트를 그냥 Kafka/메시지큐로 바로 보내면 안 되나요? | ✅ |
+| 12 | [webhook-processing.md](./webhook-processing.md) | PG 웹훅 수신·처리 흐름 | Toss/Stripe 결제 결과가 DB에 어떻게 반영되나요? | ✅ |
+| 13 | [index-design.md](./index-design.md) | 인덱스 설계 원리 | 인덱스가 없으면 뭐가 문제인가요? 복합 인덱스는 어떻게 작동하나요? | ✅ |
+| 14 | [pipa-consent.md](./pipa-consent.md) | PIPA 동의 요건 | 개인정보 동의가 왜 테이블이 따로 있고, 철회를 즉시 반영해야 하나요? | ✅ |
 
 ---
 
@@ -40,10 +40,10 @@
 
 | # | 파일 | 주제 | 핵심 질문 | 상태 |
 |---|------|------|-----------|------|
-| 15 | [break-glass-explainer.md](./break-glass-explainer.md) | break_glass 긴급 접근 | 긴급 상황에 운영팀이 직접 DB를 건드릴 때 왜 특별한 컬럼이 필요한가요? | ✅ |
-| 16 | [partitioning-explainer.md](./partitioning-explainer.md) | DB 파티셔닝 (audit_log) | 파티션이 뭔가요? 왜 audit_log만 파티션을 쓰나요? | ✅ |
-| 17 | [online-ddl-migration-explainer.md](./online-ddl-migration-explainer.md) | 온라인 DDL & 마이그레이션 위험 | 운영 중인 대형 테이블에 컬럼 추가하면 왜 서비스가 멈출 수 있나요? | ✅ |
-| 18 | [audit-hash-chain-explainer.md](./audit-hash-chain-explainer.md) | audit_log 해시 체인 무결성 | 로그 파일에 해시값을 왜 저장하나요? 그냥 로그 남기면 안 되나요? | ✅ |
+| 15 | [break-glass.md](./break-glass.md) | break_glass 긴급 접근 | 긴급 상황에 운영팀이 직접 DB를 건드릴 때 왜 특별한 컬럼이 필요한가요? | ✅ |
+| 16 | [partitioning.md](./partitioning.md) | DB 파티셔닝 (audit_log) | 파티션이 뭔가요? 왜 audit_log만 파티션을 쓰나요? | ✅ |
+| 17 | [online-ddl-migration.md](./online-ddl-migration.md) | 온라인 DDL & 마이그레이션 위험 | 운영 중인 대형 테이블에 컬럼 추가하면 왜 서비스가 멈출 수 있나요? | ✅ |
+| 18 | [audit-hash-chain.md](./audit-hash-chain.md) | audit_log 해시 체인 무결성 | 로그 파일에 해시값을 왜 저장하나요? 그냥 로그 남기면 안 되나요? | ✅ |
 
 ---
 

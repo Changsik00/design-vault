@@ -80,7 +80,7 @@ UPDATE org_entitlement SET status = 'ACTIVE';  -- WHERE 빠짐!
 
 ## Q3. break_glass 플래그가 audit_log에 있는 이유가 뭔가요?
 
-[[audit-hash-chain-explainer|audit_log]] 테이블에는 모든 시스템 이벤트가 기록됩니다. 그 중에서 break-glass를 통해 이뤄진 행위는 특별히 표시해야 합니다.
+[[audit-hash-chain|audit_log]] 테이블에는 모든 시스템 이벤트가 기록됩니다. 그 중에서 break-glass를 통해 이뤄진 행위는 특별히 표시해야 합니다.
 
 ```sql
 -- audit_log 테이블의 break_glass 컬럼
@@ -180,7 +180,7 @@ Step 5: 사후 리뷰 (팀 전체)
 | audit_log actor | 운영자 본인 pk | (금지이므로 없음) |
 | 사용 상황 | 장애 대응, 데이터 정정 | 고객 지원 "사용자 화면 보기" (금지) |
 
-임퍼소네이션이 위험한 이유([[pipa-consent-explainer|PIPA]] §3, §59 위반):
+임퍼소네이션이 위험한 이유([[pipa-consent|PIPA]] §3, §59 위반):
 
 ```
 임퍼소네이션 시나리오 (우리 시스템에서 금지):
@@ -299,8 +299,8 @@ Break-glass는 "통제된 비상구"입니다. 없으면 장애 대응이 불가
 
 ## 연결된 개념
 
-- [[audit-hash-chain-explainer|audit_log 해시 체인]] — break_glass=true 이벤트의 무결성 보장
-- [[pipa-consent-explainer|PIPA 동의]] — 동의 없는 비상 접근이 가져오는 법적 리스크
+- [[audit-hash-chain|audit_log 해시 체인]] — break_glass=true 이벤트의 무결성 보장
+- [[pipa-consent|PIPA 동의]] — 동의 없는 비상 접근이 가져오는 법적 리스크
 > 소스 문서
 - [[architecture]] — §9 보안, §12.4 Break-glass 절차
 - [[schema-reference]] — D.8 audit_log DDL (break_glass 컬럼, idx_audit_break_glass 인덱스)

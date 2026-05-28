@@ -18,7 +18,7 @@ aliases:
 > **대상**: DB 지식이 많지 않은 개발자  
 > **연관 문서**: [[architecture]] §3.1 불변식 #10, [[schema-reference]] §D.10, §D.12, §D.15
 
-코드를 처음 보면 `feature_limits`가 여러 테이블에 나뉘어 있어서 "이걸 어디서 읽어야 하지?"라는 의문이 생깁니다. 결론부터 말하면: **[[gate-b-entitlement-explainer|org_entitlement]]`.feature_limits`만 읽으면 됩니다.** 나머지는 이 값을 만들 때 참고용입니다.
+코드를 처음 보면 `feature_limits`가 여러 테이블에 나뉘어 있어서 "이걸 어디서 읽어야 하지?"라는 의문이 생깁니다. 결론부터 말하면: **[[gate-b-entitlement|org_entitlement]]`.feature_limits`만 읽으면 됩니다.** 나머지는 이 값을 만들 때 참고용입니다.
 
 ---
 
@@ -194,7 +194,7 @@ const limit = await getFeatureLimit(orgPk, 'ACADEMY', 'daily_uploads');
 
 ## Q4. 요금제가 변경되면 기존 org의 feature_limits는 어떻게 되나요?
 
-[[subscription-lifecycle-explainer|구독]] 요금제(plan)가 변경되어도 **기존 org의 `feature_limits`는 자동으로 바뀌지 않습니다.** 의도적인 설계입니다.
+[[subscription-lifecycle|구독]] 요금제(plan)가 변경되어도 **기존 org의 `feature_limits`는 자동으로 바뀌지 않습니다.** 의도적인 설계입니다.
 
 ```
 시나리오 A: plan_definition의 기본값을 변경
@@ -349,9 +349,9 @@ const limit = await getFeatureLimit(orgPk, service, 'daily_uploads');
 
 ## 연결된 개념
 
-- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — org_entitlement.feature_limits가 런타임 SSOT인 전체 맥락
-- [[subscription-lifecycle-explainer|구독 상태 머신]] — 플랜 변경 시 feature_limits 갱신 시점
-- [[index-design-explainer|인덱스 설계]] — JSON 컬럼 조회 방식
+- [[gate-b-entitlement|Gate B & 엔타이틀먼트]] — org_entitlement.feature_limits가 런타임 SSOT인 전체 맥락
+- [[subscription-lifecycle|구독 상태 머신]] — 플랜 변경 시 feature_limits 갱신 시점
+- [[index-design|인덱스 설계]] — JSON 컬럼 조회 방식
 > 소스 문서
 - [[architecture]] — §3.1 불변식 #10 (feature_limits SSOT)
 - [[schema-reference]] — D.10 product_feature, D.15 plan_definition, D.12 org_entitlement

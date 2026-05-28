@@ -18,9 +18,9 @@ aliases:
 # 구독 상태 머신 설명 (TRIALING → ACTIVE → CANCELED → EXPIRED)
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §6, [[schema-reference]] §D.12~D.13, §F.2~F.3, [[gate-b-billing-grace-explainer|Gate B 유예 기간 설계]]
+> **연관 문서**: [[architecture]] §6, [[schema-reference]] §D.12~D.13, §F.2~F.3, [[gate-b-billing-grace|Gate B 유예 기간 설계]]
 
-SaaS 구독에는 단순히 "결제됨/안됨" 이상의 상태가 있습니다. 무료 체험, 결제 실패, 취소 후 만료까지 — 각 상태가 사용자 경험과 직결됩니다. `platform_db`는 이 흐름을 두 개의 테이블(`org_subscription`, [[gate-b-entitlement-explainer|org_entitlement]])로 나눠서 관리합니다.
+SaaS 구독에는 단순히 "결제됨/안됨" 이상의 상태가 있습니다. 무료 체험, 결제 실패, 취소 후 만료까지 — 각 상태가 사용자 경험과 직결됩니다. `platform_db`는 이 흐름을 두 개의 테이블(`org_subscription`, [[gate-b-entitlement|org_entitlement]])로 나눠서 관리합니다.
 
 ---
 
@@ -77,7 +77,7 @@ EXPIRED   — 완전히 끝남. 더 이상 서비스 접근 불가.
    └── 사용자 입장: "결제 실패, X일 내 갱신 필요" 배너 표시
 ```
 
-코드에서는 이렇게 단일 트랜잭션으로 처리됩니다. 결제 원장에는 [[idempotency-key-explainer|멱등성]] 키(`idempotency_key`)를 함께 기록하고, [[feature-limits-explainer|feature_limits]]도 함께 갱신합니다:
+코드에서는 이렇게 단일 트랜잭션으로 처리됩니다. 결제 원장에는 [[idempotency-key|멱등성]] 키(`idempotency_key`)를 함께 기록하고, [[feature-limits|feature_limits]]도 함께 갱신합니다:
 
 ```sql
 BEGIN;
@@ -109,9 +109,9 @@ BEGIN;
 COMMIT;
 ```
 
-이 모든 게 **하나의 트랜잭션**이라서 "결제는 됐는데 서비스 접근이 안 된다"는 상황이 구조적으로 발생할 수 없습니다. 이메일·알림 등 비동기 fan-out은 [[outbox-pattern-explainer|Outbox 패턴]](`outbox_event` 테이블)으로 처리합니다.
+이 모든 게 **하나의 트랜잭션**이라서 "결제는 됐는데 서비스 접근이 안 된다"는 상황이 구조적으로 발생할 수 없습니다. 이메일·알림 등 비동기 fan-out은 [[outbox-pattern|Outbox 패턴]](`outbox_event` 테이블)으로 처리합니다.
 
-> 💡 **한 줄 요약**: TRIALING → ACTIVE는 [[webhook-processing-explainer|PG 웹훅]]이 트리거가 되고, 결제 기록 + 구독 상태 + 권한 활성화를 단일 트랜잭션으로 처리합니다.
+> 💡 **한 줄 요약**: TRIALING → ACTIVE는 [[webhook-processing|PG 웹훅]]이 트리거가 되고, 결제 기록 + 구독 상태 + 권한 활성화를 단일 트랜잭션으로 처리합니다.
 
 ---
 
@@ -125,7 +125,7 @@ COMMIT;
 PAST_DUE (일단 유예)
     ├── PG가 자동 재시도 (보통 3~5회, 며칠 간격)
     │     ├── 재시도 성공 → ACTIVE 복구
-    │     └── 모두 실패 → [[gate-b-billing-grace-explainer|유예 기간]] 시작
+    │     └── 모두 실패 → [[gate-b-billing-grace|유예 기간]] 시작
     ↓
 유예 기간 (grace period) 부여
     │   - org_subscription.grace_until 시각까지
@@ -320,12 +320,12 @@ TRIALING (무료 체험)
 
 ## 연결된 개념
 
-- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — org_subscription 상태가 org_entitlement에 반영되는 방식
-- [[gate-b-billing-grace-explainer|Gate B 유예 기간 설계]] — PAST_DUE 이후 GRACE 처리 설계 결정
-- [[feature-limits-explainer|feature_limits 우선순위]] — 플랜 변경 시 한도 갱신 시점
-- [[idempotency-key-explainer|멱등성 키]] — 구독 갱신 결제 처리의 중복 방지
-- [[outbox-pattern-explainer|Outbox 패턴]] — 구독 활성화 이벤트 비동기 fan-out 처리
-- [[webhook-processing-explainer|PG 웹훅 처리]] — PG webhook이 구독 상태를 갱신하는 흐름
+- [[gate-b-entitlement|Gate B & 엔타이틀먼트]] — org_subscription 상태가 org_entitlement에 반영되는 방식
+- [[gate-b-billing-grace|Gate B 유예 기간 설계]] — PAST_DUE 이후 GRACE 처리 설계 결정
+- [[feature-limits|feature_limits 우선순위]] — 플랜 변경 시 한도 갱신 시점
+- [[idempotency-key|멱등성 키]] — 구독 갱신 결제 처리의 중복 방지
+- [[outbox-pattern|Outbox 패턴]] — 구독 활성화 이벤트 비동기 fan-out 처리
+- [[webhook-processing|PG 웹훅 처리]] — PG webhook이 구독 상태를 갱신하는 흐름
 > 소스 문서
 - [[architecture]] — §6 데이터 일관성, §12.11 TRIALING→EXPIRED 자동 전환 배치
 - [[schema-reference]] — D.13 org_subscription DDL, F.2 구독 상태 머신

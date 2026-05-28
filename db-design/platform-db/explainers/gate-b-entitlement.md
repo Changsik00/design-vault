@@ -17,7 +17,7 @@ aliases:
 > **대상**: DB 지식이 많지 않은 개발자  
 > **연관 문서**: [[architecture|architecture.md]] §3.1 불변식 4/9/10 · [[schema-reference|schema-reference.md]] §D.12 org_entitlement · §E.2 Gate B · §F Billing 흐름
 
-`platform_db`에서 결제와 서비스 접근 권한은 의도적으로 다른 테이블에 분리되어 있습니다. 이 문서는 [[gate-abc-flow-explainer|Gate A/B/C]] 인가 흐름 중 그 중심에 있는 `org_entitlement` 테이블과 Gate B가 어떻게 동작하는지를 설명합니다.
+`platform_db`에서 결제와 서비스 접근 권한은 의도적으로 다른 테이블에 분리되어 있습니다. 이 문서는 [[gate-abc-flow|Gate A/B/C]] 인가 흐름 중 그 중심에 있는 `org_entitlement` 테이블과 Gate B가 어떻게 동작하는지를 설명합니다.
 
 ---
 
@@ -44,7 +44,7 @@ org_pk = 42 (행복학원)의 entitlement:
 
 ## Q2. 결제 정보가 있는데 왜 `org_entitlement` 테이블을 따로 만들었나요?
 
-결제 테이블(`org_subscription`, `payment_ledger`)을 두고도 엔타이틀먼트 테이블을 따로 만든 이유는 **두 테이블이 다른 질문에 답하기 때문**입니다. ([[subscription-lifecycle-explainer|구독]] 상태 머신과의 관계는 별도 문서 참고)
+결제 테이블(`org_subscription`, `payment_ledger`)을 두고도 엔타이틀먼트 테이블을 따로 만든 이유는 **두 테이블이 다른 질문에 답하기 때문**입니다. ([[subscription-lifecycle|구독]] 상태 머신과의 관계는 별도 문서 참고)
 
 ```
 org_subscription, payment_ledger → "결제가 어떻게 됐나?"
@@ -161,7 +161,7 @@ ACTIVE  → (관리자 정지) → SUSPENDED
 
 ---
 
-## Q4. [[feature-limits-explainer|feature_limits]]가 뭔가요? JSON으로 저장한다고요?
+## Q4. [[feature-limits|feature_limits]]가 뭔가요? JSON으로 저장한다고요?
 
 `feature_limits`는 이 조직이 사용할 수 있는 기능의 **상한선**을 저장하는 JSON 컬럼입니다.
 
@@ -287,7 +287,7 @@ try {
 }
 ```
 
-**GRACE 상태에서는 402가 안 나옵니다.** GRACE는 "결제 실패했지만 [[gate-b-billing-grace-explainer|유예 기간]] 중"이므로, 서비스는 정상적으로 이용 가능합니다. 다만 "XX일 안에 결제를 갱신하지 않으면 서비스가 중단됩니다"라는 배너를 보여주는 것이 UX 관행입니다.
+**GRACE 상태에서는 402가 안 나옵니다.** GRACE는 "결제 실패했지만 [[gate-b-billing-grace|유예 기간]] 중"이므로, 서비스는 정상적으로 이용 가능합니다. 다만 "XX일 안에 결제를 갱신하지 않으면 서비스가 중단됩니다"라는 배너를 보여주는 것이 UX 관행입니다.
 
 ```typescript
 // GRACE 상태 안내 배너
@@ -311,10 +311,10 @@ if (entitlement.status === 'GRACE') {
 
 ## 연결된 개념
 
-- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — 전체 3-gate 중 Gate B의 위치
-- [[gate-b-billing-grace-explainer|Gate B 유예 기간 설계]] — status + validUntil 복합 체크 결정 배경
-- [[feature-limits-explainer|feature_limits 우선순위]] — entitlement.feature_limits가 런타임 SSOT인 이유
-- [[subscription-lifecycle-explainer|구독 상태 머신]] — 구독 상태가 entitlement status에 반영되는 흐름
+- [[gate-abc-flow|Gate A/B/C 전체 흐름]] — 전체 3-gate 중 Gate B의 위치
+- [[gate-b-billing-grace|Gate B 유예 기간 설계]] — status + validUntil 복합 체크 결정 배경
+- [[feature-limits|feature_limits 우선순위]] — entitlement.feature_limits가 런타임 SSOT인 이유
+- [[subscription-lifecycle|구독 상태 머신]] — 구독 상태가 entitlement status에 반영되는 흐름
 > 소스 문서
 - [[architecture]] — 불변식 #4 (canXXX는 org_entitlement만), #9 (Gate B 복합 체크), #10 (feature_limits SSOT)
 - [[schema-reference]] — D.12 org_entitlement DDL, E.2 Gate B 구현 코드

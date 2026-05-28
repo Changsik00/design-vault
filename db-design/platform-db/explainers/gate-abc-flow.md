@@ -128,13 +128,13 @@ SELECT * FROM membership WHERE user_pk = 5 AND org_pk = 42;
 
 **왜 `status` 확인이 필요한가요?** membership이 있다고 해서 무조건 ACTIVE가 아닐 수 있습니다. `SUSPENDED` 상태일 수 있어요. 예를 들어 문제가 생긴 강사 계정을 관리자가 일시 정지시켰을 때, DB에서 row를 삭제하는 게 아니라 `status = 'SUSPENDED'`로만 바꿉니다. 이렇게 해야 "누가 언제 정지됐는지" 이력이 남으니까요.
 
-**`org_pk`는 어디서 오나요?** (→ [[multitenancy-rls-explainer|멀티테넌시]] 행 격리의 전제) 클라이언트가 `X-Org-Pk` 헤더로 보내는 값을 그대로 신뢰하는 게 아닙니다. 헤더의 값은 단서로만 쓰고, 실제로 DB에서 해당 조직이 존재하는지, 해당 사용자가 그 조직 멤버인지를 직접 조회합니다. 클라이언트가 헤더 값을 위조해도 본인이 소속되지 않은 조직의 데이터에는 접근할 수 없는 이유가 이것입니다.
+**`org_pk`는 어디서 오나요?** (→ [[multitenancy-rls|멀티테넌시]] 행 격리의 전제) 클라이언트가 `X-Org-Pk` 헤더로 보내는 값을 그대로 신뢰하는 게 아닙니다. 헤더의 값은 단서로만 쓰고, 실제로 DB에서 해당 조직이 존재하는지, 해당 사용자가 그 조직 멤버인지를 직접 조회합니다. 클라이언트가 헤더 값을 위조해도 본인이 소속되지 않은 조직의 데이터에는 접근할 수 없는 이유가 이것입니다.
 
 > 💡 **한 줄 요약**: Gate A는 `membership` 테이블에서 `(user_pk, org_pk)` 쌍이 ACTIVE 상태인지만 확인합니다.
 
 ---
 
-## Q4. [[gate-b-entitlement-explainer|Gate B]]와 Gate A가 다른 점이 뭔가요? 둘 다 "권한 확인"이잖아요?
+## Q4. [[gate-b-entitlement|Gate B]]와 Gate A가 다른 점이 뭔가요? 둘 다 "권한 확인"이잖아요?
 
 표면적으로는 둘 다 "막는 것"이지만 막는 이유가 완전히 다릅니다.
 
@@ -161,7 +161,7 @@ Gate B 실패 → "구독이 만료되었습니다. 결제를 갱신해주세요
 
 ---
 
-## Q5. [[role-capability-explainer|Gate C]]에서 [[role-capability-explainer|RBAC/ABAC/ReBAC]]를 다 쓴다는데 각각 뭔가요?
+## Q5. [[role-capability|Gate C]]에서 [[role-capability|RBAC/ABAC/ReBAC]]를 다 쓴다는데 각각 뭔가요?
 
 Gate C는 가장 세밀한 단계입니다. 세 가지 권한 판단 방식을 조합해서 씁니다.
 
@@ -256,7 +256,7 @@ DB의 org.perm_version:    6  ← 변경됨!
 → 캐시 flush + 재조회
 ```
 
-**실제 성능**: 세 Gate가 각각 별도 DB 쿼리를 날리는 게 아닙니다. `getPermissionContext(userPk, orgPk)` 한 번의 호출로 Gate A/B/C에 필요한 데이터를 함께 가져오도록 설계되어 있습니다. 각 Gate의 [[index-design-explainer|인덱스]] 설계와 캐싱이 적용되면, 대부분의 요청에서는 실제 DB 쿼리가 발생하지 않습니다.
+**실제 성능**: 세 Gate가 각각 별도 DB 쿼리를 날리는 게 아닙니다. `getPermissionContext(userPk, orgPk)` 한 번의 호출로 Gate A/B/C에 필요한 데이터를 함께 가져오도록 설계되어 있습니다. 각 Gate의 [[index-design|인덱스]] 설계와 캐싱이 적용되면, 대부분의 요청에서는 실제 DB 쿼리가 발생하지 않습니다.
 
 ```
 첫 번째 요청: DB 조회 (3개 테이블) → Redis 캐시 저장
@@ -276,11 +276,11 @@ Gate A/B/C는 각각 `membership`, `org_entitlement`, `delegation_grant` + 코�
 
 ## 연결된 개념
 
-- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — Gate B가 무엇을 체크하는지 상세히
-- [[role-capability-explainer|role 2단 분리 + capability]] — Gate C의 RBAC/ReBAC/ABAC 구현
-- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk 행 격리가 Gate A의 전제 조건
-- [[pk-ulid-strategy-explainer|BIGINT pk + ULID public_id]] — firebase_uid로 user_pk 찾는 흐름
-- [[index-design-explainer|인덱스 설계]] — Gate B 핫패스 복합 인덱스 설계
+- [[gate-b-entitlement|Gate B & 엔타이틀먼트]] — Gate B가 무엇을 체크하는지 상세히
+- [[role-capability|role 2단 분리 + capability]] — Gate C의 RBAC/ReBAC/ABAC 구현
+- [[multitenancy-rls|Pool 모델 + RLS]] — org_pk 행 격리가 Gate A의 전제 조건
+- [[pk-ulid-strategy|BIGINT pk + ULID public_id]] — firebase_uid로 user_pk 찾는 흐름
+- [[index-design|인덱스 설계]] — Gate B 핫패스 복합 인덱스 설계
 > 소스 문서
 - [[architecture]] — §5 권한모델 3-gate 전체 구조
 - [[schema-reference]] — E.1-E.4 3-gate 인가 모델 DDL과 구현

@@ -20,7 +20,7 @@ aliases:
 > **대상**: DB 지식이 많지 않은 개발자
 > **연관 문서**: [[schema-reference]] §D.8, [[architecture]] §12.11
 
-[[audit-hash-chain-explainer|audit_log]]는 서비스가 살아있는 한 매일 쌓이는 테이블입니다. 1년만 운영해도 수천만 건이 넘을 수 있어요. 이 문서는 "왜 파티셔닝을 썼는지, 어떻게 동작하는지"를 처음 접하는 분도 이해할 수 있도록 설명합니다.
+[[audit-hash-chain|audit_log]]는 서비스가 살아있는 한 매일 쌓이는 테이블입니다. 1년만 운영해도 수천만 건이 넘을 수 있어요. 이 문서는 "왜 파티셔닝을 썼는지, 어떻게 동작하는지"를 처음 접하는 분도 이해할 수 있도록 설명합니다.
 
 ---
 
@@ -161,7 +161,7 @@ p_future: 7월~무한대 데이터 (5000만 행!) → 거대한 파티션 → �
 2. 개별 파티션 DROP으로 오래된 데이터를 빠르게 삭제할 수 없습니다.
 3. 파티션 하나가 지나치게 커져 성능이 월별 파티션과 비슷해집니다.
 
-그래서 **운영 정기 작업(분기 1회)** 으로 새 파티션을 미리 [[online-ddl-migration-explainer|온라인 DDL]]로 추가해야 합니다.
+그래서 **운영 정기 작업(분기 1회)** 으로 새 파티션을 미리 [[online-ddl-migration|온라인 DDL]]로 추가해야 합니다.
 
 ```sql
 -- architecture.md §12.11 정기 운영 작업:
@@ -260,7 +260,7 @@ MySQL 파티션 테이블 규칙:
   pk만으로는 이 정보를 알 수 없습니다.
 ```
 
-실제 운영에서 `pk`만으로 row를 찾을 일이 있다면 별도 [[index-design-explainer|인덱스]]를 추가하면 됩니다.
+실제 운영에서 `pk`만으로 row를 찾을 일이 있다면 별도 [[index-design|인덱스]]를 추가하면 됩니다.
 
 ```sql
 -- pk 단독 조회가 필요하다면:
@@ -283,9 +283,9 @@ INDEX idx_audit_pk (pk)  -- 필요 시 추가
 
 ## 연결된 개념
 
-- [[audit-hash-chain-explainer|audit_log 해시 체인]] — 파티션 단위 아카이빙 후 WORM 적용 흐름
-- [[index-design-explainer|인덱스 설계]] — 파티션 + 인덱스를 함께 설계하는 방법
-- [[online-ddl-migration-explainer|온라인 DDL & 마이그레이션]] — 파티션 추가가 온라인 DDL인지 확인하는 방법
+- [[audit-hash-chain|audit_log 해시 체인]] — 파티션 단위 아카이빙 후 WORM 적용 흐름
+- [[index-design|인덱스 설계]] — 파티션 + 인덱스를 함께 설계하는 방법
+- [[online-ddl-migration|온라인 DDL & 마이그레이션]] — 파티션 추가가 온라인 DDL인지 확인하는 방법
 > 소스 문서
 - [[schema-reference]] — D.8 audit_log DDL (파티션 정의, 복합 PK, DATETIME 선택 이유)
 - [[review-checklist]] — P2-3 파티션 자동 추가 미구현 이슈

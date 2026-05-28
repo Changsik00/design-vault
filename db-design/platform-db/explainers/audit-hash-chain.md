@@ -190,7 +190,7 @@ row #5의 prev_hash = "xyz789..." (row #4의 row_hash)
 
 두 컬럼을 함께 쓰면 **수정 탐지 + 삭제 탐지** 모두 커버합니다.
 
-현재 DDL에는 이 컬럼들이 아직 없습니다. [[pipa-consent-explainer|PIPA 동의]] 관련 `user_consent_event`에는 설계가 들어가 있고, `audit_log`는 phase-17에서 추가 예정입니다.
+현재 DDL에는 이 컬럼들이 아직 없습니다. [[pipa-consent|PIPA 동의]] 관련 `user_consent_event`에는 설계가 들어가 있고, `audit_log`는 phase-17에서 추가 예정입니다.
 
 > 💡 **한 줄 요약**: `row_hash`는 row 수정을, `prev_hash`는 row 삭제를 감지합니다. 두 컬럼이 함께 있어야 완전한 변조 탐지가 가능합니다.
 
@@ -265,7 +265,7 @@ S3 Object Lock 작동 방식:
 | **GOVERNANCE** | 특수 권한(`s3:BypassGovernanceRetention`)으로 삭제 가능 | 개발/테스트 |
 | **COMPLIANCE** | 보존 기간 중 누구도 삭제 불가. 계정 삭제도 안 됨 | 규정 준수 (ISMS-P/GDPR) |
 
-platform_db에서 [[partitioning-explainer|파티셔닝]] 기반 WORM 도입 계획:
+platform_db에서 [[partitioning|파티셔닝]] 기반 WORM 도입 계획:
 
 ```
 현재: DB 계정 권한 제거만 (Level 1)
@@ -365,7 +365,7 @@ async function verifyAuditHashChain() {
 
 ## 부록: break_glass 컬럼은 왜 있나요?
 
-[[break-glass-explainer|break-glass]] — `audit_log.break_glass BOOLEAN NOT NULL DEFAULT FALSE` 컬럼이 보이시죠?
+[[break-glass|break-glass]] — `audit_log.break_glass BOOLEAN NOT NULL DEFAULT FALSE` 컬럼이 보이시죠?
 
 이건 [[architecture]] §12.4 Break-glass 정책과 연관됩니다. 긴급 운영 상황(서비스 장애, 법적 요청)에서 운영자가 평소에는 권한이 없는 작업을 승인을 받고 실행할 때, 그 행위를 명시적으로 표시하는 플래그입니다.
 
@@ -408,9 +408,9 @@ Level 3        P2/T4 조건  DB root의 해시까지 조작
 
 ## 연결된 개념
 
-- [[partitioning-explainer|DB 파티셔닝]] — 파티션 단위 아카이빙과 WORM 스토리지 연계
-- [[pipa-consent-explainer|PIPA 동의]] — user_consent_event에도 동일하게 적용되는 해시 체인
-- [[break-glass-explainer|Break-glass 긴급 접근]] — break_glass=true 이벤트를 해시 체인으로 탐지
+- [[partitioning|DB 파티셔닝]] — 파티션 단위 아카이빙과 WORM 스토리지 연계
+- [[pipa-consent|PIPA 동의]] — user_consent_event에도 동일하게 적용되는 해시 체인
+- [[break-glass|Break-glass 긴급 접근]] — break_glass=true 이벤트를 해시 체인으로 탐지
 > 소스 문서
 - [[architecture]] — §9 보안 D11 (해시 체이닝→WORM), §12.5 감사 무결성 운영
 - [[schema-reference]] — D.8 audit_log DDL (prev_hash/row_hash — P1 미구현 명시)

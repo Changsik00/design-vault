@@ -140,14 +140,14 @@ ALTER TABLE membership
 |---|---|---|
 | CHECK 제약 추가/변경 | ✅ 즉시, 잠금 없음 | platform_db에서 자주 씀 |
 | 컬럼 기본값 변경 | ✅ 즉시 |  |
-| [[index-design-explainer\|인덱스]] 추가 | ✅ 온라인 (단, 빌드 시간 필요) | DML은 허용 |
+| [[index-design\|인덱스]] 추가 | ✅ 온라인 (단, 빌드 시간 필요) | DML은 허용 |
 | 컬럼 추가 (`ADD COLUMN`) | 대부분 온라인 | MySQL 8.x 버전마다 다름 |
 | 컬럼 타입 변경 (`MODIFY COLUMN`) | ❌ 테이블 전체 재빌드 | 대형 테이블 위험 |
 | `ENUM` 값 추가/변경 | ❌ 테이블 전체 재빌드 | D6 원칙에서 ENUM 기피 이유 |
 | `VARCHAR` 길이 증가 | ✅ 온라인 (일부 조건부) |  |
 | `VARCHAR` 길이 감소 | ❌ 테이블 전체 재빌드 |  |
 
-[[enum-vs-varchar-check-explainer|ENUM vs VARCHAR+CHECK]]를 쓰면 `ENUM`은 값을 추가할 때마다 전체 재빌드가 필요합니다. 이게 바로 [[architecture|D6 원칙]] §4에서 `service` 컬럼을 `ENUM` 대신 `VARCHAR(50) + CHECK`로 쓰는 이유입니다.
+[[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK]]를 쓰면 `ENUM`은 값을 추가할 때마다 전체 재빌드가 필요합니다. 이게 바로 [[architecture|D6 원칙]] §4에서 `service` 컬럼을 `ENUM` 대신 `VARCHAR(50) + CHECK`로 쓰는 이유입니다.
 
 > 💡 **한 줄 요약**: MySQL 8의 온라인 DDL은 많은 작업을 잠금 없이 처리하지만, MODIFY COLUMN이나 ENUM 수정은 여전히 전체 테이블 재빌드가 필요해서 위험합니다.
 
@@ -324,9 +324,9 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 
 ## 연결된 개념
 
-- [[enum-vs-varchar-check-explainer|ENUM vs VARCHAR+CHECK (D6)]] — D6 원칙과 ENUM→VARCHAR 마이그레이션의 연결
-- [[index-design-explainer|인덱스 설계]] — 인덱스 추가 DDL의 온라인 여부
-- [[partitioning-explainer|DB 파티셔닝]] — 파티션 추가 운영과 DDL 특성
+- [[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK (D6)]] — D6 원칙과 ENUM→VARCHAR 마이그레이션의 연결
+- [[index-design|인덱스 설계]] — 인덱스 추가 DDL의 온라인 여부
+- [[partitioning|DB 파티셔닝]] — 파티션 추가 운영과 DDL 특성
 > 소스 문서
 - [[architecture]] — §4 D6 결정, D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.13 org_subscription, D.17 payment_ledger (pg_provider 마이그레이션 대상)

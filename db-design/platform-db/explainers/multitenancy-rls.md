@@ -101,7 +101,7 @@ PostgreSQL의 RLS는 강력한 안전망입니다. 개발자가 쿼리에서 `WH
 
 그래서 현재는 **앱 레이어에서 강제**합니다. 세 가지 방어선을 씁니다.
 
-**방어선 1: [[gate-abc-flow-explainer|Gate A]] 함수에 orgPk 파라미터 필수화**
+**방어선 1: [[gate-abc-flow|Gate A]] 함수에 orgPk 파라미터 필수화**
 
 ```typescript
 // 앱에서 강제 — 모든 Gate 함수에 orgPk 필수 파라미터
@@ -127,7 +127,7 @@ async function getEntitlementByService(
 ```sql
 -- 모든 도메인 테이블의 org_pk는 NOT NULL
 CREATE TABLE org_entitlement (
-  org_pk [[pk-ulid-strategy-explainer|BIGINT pk]] UNSIGNED NOT NULL,  -- ← NULL이면 INSERT 자체 실패
+  org_pk [[pk-ulid-strategy|BIGINT pk]] UNSIGNED NOT NULL,  -- ← NULL이면 INSERT 자체 실패
   ...
 );
 ```
@@ -332,10 +332,10 @@ T4: ISMS-P/GDPR 계약 체결
 
 ## 연결된 개념
 
-- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — Gate A에서 org_pk 바인딩이 일어나는 위치
-- [[pk-ulid-strategy-explainer|BIGINT pk + ULID public_id]] — org_pk(BIGINT)가 격리 키로 쓰이는 이유
-- [[index-design-explainer|인덱스 설계]] — org_pk가 모든 복합 인덱스 첫 컬럼인 이유
-- [[pipa-consent-explainer|PIPA 동의]] — 테넌트별 동의 데이터 격리의 법적 맥락
+- [[gate-abc-flow|Gate A/B/C 전체 흐름]] — Gate A에서 org_pk 바인딩이 일어나는 위치
+- [[pk-ulid-strategy|BIGINT pk + ULID public_id]] — org_pk(BIGINT)가 격리 키로 쓰이는 이유
+- [[index-design|인덱스 설계]] — org_pk가 모든 복합 인덱스 첫 컬럼인 이유
+- [[pipa-consent|PIPA 동의]] — 테넌트별 동의 데이터 격리의 법적 맥락
 > 소스 문서
 - [[architecture]] — §8 멀티테넌시 & 격리, §4 D10 (RLS 없음 → CI 린트 보강)
 - [[schema-reference]] — G.1-G.2 멀티테넌시 격리 현황

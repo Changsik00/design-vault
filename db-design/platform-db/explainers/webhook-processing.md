@@ -41,7 +41,7 @@ aliases:
 웹훅 이벤트 종류는 대략 이렇습니다:
 - `payment.completed` — 결제 완료
 - `payment.failed` — 결제 실패
-- `subscription.renewed` — [[subscription-lifecycle-explainer|구독]] 자동 갱신
+- `subscription.renewed` — [[subscription-lifecycle|구독]] 자동 갱신
 - `refund.completed` — 환불 완료
 
 > 💡 **한 줄 요약**: PG는 결제 결과를 우리 서버에 HTTP POST로 능동적으로 알려주는데, 그게 웹훅입니다.
@@ -81,7 +81,7 @@ aliases:
 
 1단계에서 200 OK를 빨리 반환하는 이유가 있습니다. PG는 정해진 시간(보통 5~10초) 안에 응답이 없으면 "실패"로 보고 재전송합니다. 처리가 오래 걸리더라도 "잘 받았어"를 먼저 알리는 것입니다.
 
-> 💡 **한 줄 요약**: 수신은 즉시 기록 후 200 OK, 실제 처리는 그 뒤에 단일 트랜잭션으로 합니다. 처리 완료 후 [[outbox-pattern-explainer|Outbox 패턴]]을 통해 알림·영수증 발송이 비동기로 이루어집니다.
+> 💡 **한 줄 요약**: 수신은 즉시 기록 후 200 OK, 실제 처리는 그 뒤에 단일 트랜잭션으로 합니다. 처리 완료 후 [[outbox-pattern|Outbox 패턴]]을 통해 알림·영수증 발송이 비동기로 이루어집니다.
 
 ---
 
@@ -97,9 +97,9 @@ Toss ──웹훅 2차 전송──▶ 우리 서버 (복구됨)
 Toss ──웹훅 3차 전송──▶ 우리 서버 (이미 처리됨)
 ```
 
-만약 이걸 처리하지 않으면 같은 결제가 세 번 처리되는 참사가 발생합니다. 이를 막는 것이 **[[idempotency-key-explainer|멱등성]](Idempotency)** 처리입니다.
+만약 이걸 처리하지 않으면 같은 결제가 세 번 처리되는 참사가 발생합니다. 이를 막는 것이 **[[idempotency-key|멱등성]](Idempotency)** 처리입니다.
 
-`pg_webhook_event` 테이블의 이 [[index-design-explainer|인덱스]]가 핵심입니다:
+`pg_webhook_event` 테이블의 이 [[index-design|인덱스]]가 핵심입니다:
 
 ```sql
 UNIQUE KEY uq_provider_event (pg_provider, event_id)
@@ -282,9 +282,9 @@ GROUP BY status;
 
 ## 연결된 개념
 
-- [[idempotency-key-explainer|멱등성 키]] — event_id UNIQUE가 중복 웹훅을 막는 방식
-- [[outbox-pattern-explainer|Outbox 패턴]] — 웹훅 처리 완료 후 async fan-out
-- [[subscription-lifecycle-explainer|구독 상태 머신]] — 웹훅이 org_subscription 상태를 갱신하는 전체 흐름
-- [[index-design-explainer|인덱스 설계]] — idx_pg_webhook_status 재처리 워커용 인덱스
+- [[idempotency-key|멱등성 키]] — event_id UNIQUE가 중복 웹훅을 막는 방식
+- [[outbox-pattern|Outbox 패턴]] — 웹훅 처리 완료 후 async fan-out
+- [[subscription-lifecycle|구독 상태 머신]] — 웹훅이 org_subscription 상태를 갱신하는 전체 흐름
+- [[index-design|인덱스 설계]] — idx_pg_webhook_status 재처리 워커용 인덱스
 > 소스 문서
 - [[schema-reference]] — D.18 pg_webhook_event DDL, F.4 PG 웹훅 멱등 처리 흐름

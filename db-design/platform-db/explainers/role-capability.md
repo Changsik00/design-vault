@@ -38,7 +38,7 @@ CREATE TABLE membership (
 );
 ```
 
-TEACHER, STUDENT, PARENT는 학원(academy) 서비스 전용 개념입니다. 이 테이블은 `platform_db`, 즉 academy/agent/market/store/fitness가 **모두 공유하는 공통 DB**에 있습니다. (org_pk 기반 [[multitenancy-rls-explainer|멀티테넌시]] 행 격리가 전제입니다)
+TEACHER, STUDENT, PARENT는 학원(academy) 서비스 전용 개념입니다. 이 테이블은 `platform_db`, 즉 academy/agent/market/store/fitness가 **모두 공유하는 공통 DB**에 있습니다. (org_pk 기반 [[multitenancy-rls|멀티테넌시]] 행 격리가 전제입니다)
 
 **문제 1: 다른 서비스에서 이 role이 무의미하다.**
 
@@ -161,7 +161,7 @@ const ROLE_PERMISSION = {
 };
 ```
 
-이 상수를 기반으로 [[gate-abc-flow-explainer|Gate C]]에서 CASL ability 객체를 만들어 권한을 판단합니다. `entitlement` 파라미터는 [[gate-b-entitlement-explainer|Gate B]]가 통과한 뒤 전달되는 값입니다.
+이 상수를 기반으로 [[gate-abc-flow|Gate C]]에서 CASL ability 객체를 만들어 권한을 판단합니다. `entitlement` 파라미터는 [[gate-b-entitlement|Gate B]]가 통과한 뒤 전달되는 값입니다.
 
 ```typescript
 // Gate C: CASL ability 빌드 (단순화한 예시)
@@ -396,9 +396,9 @@ const canDo = ability.can('approve', lecture);
 
 ## 연결된 개념
 
-- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — Gate C가 전체 3-gate에서 어디에 위치하는지
-- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — Gate B(이용권) vs Gate C(세부 정책) 차이
-- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk 격리와 role 체계의 관계
+- [[gate-abc-flow|Gate A/B/C 전체 흐름]] — Gate C가 전체 3-gate에서 어디에 위치하는지
+- [[gate-b-entitlement|Gate B & 엔타이틀먼트]] — Gate B(이용권) vs Gate C(세부 정책) 차이
+- [[multitenancy-rls|Pool 모델 + RLS]] — org_pk 격리와 role 체계의 관계
 > 소스 문서
 - [[architecture]] — §3.1 불변식, §4 D1/D2/D3 결정, §5.3 RBAC/ABAC/ReBAC 정의
 - [[schema-reference]] — D.4 membership DDL, D.6 delegation_grant DDL

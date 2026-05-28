@@ -173,7 +173,7 @@ async function getLecture(orgPublicId: string, lecturePublicId: string) {
   const lecture = await db.query.lecture.findFirst({
     where: and(
       eq(lecture.publicId, lecturePublicId),
-      eq(lecture.orgPk, org.pk)  // ← pk로 [[multitenancy-rls-explainer|멀티테넌시]] 격리
+      eq(lecture.orgPk, org.pk)  // ← pk로 [[multitenancy-rls|멀티테넌시]] 격리
     )
   });
 
@@ -212,7 +212,7 @@ ASCII 흐름도로 표현하면:
 
 ---
 
-## Q5. firebase_uid는 또 뭔가요? pk, public_id, [[gate-abc-flow-explainer|Gate 흐름]]에서 firebase_uid — 세 개나 있는 이유가 있나요?
+## Q5. firebase_uid는 또 뭔가요? pk, public_id, [[gate-abc-flow|Gate 흐름]]에서 firebase_uid — 세 개나 있는 이유가 있나요?
 
 각각 완전히 다른 역할을 합니다:
 
@@ -293,8 +293,8 @@ Firebase ──[firebase_uid]──▶ identity_user.firebase_uid (조회 키)
 
 ## 연결된 개념
 
-- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — firebase_uid → user_pk 변환이 Gate 흐름의 시작점
-- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk가 멀티테넌시 격리 키인 이유
+- [[gate-abc-flow|Gate A/B/C 전체 흐름]] — firebase_uid → user_pk 변환이 Gate 흐름의 시작점
+- [[multitenancy-rls|Pool 모델 + RLS]] — org_pk가 멀티테넌시 격리 키인 이유
 > 소스 문서
 - [[architecture]] — §3.1 불변식 #2 (내부 PK는 BIGINT, 외부 노출은 ULID)
 - [[schema-reference]] — B. 식별자 체계, D.1 identity_user DDL

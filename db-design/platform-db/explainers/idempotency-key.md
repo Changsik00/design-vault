@@ -246,7 +246,7 @@ const charge = await stripe.paymentIntents.create({
 });
 ```
 
-> 💡 **한 줄 요약**: idempotency_key는 랜덤값이 아니라, "같은 청구 의도면 항상 같은 키, 다른 청구면 다른 키"가 되도록 org_pk + [[subscription-lifecycle-explainer|구독]] 정보 + 기간을 조합해서 만들어야 합니다.
+> 💡 **한 줄 요약**: idempotency_key는 랜덤값이 아니라, "같은 청구 의도면 항상 같은 키, 다른 청구면 다른 키"가 되도록 org_pk + [[subscription-lifecycle|구독]] 정보 + 기간을 조합해서 만들어야 합니다.
 
 ---
 
@@ -255,7 +255,7 @@ const charge = await stripe.paymentIntents.create({
 맞습니다. 같은 개념이고 같은 문제를 다른 방향에서 막습니다.
 
 `idempotency_key`는 **우리 쪽에서 결제사에 요청할 때** 중복을 막는 것이고,  
-`UNIQUE(pg_provider, event_id)`는 **결제사가 우리에게 [[webhook-processing-explainer|웹훅]]을 보낼 때** 중복을 막는 것입니다.
+`UNIQUE(pg_provider, event_id)`는 **결제사가 우리에게 [[webhook-processing|웹훅]]을 보낼 때** 중복을 막는 것입니다.
 
 결제사도 webhook을 여러 번 보낼 수 있습니다:
 
@@ -352,8 +352,8 @@ try {
 
 ## 연결된 개념
 
-- [[subscription-lifecycle-explainer|구독 상태 머신]] — 구독 갱신 결제에서 idempotency_key가 쓰이는 시점
-- [[webhook-processing-explainer|PG 웹훅 처리]] — PG에서 오는 event_id의 인바운드 멱등성
-- [[outbox-pattern-explainer|Outbox 패턴]] — 결제 성공 후 비동기 처리의 at-least-once 보장
+- [[subscription-lifecycle|구독 상태 머신]] — 구독 갱신 결제에서 idempotency_key가 쓰이는 시점
+- [[webhook-processing|PG 웹훅 처리]] — PG에서 오는 event_id의 인바운드 멱등성
+- [[outbox-pattern|Outbox 패턴]] — 결제 성공 후 비동기 처리의 at-least-once 보장
 > 소스 문서
 - [[schema-reference]] — D.17 payment_ledger (idempotency_key UNIQUE), D.18 pg_webhook_event (event_id UNIQUE)

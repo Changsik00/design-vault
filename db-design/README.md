@@ -13,4 +13,4 @@
 
 | 파일 | 내용 |
 |---|---|
-| [enterprise-saas-multitenancy-db-design.md](./enterprise-saas-multitenancy-db-design.md) | Enterprise SaaS 멀티테넌시 DB 설계 패턴 |
+| [enterprise-saas-multitenancy.md](./enterprise-saas-multitenancy.md) | Enterprise SaaS 멀티테넌시 DB 설계 패턴 |

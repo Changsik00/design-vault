@@ -55,7 +55,7 @@ ALTER TABLE product
 
 ---
 
-## Q2. "[[online-ddl-migration-explainer|테이블 락]](lock)"이 뭔가요? ENUM 변경이 왜 서비스를 멈추게 하나요?
+## Q2. "[[online-ddl-migration|테이블 락]](lock)"이 뭔가요? ENUM 변경이 왜 서비스를 멈추게 하나요?
 
 테이블 락은 "이 테이블 지금 공사 중이니 아무도 읽거나 쓰지 말것"을 의미합니다.
 
@@ -272,8 +272,8 @@ ALTER TABLE product
 
 ## 연결된 개념
 
-- [[online-ddl-migration-explainer|온라인 DDL & 마이그레이션]] — 테이블 락이 서비스에 미치는 영향 상세
-- [[index-design-explainer|인덱스 설계]] — CHECK constraint와 인덱스의 조합
+- [[online-ddl-migration|온라인 DDL & 마이그레이션]] — 테이블 락이 서비스에 미치는 영향 상세
+- [[index-design|인덱스 설계]] — CHECK constraint와 인덱스의 조합
 > 소스 문서
 - [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.9 product (service 컬럼 예시), D.16-D.18 (pg_provider ENUM 미적용 사례)
