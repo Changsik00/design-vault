@@ -306,7 +306,7 @@ const MARKET_CAPABILITIES = {
 
 ## Q6. RBAC / ABAC / ReBAC가 뭔가요? 세 가지 다 쓰는 이유가 있나요?
 
-Q3에서 간략히 나왔지만, 여기서 좀 더 구체적인 시나리오로 설명합니다.
+[[role-capability#Q3. role이 코드에서 어떻게 권한 체크에 쓰이나요? DB에 "TEACHER는 영상을 올릴 수 있다" 같은 규칙이 저장되어 있나요?|Q3]]에서 간략히 나왔지만, 여기서 좀 더 구체적인 시나리오로 설명합니다.
 
 ### RBAC (Role-Based Access Control)
 
