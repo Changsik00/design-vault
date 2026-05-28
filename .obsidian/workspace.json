@@ -11,14 +11,10 @@
             "id": "81fed65598edfe27",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "db-design/platform-db/explainers/gate-b-entitlement.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "gate-b-entitlement"
+              "type": "graph",
+              "state": {},
+              "icon": "lucide-git-fork",
+              "title": "그래프 뷰"
             }
           }
         ]
@@ -94,7 +90,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-entitlement.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +99,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "gate-b-entitlement 의 백링크"
+              "title": "백링크"
             }
           },
           {
@@ -113,12 +108,11 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-entitlement.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "gate-b-entitlement 의 나가는 링크"
+              "title": "나가는 링크"
             }
           },
           {
@@ -156,13 +150,12 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "db-design/platform-db/explainers/gate-b-entitlement.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "gate-b-entitlement 의 개요"
+              "title": "개요"
             }
           }
         ]
@@ -185,33 +178,34 @@
   },
   "active": "81fed65598edfe27",
   "lastOpenFiles": [
-    "db-design/platform-db/explainers/gate-b-billing-grace-decision.md",
+    "db-design/academy-platform/data-model.md",
+    "db-design/platform-db/adr-log.md",
+    "db-design/academy-platform/competitive-edge.md",
+    "db-design/academy-platform/business-model.md",
+    "db-design/academy-platform/bdd-scenarios.md",
+    "db-design/academy-platform/auth-and-policy.md",
+    "README.md",
+    "db-design/README.md",
     "db-design/enterprise-saas-multitenancy.md",
+    "db-design/platform-db/schema-reference.md",
+    "db-design/platform-db/review-checklist.md",
+    "db-design/platform-db/requirements.md",
+    "db-design/platform-db/architecture.md.tmp.70921.62e46c0d0067",
+    "db-design/platform-db/architecture.md",
     "db-design/platform-db/explainers/webhook-processing.md",
     "db-design/platform-db/explainers/subscription-lifecycle.md",
     "db-design/platform-db/explainers/role-capability.md",
     "db-design/platform-db/explainers/pk-ulid-strategy.md",
     "db-design/platform-db/explainers/pipa-consent.md",
     "db-design/platform-db/explainers/partitioning.md",
-    "db-design/platform-db/explainers/gate-b-entitlement-explainer.md",
     "db-design/platform-db/explainers/outbox-pattern.md",
     "db-design/platform-db/explainers/online-ddl-migration.md",
     "db-design/platform-db/explainers/multitenancy-rls.md",
     "db-design/platform-db/explainers/index-design.md",
     "db-design/platform-db/explainers/idempotency-key.md",
     "db-design/platform-db/explainers/gate-b-entitlement.md",
-    "db-design/platform-db/explainers/gate-abc-flow.md",
-    "db-design/platform-db/explainers/feature-limits.md",
-    "db-design/platform-db/explainers/enum-vs-varchar-check.md",
-    "db-design/platform-db/explainers/break-glass.md",
-    "db-design/platform-db/explainers/audit-hash-chain.md",
-    "db-design/platform-db/explainers/gate-b-billing-grace-explainer.md",
+    "db-design/platform-db/explainers/gate-b-billing-grace-decision.md",
     "db-design/platform-db/explainers/gate-b-billing-grace.md.tmp.70921.aebe39e47c7a",
-    "db-design/platform-db/explainers/gate-b-billing-grace.md",
-    "db-design/platform-db/explainers/gate-abc-flow-explainer.md",
-    "db-design/platform-db/explainers/feature-limits-explainer.md",
-    "db-design/platform-db/explainers/enum-vs-varchar-check-explainer.md",
-    "db-design/platform-db/explainers/break-glass-explainer.md",
     "db-design/platform-db/explainers/pk-ulid-strategy-explainer.md.tmp.70921.fdef5f134dc9",
     "db-design/platform-db/explainers/role-capability-explainer.md.tmp.70921.93d146171fe9",
     "db-design/platform-db/explainers",

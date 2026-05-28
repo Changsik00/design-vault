@@ -16,14 +16,14 @@
 
 ## A.1 아키텍처 / 토폴로지
 
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| ARCH-1 | 공통 코어(identity/billing/product)는 단일 `platform_db`, 도메인은 서비스별 DB | R0 | ADR-044 | ✅ |
-| ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음 | R0 | §6 단일 InnoDB 트랜잭션 | ✅ |
-| ARCH-3 | cross-DB는 서비스→platform 읽기만 허용, peer 금지, least-privilege DB 계정 | R0 | 불변식 #6 | ✅ |
-| ARCH-4 | `@aiagent/db-platform` 패키지로만 platform 접근, Drizzle 직접 참조 금지 | R0 | ADR-032 Option A | ✅ |
-| ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원 보장) | R0 | 마이그레이션 규약 | ✅ |
-| ARCH-6 | async 부수효과는 `outbox_event` | R0 | §6.2 | ✅ |
+| ID     | 요구사항                                                            | 출처  | 적용 설계             | 상태  |
+| ------ | --------------------------------------------------------------- | --- | ----------------- | --- |
+| ARCH-1 | 공통 코어(identity/billing/product)는 단일 `platform_db`, 도메인은 서비스별 DB | R0  | ADR-044           | ✅   |
+| ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음             | R0  | §6 단일 InnoDB 트랜잭션 | ✅   |
+| ARCH-3 | cross-DB는 서비스→platform 읽기만 허용, peer 금지, least-privilege DB 계정   | R0  | 불변식 #6            | ✅   |
+| ARCH-4 | `platform-db` 패키지로만 platform 접근, Drizzle 직접 참조 금지               | R0  | ADR-032 Option A  | ✅   |
+| ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원 보장)                              | R0  | 마이그레이션 규약         | ✅   |
+| ARCH-6 | async 부수효과는 `outbox_event`                                      | R0  | §6.2              | ✅   |
 
 ## A.2 Identity & User
 
