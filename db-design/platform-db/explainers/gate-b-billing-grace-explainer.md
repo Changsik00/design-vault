@@ -1,9 +1,25 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p1
+  - gate
+  - billing
+  - grace
+  - design-decision
+aliases:
+  - Gate B 유예
+  - validUntil
+  - GRACE 기간
+  - 배치 실패 안전망
+---
+
 # Gate B 유예 기간 설계 결정 설명 (status + validUntil 복합 체크)
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`gate-b-billing-grace.md`](../gate-b-billing-grace.md) · [`schema-reference.md §E.2`](../schema-reference.md) · [`architecture.md §3.1 불변식 #9`](../architecture.md)
+> **연관 문서**: [[gate-b-billing-grace|gate-b-billing-grace.md]] · [[schema-reference|schema-reference.md §E.2]] · [[architecture|architecture.md §3.1 불변식 #9]]
 
-Gate B는 "이 학원이 지금 서비스를 이용할 수 있나요?"를 확인하는 관문입니다. 그런데 코드를 보면 `status` 하나만 확인하는 게 아니라 `validUntil`까지 같이 체크합니다. 왜 두 개를 다 확인할까요? 이 문서가 그 이유를 설명합니다.
+[[gate-b-entitlement-explainer|Gate B]]는 "이 학원이 지금 서비스를 이용할 수 있나요?"를 확인하는 관문입니다. 그런데 코드를 보면 `status` 하나만 확인하는 게 아니라 `validUntil`까지 같이 체크합니다. 왜 두 개를 다 확인할까요? 이 문서가 그 이유를 설명합니다.
 
 ---
 
@@ -67,7 +83,7 @@ status-only:   ACTIVE니까 통과 → 영구 무료 접근 가능 ❌
 
 **배치**는 정해진 시간에 주기적으로 실행하는 자동화 작업입니다. 여기서는 결제 갱신과 관련된 두 가지 역할을 합니다.
 
-**1. 구독 만료 처리 배치**
+**1. [[subscription-lifecycle-explainer|구독 상태]] 만료 처리 배치**
 
 매일 자정 근처에 실행되어, 기간이 지난 구독을 `EXPIRED`로 바꿉니다:
 
@@ -346,3 +362,15 @@ Gate B 체크: status ∈ {ACTIVE, GRACE} AND (validUntil IS NULL OR validUntil 
 ```
 
 `packages/db-platform/src/gates.test.ts`에 이 케이스들이 단위 테스트 18건으로 존재합니다. 새로운 변경사항도 이 테스트를 통과해야 합니다.
+
+---
+
+## 연결된 개념
+
+- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — org_entitlement 테이블과 status 값의 의미
+- [[subscription-lifecycle-explainer|구독 상태 머신]] — PAST_DUE에서 GRACE로 전이되는 흐름
+- [[index-design-explainer|인덱스 설계]] — idx_org_service_status에 valid_until이 포함된 이유
+> 소스 문서
+- [[gate-b-billing-grace]] — 원본 설계 결정 문서 (이 explainer의 원천)
+- [[architecture]] — §3.1 불변식 #9 (Gate B 복합 체크)
+- [[schema-reference]] — D.12 org_entitlement DDL, E.2 Gate B 구현 코드

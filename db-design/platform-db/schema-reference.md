@@ -1,6 +1,6 @@
 # platform_db — 스키마 레퍼런스
 
-> 작성일: 2026-05-28 · 유지: dennis  
+> 작성일: 2026-05-28 · 유지: changsik  
 > 진입점: [`architecture.md`](architecture.md) (개요·결정·운영) · 검증: [`requirements.md`](requirements.md) (요구사항·BDD)
 >
 > **이 문서**: `platform_db`의 기술 레퍼런스 — DB 토폴로지·ERD·스키마 DDL·3-gate·billing 흐름·멀티테넌시·보안·consent 모델.  

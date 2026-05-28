@@ -1,7 +1,24 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p0
+  - auth
+  - role
+  - capability
+  - rbac
+aliases:
+  - role 2단 분리
+  - capability
+  - RBAC
+  - ABAC
+  - ReBAC
+---
+
 # role 2단 분리와 capability 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [architecture.md](../architecture.md) §3.2 G1/G2 설계 목표 · §4 D1/D2/D3 · §5.3 RBAC/ABAC/ReBAC · [schema-reference.md](../schema-reference.md) §D.4 membership · §D.6 delegation_grant
+> **연관 문서**: [[architecture|architecture.md]] §3.1 불변식, §4 D1-D3, §5.3 RBAC/ABAC/ReBAC · [[schema-reference|schema-reference.md]] §D.4 membership, §D.6 delegation_grant
 
 `platform_db`의 role 체계는 현재 "아직 academy에 묶여 있는 상태"와 "멀티서비스를 향한 설계 목표" 사이 중간 어딘가에 있습니다. 이 문서는 현재 상태의 문제, 목표 구조, 그리고 capability가 무엇인지를 설명합니다.
 
@@ -21,7 +38,7 @@ CREATE TABLE membership (
 );
 ```
 
-TEACHER, STUDENT, PARENT는 학원(academy) 서비스 전용 개념입니다. 이 테이블은 `platform_db`, 즉 academy/agent/market/store/fitness가 **모두 공유하는 공통 DB**에 있습니다.
+TEACHER, STUDENT, PARENT는 학원(academy) 서비스 전용 개념입니다. 이 테이블은 `platform_db`, 즉 academy/agent/market/store/fitness가 **모두 공유하는 공통 DB**에 있습니다. (org_pk 기반 [[multitenancy-rls-explainer|멀티테넌시]] 행 격리가 전제입니다)
 
 **문제 1: 다른 서비스에서 이 role이 무의미하다.**
 
@@ -144,7 +161,7 @@ const ROLE_PERMISSION = {
 };
 ```
 
-이 상수를 기반으로 Gate C에서 CASL ability 객체를 만들어 권한을 판단합니다.
+이 상수를 기반으로 [[gate-abc-flow-explainer|Gate C]]에서 CASL ability 객체를 만들어 권한을 판단합니다. `entitlement` 파라미터는 [[gate-b-entitlement-explainer|Gate B]]가 통과한 뒤 전달되는 값입니다.
 
 ```typescript
 // Gate C: CASL ability 빌드 (단순화한 예시)
@@ -374,3 +391,14 @@ const canDo = ability.can('approve', lecture);
 ## 마치며
 
 현재 코드베이스에는 `membership.role` ENUM이 academy 어휘를 담고 있고 `delegation_grant.capability`도 6종 CHECK로 고정되어 있습니다. 이 상태가 현재 academy MVP에서는 동작하지만, 새 서비스를 붙일 때는 바뀌어야 합니다. 코드에서 role과 capability를 다룰 때 "이게 platform-level인가, service-level인가"를 의식하는 습관을 지금부터 들여두면, phase-17 마이그레이션 시 훨씬 적은 수정으로 전환을 완료할 수 있습니다.
+
+---
+
+## 연결된 개념
+
+- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — Gate C가 전체 3-gate에서 어디에 위치하는지
+- [[gate-b-entitlement-explainer|Gate B & 엔타이틀먼트]] — Gate B(이용권) vs Gate C(세부 정책) 차이
+- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk 격리와 role 체계의 관계
+> 소스 문서
+- [[architecture]] — §3.1 불변식, §4 D1/D2/D3 결정, §5.3 RBAC/ABAC/ReBAC 정의
+- [[schema-reference]] — D.4 membership DDL, D.6 delegation_grant DDL

@@ -1,7 +1,23 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p1
+  - schema
+  - mysql
+  - ddl
+  - design-decision
+aliases:
+  - ENUM vs VARCHAR
+  - D6 원칙
+  - CHECK constraint
+  - 온라인 DDL
+---
+
 # ENUM vs VARCHAR+CHECK (D6 원칙) 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [architecture.md](../architecture.md) §4 D6, [schema-reference.md](../schema-reference.md) §D.9, §K
+> **연관 문서**: [[architecture]] §4 D6, [[schema-reference]] §D.9, §K
 
 `platform_db`에서 서비스 식별자(`service` 컬럼)는 ENUM 대신 `VARCHAR(50) + CHECK constraint`로 설계되어 있습니다. 처음 보면 "ENUM이 더 간단하지 않나?" 싶겠지만, 여기엔 운영 장애를 막기 위한 명확한 이유가 있습니다.
 
@@ -39,7 +55,7 @@ ALTER TABLE product
 
 ---
 
-## Q2. "테이블 락(lock)"이 뭔가요? ENUM 변경이 왜 서비스를 멈추게 하나요?
+## Q2. "[[online-ddl-migration-explainer|테이블 락]](lock)"이 뭔가요? ENUM 변경이 왜 서비스를 멈추게 하나요?
 
 테이블 락은 "이 테이블 지금 공사 중이니 아무도 읽거나 쓰지 말것"을 의미합니다.
 
@@ -143,7 +159,7 @@ CONSTRAINT chk_entitlement_service
 **여전히 ENUM으로 남아있는 컬럼들:**
 
 ```sql
--- org_subscription.pg_provider
+-- org_subscription.pg_provider (→ [[review-checklist]] P1-6 마이그레이션 계획 참조)
 pg_provider ENUM('TOSS','STRIPE','PAYPAL','MANUAL') NOT NULL
 
 -- payment_ledger.pg_provider
@@ -251,3 +267,14 @@ ALTER TABLE product
 ```
 
 이 두 줄의 DDL이 운영 무중단으로 실행된다는 것이 D6의 핵심 가치입니다.
+
+---
+
+## 연결된 개념
+
+- [[online-ddl-migration-explainer|온라인 DDL & 마이그레이션]] — 테이블 락이 서비스에 미치는 영향 상세
+- [[index-design-explainer|인덱스 설계]] — CHECK constraint와 인덱스의 조합
+> 소스 문서
+- [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 외부 자문)
+- [[schema-reference]] — D.9 product (service 컬럼 예시), D.16-D.18 (pg_provider ENUM 미적용 사례)
+- [[review-checklist]] — P1-6 pg_provider ENUM → VARCHAR+CHECK 마이그레이션 계획

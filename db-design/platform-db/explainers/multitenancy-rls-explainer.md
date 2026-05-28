@@ -1,7 +1,23 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p0
+  - multitenancy
+  - security
+  - rls
+  - mysql
+aliases:
+  - 멀티테넌시
+  - RLS
+  - Pool 모델
+  - org_pk 격리
+---
+
 # Pool 모델 멀티테넌시와 RLS 개념 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`architecture.md §8`](../architecture.md) · [`schema-reference.md §G`](../schema-reference.md)
+> **연관 문서**: [[architecture|architecture.md §8]] · [[schema-reference|schema-reference.md §G]]
 
 "멀티테넌트", "RLS", "Pool 모델" — `platform_db` 코드를 처음 보면 이 단어들이 낯설게 느껴집니다. 이 문서는 우리 시스템이 왜 이 구조를 택했고, 어떻게 테넌트 간 데이터를 격리하는지 설명합니다.
 
@@ -85,7 +101,7 @@ PostgreSQL의 RLS는 강력한 안전망입니다. 개발자가 쿼리에서 `WH
 
 그래서 현재는 **앱 레이어에서 강제**합니다. 세 가지 방어선을 씁니다.
 
-**방어선 1: Gate 함수에 orgPk 파라미터 필수화**
+**방어선 1: [[gate-abc-flow-explainer|Gate A]] 함수에 orgPk 파라미터 필수화**
 
 ```typescript
 // 앱에서 강제 — 모든 Gate 함수에 orgPk 필수 파라미터
@@ -111,7 +127,7 @@ async function getEntitlementByService(
 ```sql
 -- 모든 도메인 테이블의 org_pk는 NOT NULL
 CREATE TABLE org_entitlement (
-  org_pk BIGINT UNSIGNED NOT NULL,  -- ← NULL이면 INSERT 자체 실패
+  org_pk [[pk-ulid-strategy-explainer|BIGINT pk]] UNSIGNED NOT NULL,  -- ← NULL이면 INSERT 자체 실패
   ...
 );
 ```
@@ -311,3 +327,15 @@ T4: ISMS-P/GDPR 계약 체결
 3. cross-tenant 집계가 필요하면 `internal/` 모듈에서만 해야 합니다
 
 새 기능을 만들 때 DB 쿼리를 작성한다면 "이 쿼리에 org_pk 조건이 있나?"를 반드시 확인하세요. CI 린트가 아직 완성되지 않았기 때문에, 지금은 코드 리뷰에서 서로 체크해주는 것이 중요합니다.
+
+---
+
+## 연결된 개념
+
+- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — Gate A에서 org_pk 바인딩이 일어나는 위치
+- [[pk-ulid-strategy-explainer|BIGINT pk + ULID public_id]] — org_pk(BIGINT)가 격리 키로 쓰이는 이유
+- [[index-design-explainer|인덱스 설계]] — org_pk가 모든 복합 인덱스 첫 컬럼인 이유
+- [[pipa-consent-explainer|PIPA 동의]] — 테넌트별 동의 데이터 격리의 법적 맥락
+> 소스 문서
+- [[architecture]] — §8 멀티테넌시 & 격리, §4 D10 (RLS 없음 → CI 린트 보강)
+- [[schema-reference]] — G.1-G.2 멀티테넌시 격리 현황

@@ -1,7 +1,25 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p1
+  - compliance
+  - pipa
+  - consent
+  - legal
+  - korea
+aliases:
+  - PIPA
+  - 개인정보 동의
+  - user_consent_event
+  - 동의 철회
+  - 14세 미만
+---
+
 # PIPA 개인정보 동의 요건 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`schema-reference.md` §I.1, §I.2](../schema-reference.md) · [`architecture.md` §7, §12.6](../architecture.md)
+> **연관 문서**: [[schema-reference]] §I.1, §I.2 · [[architecture]] §7, §12.6
 
 동의 처리는 "그냥 체크박스 결과 저장하면 되는 거 아닌가?"라고 생각하기 쉽습니다. 하지만 한국 개인정보보호법(PIPA)은 생각보다 구체적인 요건을 요구합니다. 이 문서는 왜 `user_consent_event`가 단순한 boolean 컬럼이 아니라 이벤트 로그 테이블인지, 그 이유를 설명합니다.
 
@@ -86,7 +104,7 @@ append-only 원칙:
 
 이 테이블은 DB 계정 권한 설계에서도 반영됩니다. 애플리케이션 계정(`platform_rw`)에는 INSERT 권한만 부여하고 UPDATE/DELETE 권한을 아예 없애는 것이 목표입니다. 설령 서버가 해킹당하더라도 과거 동의 이력을 조작할 수 없게 됩니다.
 
-미래에는 `prev_hash`/`row_hash` 컬럼으로 **해시 체이닝**도 도입됩니다. 각 행이 이전 행의 해시를 포함하게 만들어, 중간 행을 삭제하거나 수정하면 해시 불일치로 조작을 감지할 수 있습니다. (현재는 P1 미구현 상태입니다.)
+미래에는 `prev_hash`/`row_hash` 컬럼으로 **[[audit-hash-chain-explainer|해시 체이닝]]**도 도입됩니다. 각 행이 이전 행의 해시를 포함하게 만들어, 중간 행을 삭제하거나 수정하면 해시 불일치로 조작을 감지할 수 있습니다. (현재는 P1 미구현 상태입니다.)
 
 > 💡 **한 줄 요약**: 동의 이벤트 행은 법적 증거이므로 변조되면 안 됩니다. append-only + DB 권한 제한 + 해시 체이닝으로 무결성을 보장합니다.
 
@@ -240,7 +258,7 @@ Firebase 인증도 제3자 제공에 해당합니다. Firebase는 구글(미국)
 
 ---
 
-## Q7. 동의 철회가 JWT stale 문제와 어떻게 연결되나요?
+## Q7. 동의 철회가 [[gate-abc-flow-explainer|Gate 흐름]]의 JWT stale 문제와 어떻게 연결되나요?
 
 JWT(JSON Web Token)는 서버가 발급한 인증 토큰입니다. 기본 유효 시간이 1시간이라면, 발급 후 1시간 동안은 DB를 조회하지 않고도 유효한 것으로 처리합니다. 여기서 문제가 생깁니다.
 
@@ -301,3 +319,15 @@ user_consent_event INSERT (action='REVOKED')
 - **hash chain (P1)**: `prev_hash`/`row_hash`로 위변조 감지 예정
 
 이 구조 덕분에 사용자가 "나는 그 약관에 동의한 적 없다"고 주장해도, "2025-06-01 14:23에 v2025-06 약관에 동의하셨습니다"라고 정확히 응답할 수 있습니다. 그게 바로 이 테이블이 존재하는 이유입니다.
+
+---
+
+## 연결된 개념
+
+- [[audit-hash-chain-explainer|audit_log 해시 체인]] — user_consent_event의 prev_hash/row_hash 무결성 보호
+- [[break-glass-explainer|Break-glass 긴급 접근]] — 동의 없는 비상 접근의 법적 리스크
+- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — 테넌트별 동의 데이터 격리
+- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — 동의 철회 후 JWT stale 문제와 @VerifyOnDb의 관계
+> 소스 문서
+- [[architecture]] — §7 정책 & 동의 전체, §12.6 정보주체 권리 운영
+- [[schema-reference]] — I.1-I.2 user_consent_event DDL

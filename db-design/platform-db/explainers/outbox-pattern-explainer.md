@@ -1,7 +1,23 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p1
+  - event
+  - async
+  - pattern
+  - reliability
+aliases:
+  - Outbox 패턴
+  - transactional outbox
+  - outbox_event
+  - dual write problem
+---
+
 # Outbox 패턴 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [architecture.md](../architecture.md) §3.1 불변식 #7, §6.2, [schema-reference.md](../schema-reference.md) §D.19, §F.1
+> **연관 문서**: [[architecture]] §3.1 불변식 #7, §6.2, [[schema-reference]] §D.19, §F.1
 
 결제 성공 후 이메일을 보내고, 알림을 전송하고, 검색 인덱스를 갱신해야 합니다. 이런 "부수효과"를 어떻게 안정적으로 처리할까요? Outbox 패턴은 이 문제에 대한 검증된 해법입니다.
 
@@ -356,7 +372,7 @@ async function processEvent(event: OutboxEvent) {
 }
 ```
 
-> 💡 **한 줄 요약**: 워커는 주기적으로 PENDING 이벤트를 가져와서 처리하고 SENT로 마킹합니다. 실패하면 FAILED로 남고 재처리할 수 있습니다. DB에 기록되어 있으니 어떤 이벤트가 미처리 상태인지 항상 알 수 있습니다.
+> 💡 **한 줄 요약**: 워커는 주기적으로 PENDING 이벤트를 가져와서 처리하고 SENT로 마킹합니다. 실패하면 FAILED로 남고 재처리할 수 있습니다. DB에 기록되어 있으니 어떤 이벤트가 미처리 상태인지 항상 알 수 있습니다. at-least-once 발행과 [[idempotency-key-explainer|멱등성]] 소비의 조합으로 중복 처리를 방지합니다.
 
 ---
 
@@ -369,7 +385,7 @@ outbox_event    → "앞으로 할 일 목록" (작업 큐)
 billing_event   → "이미 일어난 일 기록" (감사 로그)
 ```
 
-**`billing_event`** — 구독 lifecycle의 감사 로그
+**`billing_event`** — [[subscription-lifecycle-explainer|구독]] lifecycle의 감사 로그
 
 ```sql
 CREATE TABLE billing_event (
@@ -464,3 +480,14 @@ case 'your.event.type':
 ```
 
 현재 Kafka 같은 메시지 브로커는 없지만, 나중에 도입하더라도 outbox_event를 CDC로 읽어서 Kafka에 넣는 방식으로 자연스럽게 확장할 수 있습니다. Outbox가 그 확장을 위한 토대입니다.
+
+---
+
+## 연결된 개념
+
+- [[idempotency-key-explainer|멱등성 키]] — at-least-once 발행과 멱등 소비의 조합
+- [[webhook-processing-explainer|PG 웹훅 처리]] — PG webhook(인바운드) vs outbox(아웃바운드) 역할 구분
+- [[subscription-lifecycle-explainer|구독 상태 머신]] — subscription.activated 이벤트가 outbox에 INSERT되는 시점
+> 소스 문서
+- [[architecture]] — §3.1 불변식 #7 (strong consistency = 단일 트랜잭션, async = outbox), §6.2 결제 단일 트랜잭션
+- [[schema-reference]] — D.19 outbox_event DDL, F.1 결제-권한 단일 트랜잭션 SQL

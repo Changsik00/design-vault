@@ -1,6 +1,6 @@
 # platform_db — 요구사항 & 검증
 
-> 작성일: 2026-05-28 · 유지: dennis  
+> 작성일: 2026-05-28 · 유지: changsik  
 > 진입점: [`architecture.md`](architecture.md) · 설계: [`schema-reference.md`](schema-reference.md)
 >
 > **이 문서**: "이 설계가 요구를 충족하는가"를 두 각도로 검증한다.  

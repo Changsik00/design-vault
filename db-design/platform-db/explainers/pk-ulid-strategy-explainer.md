@@ -1,7 +1,22 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p0
+  - identity
+  - ulid
+  - pk
+aliases:
+  - ULID
+  - public_id
+  - BIGINT pk
+  - 식별자 전략
+---
+
 # BIGINT pk + ULID public_id 전략 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`schema-reference.md §B`](../schema-reference.md) · [`architecture.md §3.1 불변식 #2`](../architecture.md)
+> **연관 문서**: [[schema-reference|schema-reference.md §B]] · [[architecture|architecture.md §3.1 불변식 #2]]
 
 `platform_db`의 모든 테이블에는 `pk`와 `public_id`가 함께 존재합니다. 처음 스키마를 보면 "왜 ID가 두 개야?"라는 의문이 자연스럽게 생깁니다. 이 문서는 그 이유와 실제 사용 방법을 설명합니다.
 
@@ -103,7 +118,7 @@ const newUser = await db.insert(identityUser).values({
 **문제 1: 정보 유출 (열거 공격)**
 
 ```
-GET /organizations/1     → NEXT Academy 본사
+GET /organizations/1     → 행복학원 본사
 GET /organizations/2     → 강남 수학학원
 GET /organizations/3     → 목동 영어학원
 ...
@@ -158,7 +173,7 @@ async function getLecture(orgPublicId: string, lecturePublicId: string) {
   const lecture = await db.query.lecture.findFirst({
     where: and(
       eq(lecture.publicId, lecturePublicId),
-      eq(lecture.orgPk, org.pk)  // ← pk로 테넌트 격리
+      eq(lecture.orgPk, org.pk)  // ← pk로 [[multitenancy-rls-explainer|멀티테넌시]] 격리
     )
   });
 
@@ -197,7 +212,7 @@ ASCII 흐름도로 표현하면:
 
 ---
 
-## Q5. firebase_uid는 또 뭔가요? pk, public_id, firebase_uid — 세 개나 있는 이유가 있나요?
+## Q5. firebase_uid는 또 뭔가요? pk, public_id, [[gate-abc-flow-explainer|Gate 흐름]]에서 firebase_uid — 세 개나 있는 이유가 있나요?
 
 각각 완전히 다른 역할을 합니다:
 
@@ -273,3 +288,13 @@ Firebase ──[firebase_uid]──▶ identity_user.firebase_uid (조회 키)
 코드를 작성할 때 가장 실수하기 쉬운 부분은 API 응답에 `pk`가 슬쩍 섞이는 것입니다. 응답 DTO를 작성할 때 `id` 필드가 숫자인지 문자열 ULID인지 한 번 더 확인하는 습관이 중요합니다.
 
 세 필드는 `schema-reference.md §B` 식별자 체계 표에 정리되어 있고, 불변식 #1·#2는 `architecture.md §3.1`에서 PR 반려 기준으로 명시되어 있습니다.
+
+---
+
+## 연결된 개념
+
+- [[gate-abc-flow-explainer|Gate A/B/C 전체 흐름]] — firebase_uid → user_pk 변환이 Gate 흐름의 시작점
+- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk가 멀티테넌시 격리 키인 이유
+> 소스 문서
+- [[architecture]] — §3.1 불변식 #2 (내부 PK는 BIGINT, 외부 노출은 ULID)
+- [[schema-reference]] — B. 식별자 체계, D.1 identity_user DDL

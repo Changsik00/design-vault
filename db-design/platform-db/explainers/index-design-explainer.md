@@ -1,7 +1,23 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p1
+  - db-ops
+  - mysql
+  - index
+  - performance
+aliases:
+  - 인덱스 설계
+  - 복합 인덱스
+  - 커버링 인덱스
+  - 풀스캔
+---
+
 # 인덱스 설계 원리 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`schema-reference.md` §D.12, §D.18, §E.2](../schema-reference.md) · [`architecture.md` §3 불변식 #9](../architecture.md)
+> **연관 문서**: [[schema-reference]] §D.12, §D.18, §E.2 · [[architecture]] §3 불변식 #9
 
 인덱스는 DB 성능의 핵심입니다. 잘 만든 인덱스 하나가 100ms짜리 쿼리를 1ms로 만들고, 없거나 잘못 만든 인덱스 하나가 서버 전체를 느리게 만듭니다. `platform_db`에는 목적별로 설계된 인덱스가 여러 개 있는데, 각각 왜 그렇게 생겼는지를 이해하면 새 기능을 만들 때도 인덱스를 올바르게 설계할 수 있습니다.
 
@@ -40,7 +56,7 @@ MySQL InnoDB는 인덱스를 **B-Tree(균형 이진 트리)** 구조로 저장�
 
 **둘째, 풀스캔은 다른 쿼리도 느리게 만듭니다.** DB는 디스크 I/O와 CPU를 공유합니다. 한 쿼리가 풀스캔으로 디스크를 독점하면 다른 쿼리들이 줄을 서야 합니다.
 
-**셋째, 핫패스(hot path)에서는 치명적입니다.** `Gate B`(서비스 이용 가능 여부 확인)는 **모든 API 요청마다 실행**됩니다. 사용자가 버튼 하나 누를 때마다 쿼리가 실행되는데, 여기서 풀스캔이 일어나면:
+**셋째, 핫패스(hot path)에서는 치명적입니다.** `[[gate-b-billing-grace-explainer|Gate B]]`(서비스 이용 가능 여부 확인)는 **모든 API 요청마다 실행**됩니다. 사용자가 버튼 하나 누를 때마다 쿼리가 실행되는데, 여기서 풀스캔이 일어나면:
 
 ```
 사용자 100명이 동시에 요청
@@ -153,7 +169,7 @@ WHERE valid_until < NOW()
   AND status = 'ACTIVE';
 ```
 
-이 쿼리는 Gate B 쿼리와 다른 패턴입니다. Gate B는 "특정 org_pk"로 좁히지만, 배치는 **날짜 기준으로 전체 테이블**을 봅니다. 그래서 인덱스도 다르게 설계됩니다.
+이 쿼리는 Gate B 쿼리와 다른 패턴입니다. Gate B는 "특정 org_pk"([[multitenancy-rls-explainer|멀티테넌시]] 격리 선두 컬럼)로 좁히지만, 배치는 **날짜 기준으로 전체 테이블**을 봅니다. 그래서 인덱스도 다르게 설계됩니다.
 
 ```sql
 INDEX idx_entitlement_expiry (valid_until, status)
@@ -244,3 +260,14 @@ INDEX idx_entitlement_expiry (valid_until, status)
 - 재처리 워커처럼 상태 + 시간 기준 → 상태 컬럼이 선두인 복합 인덱스
 
 새 기능을 만들 때 쿼리를 작성했다면 반드시 `EXPLAIN`으로 인덱스가 제대로 타는지 확인하는 습관을 들이세요. `type: ALL`이 보이면 인덱스 추가를 검토해야 합니다.
+
+---
+
+## 연결된 개념
+
+- [[gate-b-billing-grace-explainer|Gate B 유예 기간 설계]] — idx_org_service_status에 valid_until이 포함된 설계 결정
+- [[multitenancy-rls-explainer|Pool 모델 + RLS]] — org_pk가 모든 복합 인덱스 선두인 이유
+- [[partitioning-explainer|DB 파티셔닝]] — 파티션과 인덱스를 함께 설계하는 방법
+- [[enum-vs-varchar-check-explainer|ENUM vs VARCHAR+CHECK]] — CHECK constraint가 인덱스 설계에 미치는 영향
+> 소스 문서
+- [[schema-reference]] — D.12 Gate B 핫패스 인덱스, D.17 org_subscription 인덱스, D.18 pg_webhook 인덱스

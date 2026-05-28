@@ -1,7 +1,23 @@
+---
+tags:
+  - platform-db
+  - explainer
+  - p2
+  - security
+  - audit
+  - ops
+  - compliance
+aliases:
+  - break-glass
+  - 긴급 접근
+  - break_glass 플래그
+  - 비상 접근
+---
+
 # Break-glass 긴급 접근 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [`architecture.md` §9 보안, §12.4](../architecture.md) · [`schema-reference.md` §D.8 audit_log](../schema-reference.md)
+> **연관 문서**: [[architecture]] §9 보안, §12.4 · [[schema-reference]] §D.8 audit_log
 
 운영 중에 예기치 못한 장애가 발생하면 "DB를 직접 수정해야 한다"는 압박을 받는 순간이 옵니다. 이 문서는 그 상황을 어떻게 안전하게 다루는지, 왜 아무나 아무 때나 DB를 건드리면 안 되는지를 설명합니다.
 
@@ -64,7 +80,7 @@ UPDATE org_entitlement SET status = 'ACTIVE';  -- WHERE 빠짐!
 
 ## Q3. break_glass 플래그가 audit_log에 있는 이유가 뭔가요?
 
-`audit_log` 테이블에는 모든 시스템 이벤트가 기록됩니다. 그 중에서 break-glass를 통해 이뤄진 행위는 특별히 표시해야 합니다.
+[[audit-hash-chain-explainer|audit_log]] 테이블에는 모든 시스템 이벤트가 기록됩니다. 그 중에서 break-glass를 통해 이뤄진 행위는 특별히 표시해야 합니다.
 
 ```sql
 -- audit_log 테이블의 break_glass 컬럼
@@ -164,7 +180,7 @@ Step 5: 사후 리뷰 (팀 전체)
 | audit_log actor | 운영자 본인 pk | (금지이므로 없음) |
 | 사용 상황 | 장애 대응, 데이터 정정 | 고객 지원 "사용자 화면 보기" (금지) |
 
-임퍼소네이션이 위험한 이유:
+임퍼소네이션이 위험한 이유([[pipa-consent-explainer|PIPA]] §3, §59 위반):
 
 ```
 임퍼소네이션 시나리오 (우리 시스템에서 금지):
@@ -278,3 +294,13 @@ Break-glass는 "통제된 비상구"입니다. 없으면 장애 대응이 불가
 현재 break-glass는 P1 구현 대상입니다. 서비스 규모가 커지고 운영팀이 생기면, 이 절차를 가장 먼저 정비해야 합니다. ISMS-P 심사에서 빠지지 않고 점검하는 항목이기도 합니다.
 
 가장 중요한 원칙 하나만 기억하세요: **"절대 silent 금지"**. 모든 break-glass 행위는 기록으로 남습니다.
+
+---
+
+## 연결된 개념
+
+- [[audit-hash-chain-explainer|audit_log 해시 체인]] — break_glass=true 이벤트의 무결성 보장
+- [[pipa-consent-explainer|PIPA 동의]] — 동의 없는 비상 접근이 가져오는 법적 리스크
+> 소스 문서
+- [[architecture]] — §9 보안, §12.4 Break-glass 절차
+- [[schema-reference]] — D.8 audit_log DDL (break_glass 컬럼, idx_audit_break_glass 인덱스)
