@@ -131,7 +131,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 1. **Firebase = 인증, 인가 = 우리 DB.** `firebase_uid`는 조회 키일 뿐 PK/FK 아님.
 2. **내부 PK는 BIGINT, 외부 노출은 ULID(`public_id`).** 시퀀셜 PK를 URL·API에 노출 금지.
-3. **모든 도메인 테이블은 `org_pk NOT NULL`.** 예외 없음 — 테넌트 경계는 불변식.
+3. **테넌트 데이터를 담는 모든 도메인 테이블은 `org_pk NOT NULL`.** 예외는 3부류뿐 — ① 전역 카탈로그(`product`·`product_sku`·`plan_definition`) ② 플랫폼 이벤트 버스(`pg_webhook_event`·`outbox_event`) ③ `audit_log`(SYSTEM actor 이벤트는 org 무관, nullable). `user_consent_event`는 user-scoped, `subscription_item`은 부모로 격리. 그 외 누락 = PR 반려([[schema-reference]] §G.1).
 4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. entitlement는 billing의 authorization projection이며 Gate B의 유일 진실 원천.
 5. **`service`는 `VARCHAR(50)` + `CHECK`.** ENUM 아님. 새 서비스 = CHECK 1줄 추가([[service-extensibility]]). 현재: `ACADEMY`·`MARKET`·`AGENT`·`YOUTUBE`·`STORE`.
 6. **cross-DB는 아래로만.** `service_db → platform_db` 읽기 OK. 옆으로(`academy_db → store_db`) 금지. cross-schema FK 금지([[fk-strategy]]).
@@ -226,7 +226,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 > 운영 **모델·절차·신뢰성 계약·관측 KPI**는 [[operability]](O1~O6). 여기는 아키텍처가 강제하는 **운영 규율**만.
 
-- **append-only 강제**: `audit_log`·`user_consent_event`·`payment_ledger`는 INSERT만 — 앱 DB 계정에서 UPDATE/DELETE GRANT 제거([[schema-reference]] §M).
+- **append-only 강제**: `audit_log`·`user_consent_event`·`payment_ledger`·`billing_event`는 INSERT만 — 전용 INSERT-only 계정(`audit_append`·`consent_append`·`ledger_append`)으로만 write하고 `platform_rw`는 해당 4종에 UPDATE GRANT 미보유([[schema-reference]] §M). 주석이 아니라 GRANT가 강제.
 - **권한 변경**: 역할 *배정* 변경 = DB UPDATE + `perm_version` bump(즉시). 역할 *룰*(`ROLE_PERMISSION`) 변경 = **코드 배포**.
 - **Break-glass는 silent 금지**: 전건 audit + 만료 자동회수 + 사후 리뷰([[break-glass]] · [[operator-plane]]).
 - **운영자는 tenant role이 아님**: 별도 신원 평면 + cross-tenant는 아키텍처 분리·break-glass 경유([[operator-plane]]).

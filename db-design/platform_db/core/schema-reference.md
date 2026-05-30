@@ -103,7 +103,8 @@ identity_user (1)────(1) user_profile
       │ N
       │
     membership ────── (N) organization (1)
-      │                        │
+      │  │                     │
+      │  └ service_membership (user_pk, org_pk, service) — membership과 1:1 + service 차원
       │                        │
     membership_invite           │ N
                                 │
@@ -138,6 +139,10 @@ platform_db 이벤트 버스:
 | `user_profile.user_pk` | `identity_user.pk` | `fk_up_user` |
 | `membership.user_pk` | `identity_user.pk` | `fk_mbr_user` |
 | `membership.org_pk` | `organization.pk` | `fk_mbr_org` |
+| `service_membership.user_pk` | `identity_user.pk` | `fk_svc_mbr_user` |
+| `service_membership.org_pk` | `organization.pk` | `fk_svc_mbr_org` |
+| `membership_invite.org_pk` | `organization.pk` | `fk_invite_org` |
+| `membership_invite.invited_by` | `identity_user.pk` | `fk_invite_inviter` |
 | `delegation_grant.org_pk` | `organization.pk` | `fk_grant_org` |
 | `delegation_grant.grantor_pk` | `identity_user.pk` | `fk_grant_grantor` |
 | `delegation_grant.grantee_pk` | `identity_user.pk` | `fk_grant_grantee` |
@@ -259,15 +264,18 @@ CREATE TABLE service_membership (
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   PRIMARY KEY (user_pk, org_pk, service),
   INDEX idx_service_membership_org_service (org_pk, service),
-  INDEX idx_service_membership_user_service (user_pk, service)
+  INDEX idx_service_membership_user_service (user_pk, service),
+  CONSTRAINT chk_svc_mbr_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
+  CONSTRAINT fk_svc_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk),
+  CONSTRAINT fk_svc_mbr_org  FOREIGN KEY (org_pk)  REFERENCES organization(pk)
 );
 ```
 
 **설계 포인트**:
 - 서비스별 도메인 역할 격리(D1) — academy/market/agent 역할 어휘 충돌 방지.
 - `role_code VARCHAR` → 새 서비스 추가 시 마이그레이션 없이 확장(role 어휘는 코드 상수 `ROLE_PERMISSION[service]`가 권위).
-- 조회: `WHERE user_pk=? AND org_pk=? AND service='ACADEMY'` → `role_code` 반환.
-- `membership`과 1:1 대응(같은 user_pk/org_pk) + `service` 차원만 추가.
+- 조회: `WHERE user_pk=? AND org_pk=? AND service='ACADEMY' AND status='ACTIVE'` → `role_code` 반환. **SUSPENDED는 도메인 역할 미부여** — Gate C가 status 필터(§E.2). `membership.status`(테넌트 정지)와 독립: 서비스 단위 정지 가능.
+- `membership`과 1:1 대응(같은 user_pk/org_pk) + `service` 차원만 추가. FK로 고아 행 차단(§C.3).
 
 ## D.5 membership_invite
 
@@ -275,6 +283,7 @@ CREATE TABLE service_membership (
 CREATE TABLE membership_invite (
   pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   org_pk     BIGINT UNSIGNED NOT NULL,
+  service    VARCHAR(50)  NOT NULL,                   -- 수락 시 service_membership(PK에 service 포함)에 INSERT할 대상 서비스
   email      VARCHAR(255) NOT NULL,
   role_code  VARCHAR(50)  NOT NULL,                   -- ENUM → VARCHAR. 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
   token      CHAR(43)     NOT NULL,                   -- URL-safe base64(32bytes)
@@ -284,9 +293,16 @@ CREATE TABLE membership_invite (
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE KEY uq_membership_invite_token (token),
   INDEX idx_invite_org_status (org_pk, status),
-  INDEX idx_invite_email (email)
+  INDEX idx_invite_email (email),
+  CONSTRAINT chk_invite_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
+  CONSTRAINT fk_invite_org     FOREIGN KEY (org_pk)     REFERENCES organization(pk),
+  CONSTRAINT fk_invite_inviter FOREIGN KEY (invited_by) REFERENCES identity_user(pk)
 );
 ```
+
+**설계 포인트**:
+- **수락 절차(write 경로)**: 수락 시 단일 트랜잭션으로 (1) `membership` upsert(`platform_role`, 보통 MEMBER) + (2) `service_membership(user_pk, org_pk, service, role_code)` INSERT. `service`·`role_code`가 초대에 함께 있어야 **어느 서비스의 어느 역할**인지 결정 가능(D.4a PK `(user_pk, org_pk, service)` 충족).
+- 같은 org·service에 이미 멤버면 role_code 갱신(재초대). `status='ACCEPTED'`로 마킹.
 
 ## D.6 delegation_grant (ReBAC)
 
@@ -338,7 +354,7 @@ CREATE TABLE org_relation (
 ```sql
 CREATE TABLE audit_log (
   pk            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- AUTO_INCREMENT 필수
-  org_pk        BIGINT UNSIGNED,
+  org_pk        BIGINT UNSIGNED,                       -- nullable: actor_type='SYSTEM'(org 무관) 이벤트 허용 — 불변식 #3의 명시적 예외(§G.1)
   actor_type    ENUM('HUMAN','API_KEY','SYSTEM') NOT NULL,
   actor_pk      BIGINT UNSIGNED,
   api_key_pk    BIGINT UNSIGNED,                      -- api_key 구현 후 FK 추가 예정
@@ -532,7 +548,7 @@ CREATE TABLE billing_event (
 );
 ```
 
-**설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only.
+**설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only — §M `ledger_append` INSERT-only 계정으로 GRANT 강제.
 - `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, 후속 마이그레이션.
 - **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 (billing append-only 의도적 설계).
 
@@ -557,7 +573,7 @@ CREATE TABLE payment_ledger (
 );
 ```
 
-**설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지.
+**설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지 — §M `ledger_append` INSERT-only 계정으로 GRANT 강제(주석 아님).
 - `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
 - **FK 없음(의도적)**: billing 고write·append-only 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
@@ -656,7 +672,8 @@ if (!pass) throw PaymentRequiredException();
 ### Gate C — 정책 (CASL)
 
 ```typescript
-// RBAC: service_membership.role_code → ROLE_PERMISSION[service][roleCode] (코드 상수)
+// RBAC: service_membership(status='ACTIVE').role_code → ROLE_PERMISSION[service][roleCode] (코드 상수)
+//       SUSPENDED service_membership은 도메인 역할 미부여 (membership.status와 독립 — 서비스 단위 정지)
 // ReBAC: delegation_grant.capability (현행: 'ACADEMY.<action>' 네임스페이스)
 // ABAC: resource 소유권 (lecture.teacher_pk === userPk)
 ability = buildAbility(serviceRole, delegationGrants, entitlement);
@@ -764,11 +781,11 @@ ACTIVE   ──취소 요청──▶ CANCELED
 
 ## G.1 MySQL (platform_db) — 구현 현황
 
-모든 테이블: `org_pk` 컬럼으로 행 격리.
+테넌트 데이터를 담는 모든 도메인 테이블: `org_pk NOT NULL` 컬럼으로 행 격리. **예외 3부류**(불변식 #3): ① 전역 카탈로그 `product`·`product_sku`·`plan_definition`(테넌트 무관) ② 플랫폼 이벤트 버스 `pg_webhook_event`·`outbox_event`(org_pk 없음, aggregate로 추적) ③ `audit_log`(SYSTEM actor 이벤트는 org 무관 → nullable). `user_consent_event`는 user-scoped(`user_pk`), `subscription_item`은 부모 `org_subscription`으로 격리.
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 모든 테이블 `org_pk NOT NULL` | ✅ 구현됨 | `packages/db-platform/src/*/schema.ts` 검증 완료 |
+| 도메인 테이블 `org_pk NOT NULL`(예외 3부류) | ✅ 구현됨 | `packages/db-platform/src/*/schema.ts` 검증 완료 |
 | Gate 함수 전체 `orgPk` 파라미터 필수 | ✅ 구현됨 | `getActiveMembership(userPk, orgPk)` 등 |
 | cross-tenant 쿼리 CI 린트 | 🟡 미구현 (P1) | `@aiagent/db-platform` 패키지 내 쿼리 정적 분석 미완 |
 
@@ -943,7 +960,7 @@ CREATE TABLE user_consent_event (
   row_hash      CHAR(64),                           -- P1: 현재 row 전체 SHA-256 (위변조 감지)
   created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
   INDEX idx_consent_user_type (user_pk, consent_type, created_at)
-  -- UPDATE·DELETE 금지 (append-only)
+  -- UPDATE·DELETE 금지 (append-only) — §M `consent_append` INSERT-only 계정으로 GRANT 강제
 );
 ```
 
@@ -1039,10 +1056,25 @@ ALTER TABLE product
   DROP CONSTRAINT chk_product_service,
   ADD CONSTRAINT chk_product_service
     CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE','FITNESS'));
+
+-- service CHECK를 가진 테이블 전체 동반 변경: org_entitlement · product · service_membership · membership_invite
+ALTER TABLE service_membership
+  DROP CONSTRAINT chk_svc_mbr_service,
+  ADD CONSTRAINT chk_svc_mbr_service
+    CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE','FITNESS'));
+
+ALTER TABLE membership_invite
+  DROP CONSTRAINT chk_invite_service,
+  ADD CONSTRAINT chk_invite_service
+    CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE','FITNESS'));
+
+-- 신규 서비스가 위임 capability를 쓰면 delegation_grant.chk_capability(§D.6)에 'FITNESS.<action>' 추가도 동반
+-- (service_membership.role_code는 무마이그레이션 확장이나 capability CHECK는 §D.6대로 ALTER 필요 — EXT-2 비대칭)
 ```
 
 **온라인 DDL**: CHECK constraint 추가/변경은 InnoDB에서 테이블 락 없음.  
-**ENUM과의 차이**: ENUM은 `MODIFY COLUMN` 필요 → 대형 테이블 잠금 유발.
+**ENUM과의 차이**: ENUM은 `MODIFY COLUMN` 필요 → 대형 테이블 잠금 유발.  
+**동반 대상 체크리스트**: `service` CHECK 4곳(org_entitlement·product·service_membership·membership_invite) + 위임 사용 시 `delegation_grant.chk_capability`. 1곳이라도 빠지면 신규 서비스 row가 fail-closed로 거부됨.
 
 ---
 
@@ -1168,18 +1200,21 @@ CREATE TABLE store_purchase (
 
 | 계정 | 접근 DB | 권한 |
 |---|---|---|
-| `platform_rw` | `platform_db` | SELECT, INSERT, UPDATE (DELETE 금지) |
+| `platform_rw` | `platform_db` (append-only 4종 제외) | SELECT, INSERT, UPDATE (DELETE 금지) — `audit_log`·`payment_ledger`·`billing_event`·`user_consent_event`에는 UPDATE 미부여(테이블 단위 GRANT) |
 | `platform_ro` | `platform_db` | SELECT only (reporting, analytics) |
 | `academy_rw` | `academy_db` | SELECT, INSERT, UPDATE |
 | `academy_ro` | `academy_db` | SELECT only |
 | `agent_rw` | `agent_db` | SELECT, INSERT, UPDATE |
 | `market_rw` | `market_db` | SELECT, INSERT, UPDATE |
 | `store_rw` | `store_db` | SELECT, INSERT, UPDATE |
-| `audit_append` | `platform_db.audit_log` | INSERT only | 
+| `audit_append` | `platform_db.audit_log` | INSERT only |
+| `ledger_append` | `platform_db.payment_ledger`·`billing_event` | INSERT only |
+| `consent_append` | `platform_db.user_consent_event` | INSERT only |
 | `migrator` | 전체 | DDL 권한 (migration 실행 전용, 상시 접속 금지) |
 
 **원칙**:
 - cross-DB 접근 계정 없음. academy-api는 `academy_rw` + `platform_ro`만 사용
+- **append-only 4종 GRANT 강제**: `audit_log`·`payment_ledger`·`billing_event`·`user_consent_event`는 전용 INSERT-only 계정(`audit_append`·`ledger_append`·`consent_append`)으로만 write하고, `platform_rw`는 이 4개 테이블에 UPDATE를 **테이블 단위로 미부여**한다. → 주석이 아니라 GRANT가 위변조를 막음(architecture §4 'INSERT만' 단언이 DB로 참). 회귀는 GRANT 점검 CI로 방어(§N.2).
 - `DELETE` 권한: 어떤 계정에도 없음 (논리 삭제만 허용)
 - `DROP`, `TRUNCATE`: `migrator` 계정에만, CI/CD 파이프라인 내에서만 실행
 - 비밀번호: AWS Secrets Manager 관리, 90일 자동 로테이션
@@ -1196,7 +1231,7 @@ CREATE TABLE store_purchase (
 |---|---|---|
 | 테넌트 격리 | `org_pk NOT NULL` + 질의 필터 강제 | ✅ |
 | 결제 멱등 | `UNIQUE(idempotency_key)` · `UNIQUE(pg_provider, event_id)` | ✅ |
-| append-only | `audit_append` 계정 INSERT-only + 전 계정 DELETE 권한 0(§M) | 🟡 GRANT 점검 CI 필요 |
+| append-only 4종 | 전용 INSERT-only 계정(`audit_append`·`ledger_append`·`consent_append`) + `platform_rw` 테이블단위 UPDATE 미부여 + 전 계정 DELETE 0(§M) | ✅ (회귀는 GRANT 점검 CI, §N.2) |
 | 참조 정합 | 스키마 내 FK(cross-schema는 앱 검증, [[fk-strategy]]) | ✅ |
 | 자기참조 차단 | `chk_no_self_ref`(org_relation) | ✅ |
 | 결제↔권한 원자성 | 단일 InnoDB 트랜잭션(§F.1) | ✅ |
@@ -1206,7 +1241,7 @@ CREATE TABLE store_purchase (
 | 안전장치 | 현재 | 위험 | 보강 |
 |---|---|---|---|
 | **마지막 OWNER 보호** | 앱 트랜잭션만, **DB 무방비** | 유일 OWNER 삭제 → org 좀비화 | 앱 가드 + 모니터링(N.3) |
-| append-only 위반 | GRANT 누락 시 UPDATE 가능 | 감사 증거 훼손 | DDL 단계 GRANT 점검 CI |
+| append-only GRANT 회귀 | 신규 append-only 테이블·계정 추가 시 UPDATE 재유입 | 감사·금융 원장 훼손 | DDL 단계 GRANT 점검 CI(§M 4종 INSERT-only·platform_rw UPDATE 미보유 검증) |
 | 파티션 자동 추가 | 미구현(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
 | sweeper(outbox/webhook) | 미구현 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
 | webhook reconciliation | 미구현 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |

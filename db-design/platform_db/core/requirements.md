@@ -144,7 +144,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| TEN-1 | 모든 도메인 테이블 `org_pk NOT NULL` | R0 | 불변식 #3 | ✅ |
+| TEN-1 | 모든 도메인 테이블 `org_pk NOT NULL`(예외 3부류: 전역 카탈로그·플랫폼 이벤트·audit SYSTEM) | R0 | 불변식 #3 | ✅ |
 | TEN-2 | 모든 조회 `WHERE org_pk` 강제, 타 org는 404 | R1 | [[cross-tenant-separation]], BOLA | ✅ |
 | TEN-3 | cross-tenant 조회는 아키텍처 분리(`internal/`) | R1 | [[cross-tenant-separation]] | ✅ |
 | TEN-4 | MySQL RLS 부재 → CI 린트 보강 | R1 | 🟡 린트 미도입 | 🟡 |
