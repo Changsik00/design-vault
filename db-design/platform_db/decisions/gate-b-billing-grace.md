@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - Gate B 유예 설계 결정
+  - validUntil 복합체크
+  - status-only 이탈
+tags:
+  - platform-db
+  - decision
+  - billing
+  - gate-b
+  - grace
+---
+
 # Gate B 빌링 유예 설계 결정
 
 ## 배경

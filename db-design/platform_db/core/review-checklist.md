@@ -1,3 +1,15 @@
+---
+type: core
+aliases:
+  - 설계 검토 체크리스트
+  - review checklist
+tags:
+  - platform-db
+  - core
+  - review
+  - checklist
+---
+
 # platform_db 설계 검토 체크리스트
 
 > 생성: 2026-05-28  

@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - cross-tenant 분리
+  - Admin Role 거부
+  - 아키텍처 분리
+tags:
+  - platform-db
+  - decision
+  - multitenancy
+  - security
+  - isolation
+---
+
 # cross-tenant 조회 — Admin Role 거부, 코드 경로 분리
 
 > 상태: 채택 · 영역: 멀티테넌시 격리 · 형식: 비교 → 결정

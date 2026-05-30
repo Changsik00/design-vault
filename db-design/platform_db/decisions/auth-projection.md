@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - authorization projection
+  - org_entitlement 분리
+  - billing projection
+tags:
+  - platform-db
+  - decision
+  - billing
+  - authorization
+  - gate-b
+---
+
 # billing truth → authorization projection
 
 ## 배경

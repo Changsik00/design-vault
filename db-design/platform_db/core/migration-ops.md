@@ -1,3 +1,17 @@
+---
+type: core
+aliases:
+  - 마이그레이션 운영 가이드
+  - migration ops
+  - Drizzle migration
+tags:
+  - platform-db
+  - core
+  - migration
+  - ops
+  - drizzle
+---
+
 # platform_db 마이그레이션 운영 가이드
 
 > 작성일: 2026-05-28 · 대상: 운영 DB 최초 구축 또는 기존 DB 마이그레이션 담당자

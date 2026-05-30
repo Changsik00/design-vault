@@ -1,3 +1,17 @@
+---
+type: core
+aliases:
+  - 요구사항 추적표
+  - requirements
+  - BDD 시나리오
+tags:
+  - platform-db
+  - core
+  - requirements
+  - bdd
+  - traceability
+---
+
 # platform_db — 요구사항 & 검증
 
 > 작성일: 2026-05-28 · 유지: dennis  

@@ -1,3 +1,17 @@
+---
+type: core
+aliases:
+  - 스키마 레퍼런스
+  - schema reference
+  - DDL
+tags:
+  - platform-db
+  - core
+  - schema
+  - ddl
+  - erd
+---
+
 # platform_db — 스키마 레퍼런스
 
 > 작성일: 2026-05-28 · 유지: dennis  

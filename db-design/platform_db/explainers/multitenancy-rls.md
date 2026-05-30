@@ -10,7 +10,6 @@ tags:
 aliases:
   - 멀티테넌시
   - RLS
-  - Pool 모델
   - org_pk 격리
 ---
 

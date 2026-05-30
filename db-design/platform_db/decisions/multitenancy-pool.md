@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - Pool 모델
+  - 멀티테넌시 행 격리
+  - org_pk isolation
+tags:
+  - platform-db
+  - decision
+  - multitenancy
+  - isolation
+  - pool
+---
+
 # Pool 모델 — 공유 DB + org_pk 행 격리
 
 ## 배경

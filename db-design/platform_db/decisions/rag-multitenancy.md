@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - RAG 멀티테넌시
+  - Qdrant 격리
+  - shared collection
+tags:
+  - platform-db
+  - decision
+  - multitenancy
+  - rag
+  - qdrant
+---
+
 # RAG 멀티테넌시 — shared collection + payload 필터
 
 > 상태: 채택 · 영역: 벡터 저장소(Qdrant) 테넌트 격리 · 형식: 비교 → 결정

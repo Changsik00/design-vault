@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - Firebase 경계
+  - 인증 vs 인가
+  - AuthN AuthZ 분리
+tags:
+  - platform-db
+  - decision
+  - auth
+  - firebase
+  - identity
+---
+
 # Firebase = 인증만 — 인가는 우리 DB
 
 ## 배경

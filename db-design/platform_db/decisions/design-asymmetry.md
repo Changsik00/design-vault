@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - 비대칭 분리
+  - platform_db 경계
+  - asymmetric split
+tags:
+  - platform-db
+  - decision
+  - architecture
+  - boundary
+  - multitenancy
+---
+
 # 비대칭 분리 — platform_db(공통) + 서비스 DB(도메인)
 
 ## 배경

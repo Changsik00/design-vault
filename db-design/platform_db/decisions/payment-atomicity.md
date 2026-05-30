@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - 결제 단일 트랜잭션
+  - payment atomicity
+  - Kafka 거부
+tags:
+  - platform-db
+  - decision
+  - billing
+  - transaction
+  - consistency
+---
+
 # 결제↔권한 단일 트랜잭션
 
 ## 배경

@@ -11,7 +11,6 @@ aliases:
   - ENUM vs VARCHAR
   - D6 원칙
   - CHECK constraint
-  - 온라인 DDL
 ---
 
 # ENUM vs VARCHAR+CHECK (D6 원칙) 설명

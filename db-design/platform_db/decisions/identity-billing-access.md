@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - identity billing 접근 전략
+  - 공유 패키지 Option A
+  - platform 접근 경계
+tags:
+  - platform-db
+  - decision
+  - access-strategy
+  - package
+  - boundary
+---
+
 # identity/billing 접근 전략 — 공유 패키지(Option A) 채택, 분리 서비스(B) 전환 준비
 
 > 상태: 채택 · 영역: platform_db 접근 경계 · 형식: 비교 → 결정

@@ -1,3 +1,15 @@
+---
+type: core
+aliases:
+  - 아키텍처 핸드북
+  - platform_db architecture
+tags:
+  - platform-db
+  - core
+  - architecture
+  - design-handbook
+---
+
 # platform_db — 아키텍처 & 의사결정 핸드북
 
 > 작성일: 2026-05-28 · 유지: dennis

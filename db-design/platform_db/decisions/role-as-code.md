@@ -1,3 +1,18 @@
+---
+type: decision
+status: 채택
+aliases:
+  - role to action 코드 상수
+  - ROLE_PERMISSION
+  - RBAC 코드 상수
+tags:
+  - platform-db
+  - decision
+  - authorization
+  - rbac
+  - role
+---
+
 # role→action 매핑은 코드 상수
 
 ## 배경
