@@ -94,11 +94,10 @@ function isEntitlementValid(e: OrgEntitlement | null): boolean {
 
 ---
 
-## 관련 파일
+## 관련 문서
 
-| 파일 | 내용 |
-|------|------|
-| `packages/db-platform/src/gates.ts` | `isEntitlementValid` 구현체 |
-| `packages/db-platform/src/gates.test.ts` | 분기별 단위 테스트 18건 |
-| `packages/db-platform/drizzle/platform/0006_schema_p1_p3_fixes.sql` | `idx_entitlement_expiry(valid_until, status)` 인덱스 추가 |
-| `docs/platform_db/schema-reference.md` | `org_entitlement` 테이블 명세 |
+- [[auth-projection]] — Gate B가 읽는 org_entitlement가 billing의 투영인 이유
+- [[subscription-lifecycle]] — 구독 상태와 GRACE 전이
+> 소스 문서
+- [[schema-reference]] — §D.12 org_entitlement 명세, §E.2 Gate B 구현, idx_entitlement_expiry 인덱스
+- [[architecture]] — §3.1 불변식 #9 (status + valid_until 복합 체크)

@@ -104,9 +104,8 @@ projection 동기화가 신뢰할 수 없다면 (배치 실패가 잦다면):
 
 ## 관련 문서
 
-| 파일 | 내용 |
-|---|---|
-| `decisions/gate-b-billing-grace.md` | validUntil 복합체크 세부 결정 |
-| `core/schema-reference.md §D.12, §F` | org_entitlement DDL, billing 흐름 전체 |
-| `core/architecture.md §6` | 데이터 일관성 — 결제·권한 분리 원칙 |
-| `decisions/payment-atomicity.md` | subscription → entitlement 투영이 일어나는 트랜잭션 |
+- [[decisions/gate-b-billing-grace|gate-b-billing-grace]] — validUntil 복합체크 세부 결정 (2차 방어선)
+- [[payment-atomicity]] — subscription → entitlement 투영이 일어나는 트랜잭션
+> 소스 문서
+- [[schema-reference]] — §D.12 org_entitlement DDL, §F billing 흐름 전체
+- [[architecture]] — §6 데이터 일관성(결제·권한 분리 원칙)

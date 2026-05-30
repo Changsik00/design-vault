@@ -52,7 +52,7 @@
 |---|------|------|------|
 | P3-1 | **OWNER lockout 가드 완전 부재** — 유일 OWNER 탈퇴 시 org 좀비화, BDD만 있고 DB constraint/앱 가드 없음 | 🔴 | [[requirements]] P9-04 |
 | P3-2 | **break_glass 컬럼 없음** — meta_json 풀스캔, 자기승인 차단 불가 | ✅ audit_log DDL에 `break_glass BOOLEAN NOT NULL DEFAULT FALSE` + 인덱스 추가 | [[schema-reference]] §D.8 |
-| P3-3 | **Qdrant org_id(ULID) vs MySQL org_pk(BIGINT) 식별자 불일치** — 매핑 검증 없음, 다른 org 데이터 노출 가능 | 🔴 | [[architecture]] §2 ADR-044 |
+| P3-3 | **Qdrant org_id(ULID) vs MySQL org_pk(BIGINT) 식별자 불일치** — 매핑 검증 없음, 다른 org 데이터 노출 가능 | 🔴 | [[architecture]] §2; [[design-asymmetry]] |
 | P3-4 | **delegation_grant capability CHECK 6종 하드코딩** — 두 번째 서비스 추가 시 즉시 마이그레이션 블로킹 (G2 aspirational) | 🔴 | [[architecture]] §3.2 G2 |
 | P3-5 | **user_consent_event DDL에 PIPA §17 4요건 컬럼 없음** — meta_json, prev_hash, row_hash 미정의, 동의 무결성 증명 불가 | ✅ DDL에 `meta_json JSON`, `prev_hash CHAR(64)`, `row_hash CHAR(64)` 추가 (P1 활성화 예정 명기) | [[schema-reference]] §I.2 |
 

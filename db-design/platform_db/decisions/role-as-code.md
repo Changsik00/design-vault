@@ -101,8 +101,8 @@ DB 레지스트리 도입 트리거:
 
 ## 관련 문서
 
-| 파일 | 내용 |
-|---|---|
-| `core/architecture.md §4 D3` | 코드 상수 결정 원문 |
-| `core/architecture.md §5.3` | RBAC/ABAC/ReBAC 정의 |
-| `core/schema-reference.md §E.2 Gate C` | CASL ability 빌드 코드 |
+- [[role-capability]] — platform_role / service_role 2단 분리와 capability
+- [[gate-abc-flow]] — Gate C(정책)에서 ROLE_PERMISSION이 쓰이는 흐름
+> 소스 문서
+- [[architecture]] — §4 D3 코드 상수 결정, §5.3 RBAC/ABAC/ReBAC 정의
+- [[schema-reference]] — §E.2 Gate C CASL ability 빌드

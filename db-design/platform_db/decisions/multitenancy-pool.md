@@ -52,7 +52,7 @@ academy_org_2 DB → 서버 B
 
 ---
 
-## 우리 결정 — Pool 모델 (ADR-041)
+## 우리 결정 — Pool 모델
 
 **공유 DB + `org_pk` 행 격리**
 
@@ -119,9 +119,8 @@ T1~T4 트리거 도달 시 단계 실행:
 
 ## 관련 문서
 
-| 파일 | 내용 |
-|---|---|
-| `adr/ADR-041-multitenancy-db-strategy.md` | 원문 의사결정 기록 |
-| `adr/ADR-042-cross-tenant-query-separation.md` | cross-tenant 조회: Admin Role 거부 + 아키텍처 분리 |
-| `core/architecture.md §8` | 멀티테넌시 격리 전략 전문 |
-| `core/schema-reference.md §G` | Qdrant·Neo4j·Redis 격리 구현 현황 |
+- [[cross-tenant-separation]] — 격리를 의도적으로 벗어나는 cross-tenant 집계 처리
+- [[rag-multitenancy]] — 같은 "공유 + 격리" 철학의 Qdrant 적용
+> 소스 문서
+- [[architecture]] — §8 멀티테넌시 격리 전략 전문
+- [[schema-reference]] — §G Qdrant·Neo4j·Redis 격리 구현 현황

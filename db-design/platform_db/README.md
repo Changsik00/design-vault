@@ -9,8 +9,7 @@
 ```
 platform_db/
   core/        핵심 레퍼런스 — 아키텍처·스키마·요구사항·운영
-  decisions/   설계 결정 — 왜 이렇게 만들었나 (gate-b 스타일)
-  adr/         ADR 원문 — 의사결정 기록 (ADR-025 ~ ADR-044)
+  decisions/   설계 결정 — 무엇을 비교해 이렇게 정했나 (비교 → 결정)
   explainers/  온보딩 Q&A — DB 지식이 적은 개발자를 위한 설명 문서 21편
 ```
 
@@ -22,8 +21,7 @@ platform_db/
 |---|---|
 | 전체 그림이 보고 싶다 | [[architecture]] |
 | 스키마·DDL이 궁금하다 | [[schema-reference]] |
-| "왜 이렇게 설계했나?" | `decisions/` (아래 표) |
-| ADR 원문이 필요하다 | `adr/` (아래 표) |
+| "무엇을 비교해 이렇게 정했나?" | `decisions/` (아래 표) |
 | 처음 합류해 Q&A로 배우고 싶다 | `explainers/` (아래 목록 — P0부터) |
 
 ---
@@ -32,7 +30,7 @@ platform_db/
 
 | 파일 | 내용 |
 |---|---|
-| [[architecture]] | 아키텍처 핸드북 (진입점) — 8라운드 설계 여정, D1~D12 결정, 운영 플레이북, ADR 부록 |
+| [[architecture]] | 아키텍처 핸드북 (진입점) — 8라운드 설계 여정, D1~D12 결정, 운영 플레이북 |
 | [[schema-reference]] | ERD · DDL · 3-gate · billing 흐름 · 멀티테넌시 · 보안 · consent 모델 |
 | [[requirements]] | 요구사항 추적표 104건 + BDD 시나리오 Domain 1~10 |
 | [[review-checklist]] | 설계 검토 체크리스트 P0~P5 (42건, 23 완료) |
@@ -40,33 +38,35 @@ platform_db/
 
 ---
 
-## decisions/ — 설계 결정
+## decisions/ — 설계 결정 (비교 → 결정)
 
-> **배경 → 대안 → 우리 결정(이탈 근거) → 트레이드오프 → 향후 조건 → 관련 파일** 형식.
+> 형식: **결정 → 비교한 선택지(공정하게 장·단점) → 왜 이걸 골랐나 → 트레이드오프 → 전환 조건.**  
+> "역사적 맥락"이 아니라 "무엇을 비교해 이렇게 결정했는가"를 남긴다.
 
-| 파일 | 한 줄 요약 |
+### 경계 · 구조
+
+| 파일 | 비교 → 결정 |
 |---|---|
-| [[decisions/gate-b-billing-grace\|gate-b-billing-grace]] | Gate B validUntil 복합체크 — status-only 권고를 이탈한 이유 |
-| [[design-asymmetry]] | 비대칭 분리 — MSA도 모놀리스도 아닌 platform_db + 서비스 DB |
-| [[auth-projection]] | billing truth → auth projection — org_entitlement 분리 이유 |
-| [[payment-atomicity]] | 결제↔권한 단일 트랜잭션 — Kafka를 쓰지 않은 이유 |
-| [[multitenancy-pool]] | Pool 모델 — schema-per-tenant를 거부한 이유 |
-| [[firebase-boundary]] | Firebase = 인증만 — 인가를 우리 DB에 둔 이유 |
-| [[role-as-code]] | role→action 코드 상수 — DB 레지스트리를 거부한 이유 |
+| [[design-asymmetry]] | 완전 MSA vs 모놀리스 vs **비대칭 분리** (platform_db + 서비스 DB) |
+| [[identity-billing-access]] | 직접 Drizzle vs **공유 패키지(A)** vs HTTP 서비스(B) |
 
----
+### 멀티테넌시 · 격리
 
-## adr/ — ADR 원문
-
-| 파일 | 결정 |
+| 파일 | 비교 → 결정 |
 |---|---|
-| [[ADR-044-platform-db-boundary\|ADR-044]] | platform_db 경계: identity + billing + product 통합 |
-| [[ADR-041-multitenancy-db-strategy\|ADR-041]] | 멀티테넌시: 단일 DB + 행 격리 + 분리 트리거 |
-| [[ADR-042-cross-tenant-query-separation\|ADR-042]] | cross-tenant 조회: Admin Role 거부 + 아키텍처 분리 |
-| [[ADR-032-platform-identity-billing-access-strategy\|ADR-032]] | identity/billing 접근: Option A(공유 패키지) + Option B 전환 준비 |
-| [[ADR-035-rag-shared-collection-multitenancy\|ADR-035]] | Qdrant: shared collection + payload filter |
-| [[ADR-036-qdrant-neo4j-dual-index\|ADR-036]] | RAG 이중 색인: Qdrant(dense) + Neo4j(graph) |
-| [[ADR-025-domain-bounded-context\|ADR-025]] | 도메인 바운디드 컨텍스트 / YAGNI |
+| [[multitenancy-pool]] | schema-per-tenant vs DB-per-tenant vs **Pool 모델**(행 격리) |
+| [[cross-tenant-separation]] | Admin role 분기 vs **아키텍처 분리**(internal/) |
+| [[rag-multitenancy]] | collection-per-tenant vs **shared collection + payload 필터** |
+
+### billing · 권한
+
+| 파일 | 비교 → 결정 |
+|---|---|
+| [[auth-projection]] | billing 직접 조회 vs **authorization projection 분리** |
+| [[payment-atomicity]] | Kafka + eventual vs **단일 InnoDB 트랜잭션** |
+| [[decisions/gate-b-billing-grace\|gate-b-billing-grace]] | status-only vs **status + validUntil 복합 체크** |
+| [[firebase-boundary]] | Firebase Custom Claims로 인가 vs **인가는 우리 DB** |
+| [[role-as-code]] | DB role 레지스트리 vs **코드 상수**(ROLE_PERMISSION) |
 
 ---
 

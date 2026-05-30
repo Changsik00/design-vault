@@ -18,10 +18,10 @@
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| ARCH-1 | 공통 코어(identity/billing/product)는 단일 `platform_db`, 도메인은 서비스별 DB | R0 | ADR-044 | ✅ |
+| ARCH-1 | 공통 코어(identity/billing/product)는 단일 `platform_db`, 도메인은 서비스별 DB | R0 | [[design-asymmetry]] | ✅ |
 | ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음 | R0 | §6 단일 InnoDB 트랜잭션 | ✅ |
 | ARCH-3 | cross-DB는 서비스→platform 읽기만 허용, peer 금지, least-privilege DB 계정 | R0 | 불변식 #6 | ✅ |
-| ARCH-4 | `@aiagent/db-platform` 패키지로만 platform 접근, Drizzle 직접 참조 금지 | R0 | ADR-032 Option A | ✅ |
+| ARCH-4 | `@aiagent/db-platform` 패키지로만 platform 접근, Drizzle 직접 참조 금지 | R0 | [[identity-billing-access]] (A) | ✅ |
 | ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원 보장) | R0 | 마이그레이션 규약 | ✅ |
 | ARCH-6 | async 부수효과는 `outbox_event` | R0 | §6.2 | ✅ |
 
@@ -111,8 +111,8 @@
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
 | TEN-1 | 모든 도메인 테이블 `org_pk NOT NULL` | R0 | 불변식 #3 | ✅ |
-| TEN-2 | 모든 조회 `WHERE org_pk` 강제, 타 org는 404 | R1 | ADR-042, BOLA 프레임워크 | ✅ |
-| TEN-3 | cross-tenant 조회는 아키텍처 분리(`internal/`) | R1 | ADR-042 | ✅ |
+| TEN-2 | 모든 조회 `WHERE org_pk` 강제, 타 org는 404 | R1 | [[cross-tenant-separation]], BOLA 프레임워크 | ✅ |
+| TEN-3 | cross-tenant 조회는 아키텍처 분리(`internal/`) | R1 | [[cross-tenant-separation]] | ✅ |
 | TEN-4 | MySQL RLS 부재 → CI 린트 보강 | R1 | 🟡 린트 미도입 | 🟡 |
 | TEN-5 | Qdrant payload 필터 + `org_id` 인덱스 | R1 | 🟡 | 🟡 |
 | TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | 🟡 | 🟡 |
@@ -209,7 +209,7 @@
 # B. BDD 시나리오 (platform_db 도메인)
 
 > platform_db 계층에서 직접 검증 가능한 시나리오.  
-> academy 서비스 시나리오(F1~F60)는 [`docs/academy/v3/bdd-scenarios.md`](../academy/v3/bdd-scenarios.md) 참조.
+> academy 서비스 시나리오(F1~F60)는 academy 서비스 문서의 BDD 시나리오에서 관리한다(본 볼트 범위 밖).
 
 ---
 
@@ -827,7 +827,7 @@ Scenario: OTP 5회 연속 실패 → 차단
 
 # C. academy BDD 수용성 크로스체크
 
-> 상세 시나리오: [`docs/academy/v3/bdd-scenarios.md`](../academy/v3/bdd-scenarios.md)  
+> 상세 시나리오는 academy 서비스 문서에서 관리(본 볼트 범위 밖).  
 > 이 섹션은 platform_db 설계가 academy BDD를 수용하는지 갭만 기록.
 
 | academy BDD | platform_db 설계 수용 여부 | 갭/조치 |

@@ -58,7 +58,7 @@ market-api   →  market_db   (identity 복사본 + 상품 데이터)
 
 ---
 
-## 우리 결정 — 비대칭 분리 (ADR-044)
+## 우리 결정 — 비대칭 분리
 
 > **공통은 묶고, 도메인은 뗀다.**
 
@@ -111,8 +111,7 @@ market-api   →  market_db   (identity 복사본 + 상품 데이터)
 
 ## 관련 문서
 
-| 파일 | 내용 |
-|---|---|
-| `adr/ADR-044-platform-db-boundary.md` | 원문 의사결정 기록 |
-| `core/architecture.md §1, §2, §12.1` | 개요, 여정, 비대화 대응 플레이북 |
-| `decisions/payment-atomicity.md` | 단일 트랜잭션이 비대칭 분리에서만 가능한 이유 |
+- [[payment-atomicity]] — 단일 트랜잭션이 비대칭 분리에서만 가능한 이유
+- [[identity-billing-access]] — 공통 코어를 무엇으로 감싸 노출하는가
+> 소스 문서
+- [[architecture]] — §1 개요, §2 설계 여정, §12.1 비대화 대응 플레이북

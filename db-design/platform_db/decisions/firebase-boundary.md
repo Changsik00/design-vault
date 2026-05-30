@@ -113,8 +113,8 @@ Firebase에서 다른 AuthN 제공자(Auth0, Cognito 등)로 교체 시:
 
 ## 관련 문서
 
-| 파일 | 내용 |
-|---|---|
-| `core/architecture.md §3.1` | 불변식 #1: Firebase = 인증, 인가 = 우리 DB |
-| `core/schema-reference.md §D.1` | identity_user 스키마 (firebase_uid 컬럼 설명) |
-| `core/schema-reference.md §E` | 3-gate 전체 구조 |
+- [[gate-abc-flow]] — Firebase 인증 통과 후 우리 DB가 도는 3-gate 흐름
+- [[role-as-code]] · [[auth-projection]] — "우리 DB가 인가한다"의 구체 내용
+> 소스 문서
+- [[architecture]] — §3.1 불변식 #1 (Firebase = 인증, 인가 = 우리 DB)
+- [[schema-reference]] — §D.1 identity_user(firebase_uid), §E 3-gate 구조
