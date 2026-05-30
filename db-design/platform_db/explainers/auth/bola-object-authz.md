@@ -209,6 +209,8 @@ if (can(user, 'update', 'lecture')) {        // ✅ 역할 OK
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 BOLA는 **자동 스캐너가 못 잡으니 직접 테스트를 짜야** 합니다. 핵심은 **negative test** — "되면 안 되는 게 정말 안 되는가".
 

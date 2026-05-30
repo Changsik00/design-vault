@@ -246,6 +246,8 @@ WHERE grantee LIKE "'platform_rw'@%"
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 이 설계의 핵심은 "권한이 의도대로 *부여되지 않았는지*"를 검증하는 것입니다. 권한은 시간이 지나며 슬그머니 늘어나기 쉬우므로(권한 회귀), 아래 검사를 CI에 넣어 매 배포마다 단언합니다.
 

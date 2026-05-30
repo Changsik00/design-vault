@@ -180,6 +180,8 @@ ability 빌드는 이미 캐싱된 입력 블록으로 메모리에서 조립하
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 ability 테스트의 핵심은 **세 축이 각각 그리고 합쳐서 올바르게 작동하는가**, 그리고 **명시적 allow 없으면 막히는가**입니다. ability는 순수 함수(입력→ability)라 단위 테스트가 쉽고, 경계는 e2e로 봅니다.
 

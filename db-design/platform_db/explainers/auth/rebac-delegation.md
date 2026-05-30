@@ -341,6 +341,8 @@ Zanzibar(또는 범용 relation_tuple) 재검토 트리거:
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 ReBAC/위임은 "부여 → 행사 → 회수 → 차단"의 **생애주기(lifecycle)** 전체가 정확해야 합니다([[e2e-journeys|e2e-journeys.md]] C-04 정상 lifecycle / D3-07 오부여 정정). 아래는 vitest + supertest 통합 테스트 예시입니다.
 

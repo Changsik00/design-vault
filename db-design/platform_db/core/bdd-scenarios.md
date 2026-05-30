@@ -24,7 +24,7 @@ tags:
 > Gherkin 형식 (English keywords, Korean content). 통합 테스트: vitest + supertest
 
 >
-> 📄 **설계 시나리오 — 구현 코드는 없습니다.** ⚠️ 표시 시나리오는 *기능 코드가 생기면* 테스트로 활성화하며, 설계 자체는 본 문서·[[schema-reference]] 기준으로 완결입니다.
+> 📄 **설계 시나리오 — 구현 코드는 없습니다.** ⚠️ 표시 시나리오는 *기능 코드가 생기면* 테스트로 활성화하며, 설계 자체는 본 문서·[[schema-reference]] 기준으로 완결입니다. 실행 전략(실제 DB·ORM)은 [[testing-strategy]]·[[orm-testing-drizzle]].
 
 **상태 범례**: ⚠️ 구현 후 활성화
 

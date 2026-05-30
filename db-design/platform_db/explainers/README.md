@@ -10,8 +10,6 @@ tags: [platform-db, explainer, index]
 > **분류**: 디렉토리 = 주제, `difficulty` 속성 = 난이도(🟢 기초 → 🟡 중급 → 🔴 고급).
 > 강의 진도는 각 주제 안에서 기초 → 고급 순으로 따라가면 됩니다.
 
-> 📄 **설계 문서 — 구현 코드는 없습니다.** 상태 표기는 *설계 성숙도*(✅ 설계 확정 · 🟡 부분 · 🔴 미설계)이며, 코드 블록은 설계 의도·테스트 방법 예시입니다.
-
 ## 🔐 인가·인증 (Auth)  ·  10편
 
 | 난이도 | 문서 | 한 줄 |
@@ -68,14 +66,16 @@ tags: [platform-db, explainer, index]
 | 🟡 중급 | [[pipa-consent]] | PIPA 개인정보 동의 요건 |
 | 🔴 고급 | [[audit-hash-chain]] | audit_log 해시 체인 무결성 |
 
-## 🛠️ 운영 (Operations)  ·  4편
+## 🛠️ 운영 (Operations)  ·  6편
 
 | 난이도 | 문서 | 한 줄 |
 |---|---|---|
 | 🟡 중급 | [[break-glass]] | Break-glass 긴급 접근 |
 | 🟡 중급 | [[observability-slo]] | 관측성과 신뢰성 계약 (SLO·SLI·모니터링) |
+| 🟡 중급 | [[orm-testing-drizzle]] | "타입은 통과하는데 진짜 DB에선 터지는" 갭을 메우는 법 |
 | 🟡 중급 | [[permission-debugger]] | "왜 막혔나"를 1초에 답하는 계약 (DBG-1) |
 | 🟡 중급 | [[rate-limiting]] | 무엇을 어디서 막나 |
+| 🔴 고급 | [[testing-strategy]] | 실제 DB에서, 그리고 운영 DB에서 안전하게 테스트하기 |
 
 ---
-> 총 35편. 새 문서는 해당 주제 디렉토리에 두고 frontmatter에 `difficulty: 기초|중급|고급`를 넣으면 이 인덱스 분류에 들어갑니다.
+> 총 37편. 새 문서는 해당 주제 디렉토리에 두고 frontmatter에 `difficulty: 기초|중급|고급`를 넣으면 이 인덱스 분류에 들어갑니다.

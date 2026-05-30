@@ -377,6 +377,8 @@ C-07 시나리오 #5가 이를 검증합니다: `DELETE /v1/api-keys/{id}`로 re
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 api_key는 **머신용 우회 경로가 없다는 것**이 핵심이라, 테스트의 본질은 "**머신도 사람과 똑같이 게이트에서 막히는가**"를 확인하는 것입니다. ([[e2e-journeys]] C-07이 black-box 기준선입니다.)
 

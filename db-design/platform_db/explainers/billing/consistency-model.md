@@ -324,6 +324,8 @@ C와 A 중 하나를 포기해야 한다:
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 핵심 두 가지를 검증합니다. **(1)** 트랜잭션 중간 실패 시 전부 rollback되어 `payment_ledger`도 `org_entitlement`도 안 생기는가(원자성=강한 일관성). **(2)** 부수효과는 COMMIT 후 별도 워커가 소비하는가(결과적 일관성).
 

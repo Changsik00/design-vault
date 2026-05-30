@@ -20,6 +20,8 @@ tags:
 >
 > **범위 규율**: 여기는 platform_db가 **소유하는 데이터·계약**만 둔다. 콘솔 UI·알림 임계치·DR 런북·Feature Flag rollout은 platform_db가 *enable*만 하고 *소유*는 별도 ops 제품. **단 Permission Debugger는 UI가 아니라 계약으로서 platform_db 책임**.  
 > **상태**: 설계는 결정·explainer·스키마(§D.20 usage_snapshot·§D.21 operator)로 대부분 **확정/착수**, 구현(배치·콘솔)은 후속. 이 문서는 그 *계약*을 정의한다.
+>
+> 🧪 **테스트**: 이 운영 계약·안전장치를 *실제 DB·운영*에서 검증하는 법은 [[testing-strategy]](실제·운영 DB 테스트)·[[orm-testing-drizzle]](ORM).
 
 ---
 

@@ -286,6 +286,8 @@ Scenario: OTP 5회 연속 실패 → 차단
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 rate limit은 platform_db 단위 테스트가 아니라 *Gateway 통합 테스트*로 검증한다는 점이 중요합니다. platform_db 쪽에서 테스트할 것은 "정책(tier) 보관"과 "차단 감사 기록"뿐입니다.
 

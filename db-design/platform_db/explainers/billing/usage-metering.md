@@ -223,6 +223,8 @@ if (current > limit) throw new LimitExceeded();   // 즉각·정확
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 ### 1. 스냅샷이 서비스 raw 합과 일치하나 (허용 오차)
 
