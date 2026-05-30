@@ -19,7 +19,7 @@ tags:
 > **이 문서의 관점**: 요구사항을 *"academy를 충족하는가"*가 아니라 ***"platform_db의 목적을 달성하는가"***로 측정한다.  
 > academy/market/agent는 **적합성 테스트 케이스**([[bdd-scenarios]])이지 요구사항의 출처가 아니다.
 >
-> **상태 범례**: ✅ 충족 · 🟡 부분/P1 · ⚠️ phase-17 · ⛔ 보류(YAGNI/트리거 미충족) · ❓ 미결정 · 🔴 **목적 위반(부채)**
+> **상태 범례**: ✅ 충족 · 🟡 부분/P1 · ⚠️ 미구현 · ⛔ 보류(YAGNI/트리거 미충족) · ❓ 미결정 · 🔴 **목적 위반(부채)**
 
 ---
 
@@ -38,7 +38,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 ## 1. 확장성 요구사항 (EXT) — *1급, 목적 직결*
 
 > **신설.** 플랫폼의 핵심 가치 명제(서비스 추가 한계비용)를 처음으로 측정 가능한 요구로 끌어올린다.  
-> 기존 추적표에서 "phase-17 nice-to-have"로 묻혀 있던 결합들이, 목적 렌즈에서는 **P0 부채(🔴)**다.
+> 기존 추적표에서 "미구현 nice-to-have"로 묻혀 있던 결합들이, 목적 렌즈에서는 **P0 부채(🔴)**다.
 
 | ID | 요구사항 | 측정 기준 | 상태 |
 |---|---|---|---|
@@ -66,7 +66,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | **P5 감사·동의 컴플라이언스** | 법적 증거·불변 기록 | AUD, CON | append-only, WORM |
 | **P6 머신·B2B 신원** | 사람=머신 동일 3-gate | api_key·SERVICE 계정 (AUTHN-5, SEC-5/7, RBAC-4) | type=SERVICE |
 
-> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **phase-17/0%**다. academy 역할분리(0008)는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
+> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **미구현(0%)**다. academy 역할분리(0008)는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
 
 ---
 
@@ -104,7 +104,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1, 0008 | ✅ |
 | RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership, 0008 | ✅ (단 EXT-4 충족, EXT-2는 별개) |
 | RBAC-3 | role→action 매핑은 코드 상수(DB 저장 금지) | R0 | ROLE_PERMISSION | ✅ |
-| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4, 0008 | 🟡 SERVICE ✅ / api_key phase-17 |
+| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4, 0008 | 🟡 SERVICE ✅ / api_key 미구현 |
 | RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
 | RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
 | RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
@@ -161,27 +161,27 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | AUD-2 | **보안유의 이벤트** 기록(DENY·ERROR·민감 ALLOW·운영자) — 일상 read ALLOW는 텔레메트리(샘플링), audit 아님 | R0 | [[audit-two-lane]] | 🟡 범위 재정의(2-lane 미구현) |
 | AUD-3 | trace_id + audit_event_id(분산 추적) | R4 | 🟡 P1 | 🟡 |
 | AUD-4 | 사람·머신 활동 통계 분리(type 필터) | R2 | identity_user.type | ✅ |
-| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ phase-17 |
-| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ⚠️ phase-17 |
-| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
-| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
-| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ⚠️ phase-17 |
-| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ⚠️ phase-17 |
+| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ 미구현 |
+| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ⚠️ 미구현 |
+| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ⚠️ 미구현 |
+| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ⚠️ 미구현 |
+| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ⚠️ 미구현 |
+| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ⚠️ 미구현 |
 | CON-7 | 약관 버전 관리 + 재동의 인터셉터 | R5 | 🟡 P1 | 🟡 |
-| CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ⚠️ phase-17 |
-| CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ⚠️ phase-17 |
-| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ⚠️ phase-17 |
+| CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ⚠️ 미구현 |
+| CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ⚠️ 미구현 |
+| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ⚠️ 미구현 |
 | CON-12 | fan-out anonymize — 탈퇴 시 outbox `user.deleted` → 각 서비스 anonymize | R6 | §4 | 🟡 P1 |
 | CON-13 | 동의 `meta_json` canonical(RFC 8785 JCS) + JSON Schema 검증 | R6 | user_consent_event | 🟡 P1 |
 
 ### P6 — 머신·B2B 신원 (api_key)
 
-> agent·B2B 통합의 전제. 사람과 동일 3-gate를 통과하는 머신 신원. **전 항목 phase-17 — 두 번째 서비스가 agent라면 최우선 후보.**
+> agent·B2B 통합의 전제. 사람과 동일 3-gate를 통과하는 머신 신원. **전 항목 미구현 — 두 번째 서비스가 agent라면 최우선 후보.**
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ⚠️ phase-17 |
-| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 | ⚠️ phase-17 |
+| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ⚠️ 미구현 |
+| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 | ⚠️ 미구현 |
 | SEC-7 | api_key 보강 — `last_used_ip`·`created_by_user_pk`·`rate_limit_tier`·`environment` | R7 | api_key 설계 | 🟡 P1 |
 
 ### 횡단 — 아키텍처 · 보안 · 비기능 · 운영

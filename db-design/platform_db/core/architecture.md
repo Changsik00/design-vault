@@ -179,22 +179,22 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 3.1 핵심 결정 D1~D12 (구현 상태)
 
-| ID | 결정 | 상태 · 문서 |
-|---|---|---|
-| D1 | role 2단(`platform_role` + `service_membership`) | ✅ 0008 · [[role-capability]] |
-| D2 | capability 네임스페이스 `<service>.<action>` | ✅ 0008 · [[service-extensibility]] |
-| D3 | role→action = **코드 상수**(DB 레지스트리 거부) | ✅ · [[role-as-code]] |
-| D4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | 🟡 SERVICE ✅ / api_key phase-17 |
-| D5 | `org_kind` generic + 서비스는 entitlement | 🟡 0008 부분 |
-| D6 | service 식별자 `VARCHAR(50)+CHECK`(온라인 DDL) | ✅ · [[service-extensibility]] |
-| D7 | `user_consent_event` append-only | ⚠️ phase-17 · [[pipa-consent]] |
-| D8 | `api_key` 하드닝 | ⚠️ phase-17 |
-| D9 | `permission_snapshot`은 프론트 read-model만 | 🟡 P1 |
-| D10 | 멀티테넌시: RLS 없음→CI 린트 | 🟡 · [[multitenancy-pool]] |
-| D11 | 표준보안: BOLA / NIST / 해시→WORM | 🟡 BOLA ✅, 해시·WORM P1 · [[audit-hash-chain]] |
-| D12 | 운영보강: 논리 소유권·break-glass·키 cadence | 🟡 · [[operability]] |
+| ID  | 결정                                              | 상태 · 문서                                      |
+| --- | ----------------------------------------------- | -------------------------------------------- |
+| D1  | role 2단(`platform_role` + `service_membership`) | ✅ 0008 · [[role-capability]]                 |
+| D2  | capability 네임스페이스 `<service>.<action>`          | ✅ 0008 · [[service-extensibility]]           |
+| D3  | role→action = **코드 상수**(DB 레지스트리 거부)            | ✅ · [[role-as-code]]                         |
+| D4  | 서비스 계정 = `platform_role='SERVICE'` + api_key    | 🟡 SERVICE ✅ / api_key 미구현              |
+| D5  | `org_kind` generic + 서비스는 entitlement           | 🟡 0008 부분                                   |
+| D6  | service 식별자 `VARCHAR(50)+CHECK`(온라인 DDL)        | ✅ · [[service-extensibility]]                |
+| D7  | `user_consent_event` append-only                | ⚠️ 미구현 · [[pipa-consent]]               |
+| D8  | `api_key` 하드닝                                   | ⚠️ 미구현                                  |
+| D9  | `permission_snapshot`은 프론트 read-model만          | 🟡 P1                                        |
+| D10 | 멀티테넌시: RLS 없음→CI 린트                             | 🟡 · [[multitenancy-pool]]                   |
+| D11 | 표준보안: BOLA / NIST / 해시→WORM                     | 🟡 BOLA ✅, 해시·WORM P1 · [[audit-hash-chain]] |
+| D12 | 운영보강: 논리 소유권·break-glass·키 cadence              | 🟡 · [[operability]]                         |
 
-> **D6 미적용 사례**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(4곳)·`billing_event.event_type`에 미일관 적용 → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상([[schema-reference]]).
+> **D6 미적용 사례**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(4곳)·`billing_event.event_type`에 미일관 적용 → 후속 ENUM→VARCHAR(50)+CHECK 마이그레이션 대상([[schema-reference]]).
 
 ### 3.2 결정 문서 (비교 → 결정)
 
@@ -230,12 +230,12 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 5.2 법·표준 준거
 
-> "설계 확정" ≠ "구현 완료". ⚠️는 설계는 됐으나 코드 없음(phase-17). 감사자는 ⚠️를 준수로 읽으면 안 됨.
+> "설계 확정" ≠ "구현 완료". ⚠️는 설계는 됐으나 코드 없음. 감사자는 ⚠️를 준수로 읽으면 안 됨.
 
 | 근거 | 설계 | 구현 |
 |---|---|---|
-| PIPA §15 보유 / §17~18 제3자 / §22 14세 / §35 열람 / §37 철회 | ✅ 설계(§22·§35 일부) | ⚠️ phase-17 (§22 **법적 필수**) |
-| 정보통신망법 §50 수신거부 / 국외이전 고지 | ✅ 설계 | ⚠️ phase-17 |
+| PIPA §15 보유 / §17~18 제3자 / §22 14세 / §35 열람 / §37 철회 | ✅ 설계(§22·§35 일부) | ⚠️ 미구현 (§22 **법적 필수**) |
+| 정보통신망법 §50 수신거부 / 국외이전 고지 | ✅ 설계 | ⚠️ 미구현 |
 | (구)유효기간제 휴면 | ⛔ | ⛔ 2023 폐지 — 법 의무 아님 |
 | NIST SP 800-162 ABAC | 🟡 | 🟡 Subject×Object ✅, Environment P1 |
 | OWASP API #1 BOLA | ✅ | ✅ org_pk 질의 강제 |

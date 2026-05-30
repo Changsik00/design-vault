@@ -22,7 +22,7 @@ tags:
 > **0008 마이그레이션**: `delegation_grant.capability` 네임스페이스 `ACADEMY.*` 적용  
 > Gherkin 형식 (English keywords, Korean content). 통합 테스트: vitest + supertest
 
-**상태 범례**: ⚠️ phase-17 구현 후 활성화
+**상태 범례**: ⚠️ 구현 후 활성화
 
 ---
 
@@ -326,9 +326,9 @@ Scenario: 특정 월 감사 로그 조회
 
 ---
 
-## Domain 6: Consent — PIPA 동의 (phase-17)
+## Domain 6: Consent — PIPA 동의 (미구현)
 
-> ⚠️ 아래 시나리오는 phase-17 구현 후 통합 테스트로 전환.
+> ⚠️ 아래 시나리오는 구현 후 통합 테스트로 전환.
 
 ### P6-01: 가입 시 필수 동의 누락 차단
 
@@ -684,11 +684,11 @@ Scenario: OTP 5회 연속 실패 → 차단
 | academy BDD | platform_db 설계 수용 여부 | 갭/조치 |
 |---|---|---|
 | F1-01 신규 학원장 가입 | ✅ | identity_user + org + membership + service_membership + entitlement 단일 트랜잭션 (P1-01) |
-| F1-02 약관 동의 | ⚠️ | user_consent_event 미구현 (phase-17). 현재 앱 레이어에서만 처리 |
+| F1-02 약관 동의 | ⚠️ | user_consent_event 미구현. 현재 앱 레이어에서만 처리 |
 | F3-01~04 강사 초대/수락/만료/제거 | ✅ | membership_invite + membership + service_membership 설계 완료 (P1-02/03) |
 | F4-01~04 멀티 워크스페이스 | ✅ | membership 복합 PK(user_pk, org_pk) 설계 완료 (P1-02) |
 | F5-01~05 Trust Grant | ✅ | delegation_grant 구현 완료. capability 네임스페이스 `ACADEMY.*` 0008 적용 (P3-01) |
-| F6-01~04 Agent 인증 | 🟡 | identity_user.type='SERVICE' ✅. api_key 테이블은 phase-17 |
+| F6-01~04 Agent 인증 | 🟡 | identity_user.type='SERVICE' ✅. api_key 테이블은 미구현 |
 | F7-01~05 권한 거부 | ✅ | 3-gate(Gate A/B/C) + VerifyOnDb 설계 완료 (P2/P3) |
 | F11~F16 파이프라인 | ✅ (academy_db) | platform_db와 직접 무관. entitlement.feature_limits로 cap 확인 |
 | F37-01~04 DIRECTOR lockout 방지 | ✅ | service_membership DIRECTOR 보호 (P2-04) |
@@ -699,6 +699,6 @@ Scenario: OTP 5회 연속 실패 → 차단
 
 | 갭 | 심각도 | 조치 |
 |---|---|---|
-| C-1 `user_consent_event` 미구현 | PIPA P0 법적 | phase-17 spec-17-xx |
-| C-2 `api_key` 미구현 | B2B 머신 인증 P1 | phase-17 spec-17-xx |
+| C-1 `user_consent_event` 미구현 | PIPA P0 법적 | 후속 구현 |
+| C-2 `api_key` 미구현 | B2B 머신 인증 P1 | 후속 구현 |
 | C-5 youtube_channel의 `org_pk` 컬럼 확인 필요 | 멀티테넌시 불변식 | spec-16-xx 확인 |

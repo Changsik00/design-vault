@@ -219,7 +219,7 @@ billing_cycle ENUM('MONTHLY','ANNUAL','ONE_TIME','USAGE') NOT NULL
 마이그레이션 계획:
 
 ```sql
--- phase-17+ 예정 마이그레이션
+-- 후속 예정 마이그레이션
 -- 4개 테이블 동시 작업 필요:
 -- org_subscription, payment_ledger, billing_event, pg_webhook_event
 
@@ -238,7 +238,7 @@ ALTER TABLE billing_event
 
 현재 테이블이 아직 대형화되기 전, 서비스 초기인 지금이 마이그레이션 적기입니다. 미룰수록 행이 쌓여서 마이그레이션 비용이 올라갑니다.
 
-> 💡 **한 줄 요약**: `pg_provider` ENUM은 D6 원칙 적용이 누락된 케이스로, phase-17+에서 VARCHAR+CHECK로 마이그레이션 예정입니다. 지금 수정하지 않으면 나중에 PG 추가할 때 잠금 장애가 납니다.
+> 💡 **한 줄 요약**: `pg_provider` ENUM은 D6 원칙 적용이 누락된 케이스로, 후속에서 VARCHAR+CHECK로 마이그레이션 예정입니다. 지금 수정하지 않으면 나중에 PG 추가할 때 잠금 장애가 납니다.
 
 ---
 

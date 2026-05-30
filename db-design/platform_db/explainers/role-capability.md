@@ -383,7 +383,7 @@ const canDo = ability.can('approve', lecture);
 
 ## 마치며
 
-현재 코드베이스에는 `membership.role` ENUM이 academy 어휘를 담고 있고 `delegation_grant.capability`도 6종 CHECK로 고정되어 있습니다. 이 상태가 현재 academy MVP에서는 동작하지만, 새 서비스를 붙일 때는 바뀌어야 합니다. 코드에서 role과 capability를 다룰 때 "이게 platform-level인가, service-level인가"를 의식하는 습관을 지금부터 들여두면, phase-17 마이그레이션 시 훨씬 적은 수정으로 전환을 완료할 수 있습니다.
+현재 코드베이스에는 `membership.role` ENUM이 academy 어휘를 담고 있고 `delegation_grant.capability`도 6종 CHECK로 고정되어 있습니다. 이 상태가 현재 academy MVP에서는 동작하지만, 새 서비스를 붙일 때는 바뀌어야 합니다. 코드에서 role과 capability를 다룰 때 "이게 platform-level인가, service-level인가"를 의식하는 습관을 지금부터 들여두면, 후속 마이그레이션 시 훨씬 적은 수정으로 전환을 완료할 수 있습니다.
 
 ---
 

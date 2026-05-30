@@ -190,7 +190,7 @@ row #5의 prev_hash = "xyz789..." (row #4의 row_hash)
 
 두 컬럼을 함께 쓰면 **수정 탐지 + 삭제 탐지** 모두 커버합니다.
 
-현재 DDL에는 이 컬럼들이 아직 없습니다. [[pipa-consent|PIPA 동의]] 관련 `user_consent_event`에는 설계가 들어가 있고, `audit_log`는 phase-17에서 추가 예정입니다.
+현재 DDL에는 이 컬럼들이 아직 없습니다. [[pipa-consent|PIPA 동의]] 관련 `user_consent_event`에는 설계가 들어가 있고, `audit_log`는 구현 시 추가 예정입니다.
 
 > 💡 **한 줄 요약**: `row_hash`는 row 수정을, `prev_hash`는 row 삭제를 감지합니다. 두 컬럼이 함께 있어야 완전한 변조 탐지가 가능합니다.
 
@@ -292,8 +292,8 @@ CREATE TABLE audit_log (
   -- ... 다른 컬럼들 ...
   break_glass BOOLEAN NOT NULL DEFAULT FALSE,
   created_at  DATETIME NOT NULL DEFAULT (NOW()),
-  -- prev_hash CHAR(64),  ← 아직 없음 (phase-17 예정)
-  -- row_hash  CHAR(64),  ← 아직 없음 (phase-17 예정)
+  -- prev_hash CHAR(64),  ← 아직 없음 (미구현 예정)
+  -- row_hash  CHAR(64),  ← 아직 없음 (미구현 예정)
   PRIMARY KEY (pk, created_at)
 );
 ```
@@ -311,7 +311,7 @@ GRANT INSERT ON platform_db.audit_log TO 'audit_append'@'%';
 
 이 방어의 한계는 DB 자체에 접근할 수 있는 DBA나 root 계정은 막을 수 없다는 점입니다.
 
-**phase-17 구현 예정 (P1):**
+**구현 예정 (P1):**
 
 ```
 1. audit_log에 prev_hash, row_hash 컬럼 추가
@@ -359,7 +359,7 @@ async function verifyAuditHashChain() {
 }
 ```
 
-> 💡 **한 줄 요약**: 현재는 app 계정에서 UPDATE/DELETE를 막는 1차 방어만 작동 중이고, 해시 체인(2차)과 WORM(3차) 방어는 각각 phase-17, T4 트리거 시점에 구현될 예정입니다.
+> 💡 **한 줄 요약**: 현재는 app 계정에서 UPDATE/DELETE를 막는 1차 방어만 작동 중이고, 해시 체인(2차)과 WORM(3차) 방어는 각각 후속·T4 트리거 시점에 구현될 예정입니다.
 
 ---
 
@@ -394,7 +394,7 @@ Level 1        ✅ 현재      app 코드의 실수/의도적 수정
 (권한 제거)                 일반 DB 계정의 변조
 
 Level 2        P1 예정     DBA/특권 계정의 조용한 변조
-(해시 체인)    phase-17    중간 row 삭제
+(해시 체인)    미구현    중간 row 삭제
 
 Level 3        P2/T4 조건  DB root의 해시까지 조작
 (WORM)         트리거 시   물리적 스토리지 공격

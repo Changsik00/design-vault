@@ -370,7 +370,7 @@ CREATE TABLE audit_log (
 - `ip VARBINARY(16)`: PIPA 개인정보 처리방침 감사 요건
 - `created_at DATETIME` (TIMESTAMP 아님): MySQL 8.0에서 `PARTITION BY RANGE COLUMNS`에 TIMESTAMP 미지원 버그 회피 — PostgreSQL에서는 불필요한 우회
 - WORM 원칙: 이 테이블은 INSERT만. UPDATE·DELETE 금지
-- ⚠️ **파티션 자동 추가 미구현**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. phase-17에서 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
+- ⚠️ **파티션 자동 추가 미구현**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. 구현 시 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
 
 ---
 
@@ -533,7 +533,7 @@ CREATE TABLE billing_event (
 ```
 
 **설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only.
-- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, phase-17+ 마이그레이션.
+- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, 후속 마이그레이션.
 - **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.17 payment_ledger
@@ -580,7 +580,7 @@ CREATE TABLE pg_webhook_event (
 
 **설계 포인트**:
 - `pg_provider ENUM`: `MANUAL` 제외 — 수동 결제는 webhook이 없으므로 의도적 제외 (org_subscription·payment_ledger와 달리 MANUAL 항목 없음)
-- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 자문). phase-17+ 마이그레이션.
+- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 자문). 후속 마이그레이션.
 - **FK 없음(의도적)**: billing 고write 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.19 outbox_event
@@ -947,7 +947,7 @@ CREATE TABLE user_consent_event (
 );
 ```
 
-> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 phase-17 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
+> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
 
 > **파티셔닝 검토(P2, R8 자문)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
 
