@@ -69,6 +69,8 @@ Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 - `perm_version` self-healing: 권한 변경→bump→`X-Perm-Version` 불일치→snapshot 재요청. 개인=user_pv / org=org_pv 분리(thundering herd 회피).
 - **현황**: DB 함수(`checkGateA/B`)는 ✅. 단 `GateAGuard`(실시간 재검증)는 🧊 Icebox — 현재 Firebase custom claims로 간접 커버(취소 시 ~1h stale, 민감 쓰기는 `@VerifyOnDb`로 메움). `checkGateB`는 `GateBGuard`로 래핑(기본값 `"ACADEMY"` — [[service-extensibility]] EXT-5).
 
+> **⚙️ 모델 edge**: 머신 신원은 `api_key` 기본(P6)까지. **B2B 심화**(OAuth Client Credentials · API versioning · scope-per-product)는 미모델 — api_key 위 확장 필요 ([[requirements]] §7.2 B2BAPI-1).
+
 ### 1.3 데이터 일관성 — billing → projection → auth
 
 ```
@@ -85,6 +87,8 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(
 - **결제 단일 트랜잭션**: `payment_ledger INSERT(CHARGE) + org_subscription UPDATE + org_entitlement UPSERT + perm_version bump + outbox INSERT`를 한 InnoDB 트랜잭션으로 → **"결제됐는데 권한 미반영" 창 0**(2PC·Kafka 불필요). ([[payment-atomicity]])
 - 멱등 2중: webhook `event_id` UNIQUE + payment `idempotency_key` UNIQUE([[idempotency-key]]). 환불은 append-only. async 부수효과만 outbox([[outbox-pattern]]).
 - eventual consistency 수용: webhook→투영 수 초 지연 허용(SaaS 표준). 배치 실패 안전망은 Gate B `validUntil` 복합체크([[decisions/gate-b-billing-grace|gate-b-billing-grace]]).
+
+> **⚙️ 모델 edge**: `outbox`=내부 async 발행, PG `webhook`=**인바운드 전용**. **아웃바운드 고객 webhook**(우리→고객 시스템)·**정산**(franchise 본사↔지점 매출 분배)은 미모델 — 새 컴포넌트 필요 ([[requirements]] §7.2 WEBHOOK-OUT-1·SETTLE-1).
 
 ### 1.4 멀티테넌시 — Pool 모델 + 분리 트리거
 
@@ -107,6 +111,8 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(
 | T4 | ISMS-P/GDPR 계약 | 물리 격리 DB·리전 + 감사 외부 WORM |
 
 cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin role 금지([[cross-tenant-separation]]). 운영자 cross-tenant는 [[operator-plane]] 경유.
+
+> **⚙️ 모델 edge**: 조직 계층은 `org_relation`의 **HQ_BRANCH/HOLDING 2단**까지. 다단계 프랜차이즈/병원 지점 같은 **깊은 계층**은 미모델 — 재귀 org 그래프 필요 ([[requirements]] §7.2 ORGGRAPH-1).
 
 ### 1.5 정책·동의 모델
 
@@ -170,6 +176,8 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 | Kafka/Debezium CDC | MQ는 outbox 위에 나중에([[payment-atomicity]]) | ISMS-P/SOC2(T4) |
 | platform 공통 usage 카운터 | 카운터는 서비스측(집계만 platform, [[operability]] O4) | cross-service 합산 과금 실수요 |
 | schema-per-tenant / 즉시 DB-per-tenant | MySQL db=schema pool 복잡 / 현 규모 운영비만↑ | T1/T2/T4 트리거 |
+
+> **범위 경계 (enterprise 원본 대비)**: platform_db가 일부러 다루지 않는 영역(정산·아웃바운드 webhook·다단계 조직그래프·B2B 심화·규제 산업 감사)은 [[requirements]] §7 추적표. 각 구조의 edge는 §1.2~§1.4 ⚙️ 주석 참조.
 
 ---
 
