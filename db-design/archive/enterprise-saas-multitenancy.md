@@ -1,5 +1,9 @@
 # Enterprise SaaS Multitenancy DB 설계 요구사항
 
+> 🗄️ **아카이브 — 원본 요구수렴 기록(seed)**. platform_db 설계의 *결정 전* 탐색 로그다.  
+> 결정·구현된 내용은 [[requirements]] · [[architecture]] · `decisions/`가 대체한다. **좁힌 결정과 미타겟 갭은 [[requirements]] §7** 참조.  
+> ⚠️ 본문의 "Firebase **또는** Supabase", "MySQL **또는** Postgres", "identity_db/billing_db 분리 **고민**" 등 미결정 표기는 **stale**(platform_db가 이미 확정) — 역사 기록으로만 읽을 것.
+
 > **컨텍스트**: 엔터프라이즈급 SaaS 플랫폼의 멀티테넌트 DB 설계에 대해 AI agent 와 나눈 요구사항 수렴 기록.
 > 인증은 **Firebase Authentication** 또는 **Supabase Auth** 기준으로 설계.
 > 학원, 회사, 매장, 프랜차이즈, 병원 등 다양한 조직 유형을 포괄하는 범용 SaaS 구조 상정.

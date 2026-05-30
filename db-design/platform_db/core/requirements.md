@@ -271,3 +271,31 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 ## 6. BDD 시나리오
 
 → [[bdd-scenarios]]. platform_db 10개 도메인 행위 시나리오 + 서비스 적합성 크로스체크(테스트 케이스).
+
+---
+
+## 7. 범위 경계 — enterprise 원본에서 좁혀낸 것
+
+> 출처: [[enterprise-saas-multitenancy]](아카이브 — 결정 전 요구수렴 기록). platform_db는 그 넓은 그림에서 **결정·구현된 부분만** 다루고, 나머지는 아래처럼 *명시적으로* 범위를 긋는다. (원본 대부분은 §3 기능 요구로 흡수됨.)
+
+### 7.1 의도적으로 좁힌 결정 (원본의 "고민 필요" → 우리 결정)
+
+| 원본 | 우리 결정 |
+|---|---|
+| 인증: Firebase **또는** Supabase | **Firebase 확정** ([[firebase-boundary]]) |
+| DB: MySQL **또는** Postgres | **MySQL 확정**(회사 규약), Postgres는 권장만 |
+| identity_db/billing_db 분리 **고민** | **통합 platform_db** ([[design-asymmetry]]) |
+| 조직 타입 academy/store/franchise/hospital | **generic `org.type`** + `entitlement.service` ([[service-extensibility]]) |
+| 내부 PK: ULID/BIGINT/UUID v7 | **BIGINT + ULID public_id** (불변식 #2) |
+
+### 7.2 미타겟 갭 (원본엔 있으나 우리 미반영 — 추적용)
+
+| ID | 갭 | 출처 | 상태 |
+|---|---|---|---|
+| SETTLE-1 | **프랜차이즈/다지점 정산**(본사↔지점 매출 분배) | 원본 §4·§5 | ⛔ franchise 미타겟 — franchise 테넌트 도입 시 |
+| WEBHOOK-OUT-1 | **아웃바운드 고객 webhook**(우리→고객 시스템) | 원본 §13 | 🔴 미설계 — 현재 인바운드 PG webhook만. B2B 고객 생기면 |
+| ORGGRAPH-1 | **다단계 조직 그래프**(프랜차이즈 계층·병원 다지점) | 원본 §12 | 🟡 `org_relation`은 HQ_BRANCH/HOLDING 2단 — 깊은 계층 수요 시 |
+| B2BAPI-1 | B2B API 심화: OAuth Client Credentials · API versioning · scope-per-product | 원본 §13 | ⛔ — api_key 기본(P6) 후 B2B 정식화 시 |
+| AUDIT-REG-1 | 조직 타입별 감사 요건 상이(병원 HIPAA·금융) | 원본 §13 | ⛔ 범위 밖 — 규제 산업 테넌트 없음 |
+
+> 대부분의 ⛔는 franchise/hospital/B2B-정식화 등 **아직 안 겨냥한 시나리오**다(현재 플랫폼이 깨진 게 아님). 단 **WEBHOOK-OUT-1·SETTLE-1**은 academy/market만 커져도 닿을 수 있어 🔴/⛔ 경계에 둔다.
