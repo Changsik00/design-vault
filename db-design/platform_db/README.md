@@ -12,7 +12,7 @@
 2. [core/requirements.md](./core/requirements.md) — 무엇을 충족해야 하나 (+ 요구 추적 매트릭스)
 3. [core/schema-reference.md](./core/schema-reference.md) — 전체 DDL · ERD · billing · 보안
 4. [decisions/](./decisions/) — "왜 이렇게 했나" (비교 + 결정 13편)
-5. [explainers/](./explainers/README.md) — 개념을 풀어쓴 학습 문서 35편 (난이도별)
+5. [explainers/](./explainers/README.md) — 개념을 풀어쓴 학습 문서 37편 (난이도별)
 6. [core/bdd-scenarios.md](./core/bdd-scenarios.md) · [core/e2e-journeys.md](./core/e2e-journeys.md) — 행위 검증
 
 ## 📁 구성
@@ -21,7 +21,7 @@
 |---|---|
 | `core/` | architecture · requirements · schema-reference · operability · bdd-scenarios · e2e-journeys |
 | `decisions/` | 설계 의사결정 13편 (audit-two-lane, auth-projection, service-extensibility …) |
-| `explainers/` | 학습 문서 35편 — auth · billing · data-modeling · security · compliance · operations ([인덱스](./explainers/README.md)) |
+| `explainers/` | 학습 문서 37편 — auth · billing · data-modeling · security · compliance · operations ([인덱스](./explainers/README.md)) |
 
 ## 🧩 핵심 한 장 요약
 
