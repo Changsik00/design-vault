@@ -45,7 +45,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | EXT-1 | 새 서비스 추가가 **platform 스키마 마이그레이션 없이** 가능 | 서비스 N 추가 시 변경되는 platform DDL = 0 | 🟡 **의도적 트레이드오프** — service CHECK는 온라인 1줄 마이그레이션(D6). [[service-extensibility]] Option A 채택 |
 | EXT-2 | 플랫폼 코어 인가에 **서비스 고유 어휘 하드코딩 금지** | 코어 테이블에 academy 동사/역할 리터럴 0 | 🟡 **의도적 트레이드오프** — `chk_capability` `ACADEMY.*` 6종(코드 ROLE_PERMISSION과 중복 안전망). [[service-extensibility]] |
 | EXT-3 | role→action 매핑은 **코드 상수** (서비스 역할 추가 = 코드 배포, 스키마 무변경) | 새 서비스 역할 권한 추가 시 DB DDL = 0 | ✅ [[role-as-code]] `ROLE_PERMISSION[service]` |
-| EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 0008 |
+| EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 구현됨 |
 | EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 — `checkGateB(...="ACADEMY")` 기본값. 2번째 서비스 도입 시 중립화 ([[service-extensibility]]) |
 | EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §2.4 단편) |
 
@@ -66,7 +66,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | **P5 감사·동의 컴플라이언스** | 법적 증거·불변 기록 | AUD, CON | append-only, WORM |
 | **P6 머신·B2B 신원** | 사람=머신 동일 3-gate | api_key·SERVICE 계정 (AUTHN-5, SEC-5/7, RBAC-4) | type=SERVICE |
 
-> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **미구현(0%)**다. academy 역할분리(0008)는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
+> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **미구현(0%)**다. academy 역할분리는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
 
 ---
 
@@ -101,10 +101,10 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1, 0008 | ✅ |
-| RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership, 0008 | ✅ (단 EXT-4 충족, EXT-2는 별개) |
+| RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1 | ✅ |
+| RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership | ✅ (단 EXT-4 충족, EXT-2는 별개) |
 | RBAC-3 | role→action 매핑은 코드 상수(DB 저장 금지) | R0 | ROLE_PERMISSION | ✅ |
-| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4, 0008 | 🟡 SERVICE ✅ / api_key 미구현 |
+| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4 | 🟡 SERVICE ✅ / api_key 미구현 |
 | RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
 | RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
 | RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
@@ -117,7 +117,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ABAC-6 | NIST 환경속성 — api_key `allowed_ip_cidr` + Gateway/WAF IP | R4 | D8 (P1) | 🟡 |
 | ABAC-7 | 최종 `can()` 결정 캐싱 금지, 입력 블록만 TTL 60s | R0 | Redis 전략 | ✅ |
 | REBAC-1 | capability 위임(grantor→grantee, scoped, expiry, revoke) | R0 | delegation_grant | ✅ |
-| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2, 0008 | ✅ (🔴 EXT-2: CHECK 하드코딩 잔존) |
+| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2 | ✅ (🔴 EXT-2: CHECK 하드코딩 잔존) |
 | REBAC-3 | 임퍼소네이션 금지, 위임 행사를 감사 기록 | R0 | audit_log | ✅ |
 | REBAC-4 | org 계층(HQ_BRANCH/HOLDING) | R0 | org_relation | ✅ |
 | REBAC-5 | 계층은 권한 근거 아님, 명시적 membership만 | R2 | 불변식 | ✅ |
@@ -263,7 +263,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 > 기존 104건은 구 A.13(R6/R7 보강)에 NFR-6·AUTHN-8·REBAC-8·BILL-12 등 **상위 항목과 중복 기재**가 있었음 → 목적 재구성 시 dedup하여 100건. (기능 합계 외 EXT 6건은 §4.1에서 별도 관리.)
 >
-> **2026-05-30**: 0008(RBAC-1/2·REBAC-2) 반영. 단 기능 ✅와 **목적(EXT) 충족은 별개** — REBAC-2는 기능 ✅이나 EXT-2 🔴.  
+> **2026-05-30**: 구현됨(RBAC-1/2·REBAC-2) 반영. 단 기능 ✅와 **목적(EXT) 충족은 별개** — REBAC-2는 기능 ✅이나 EXT-2 🔴.  
 > **읽는 법**: 기능 점수(53% ✅)가 아니라 **service 결합(의도적 채택 → [[service-extensibility]])과 P6(머신 신원) 미착수**가 "플랫폼 목적" 관점의 핵심이다.
 
 ---

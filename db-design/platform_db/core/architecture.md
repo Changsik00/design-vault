@@ -148,11 +148,11 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 2.3 마이그레이션 상태·목표 (G1~G3)
 
-> 0008로 role 2단 분리가 구현됨. G1/G2 완료, G3 부분.
+> 구현됨로 role 2단 분리가 구현됨. G1/G2 완료, G3 부분.
 
-- **G1. role 2단 분리** (D1) — ✅ **0008**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
-- **G2. capability 네임스페이스** (D2) — ✅ **0008**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
-- **G3. `organization.org_kind`** (D5) — 🟡 **0008 부분**: `type ENUM('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거). `org_kind VARCHAR+CHECK` 전환은 미완(저빈도라 ENUM 유지).
+- **G1. role 2단 분리** (D1) — ✅ **구현됨**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
+- **G2. capability 네임스페이스** (D2) — ✅ **구현됨**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
+- **G3. `organization.org_kind`** (D5) — 🟡 **부분 구현**: `type ENUM('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거). `org_kind VARCHAR+CHECK` 전환은 미완(저빈도라 ENUM 유지).
 
 ### 2.4 의도적으로 안 하는 것 (YAGNI) + 도입 트리거
 
@@ -181,11 +181,11 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 | ID  | 결정                                              | 상태 · 문서                                      |
 | --- | ----------------------------------------------- | -------------------------------------------- |
-| D1  | role 2단(`platform_role` + `service_membership`) | ✅ 0008 · [[role-capability]]                 |
-| D2  | capability 네임스페이스 `<service>.<action>`          | ✅ 0008 · [[service-extensibility]]           |
+| D1  | role 2단(`platform_role` + `service_membership`) | ✅ 구현됨 · [[role-capability]]                 |
+| D2  | capability 네임스페이스 `<service>.<action>`          | ✅ 구현됨 · [[service-extensibility]]           |
 | D3  | role→action = **코드 상수**(DB 레지스트리 거부)            | ✅ · [[role-as-code]]                         |
 | D4  | 서비스 계정 = `platform_role='SERVICE'` + api_key    | 🟡 SERVICE ✅ / api_key 미구현              |
-| D5  | `org_kind` generic + 서비스는 entitlement           | 🟡 0008 부분                                   |
+| D5  | `org_kind` generic + 서비스는 entitlement           | 🟡 부분 구현                                   |
 | D6  | service 식별자 `VARCHAR(50)+CHECK`(온라인 DDL)        | ✅ · [[service-extensibility]]                |
 | D7  | `user_consent_event` append-only                | ⚠️ 미구현 · [[pipa-consent]]               |
 | D8  | `api_key` 하드닝                                   | ⚠️ 미구현                                  |

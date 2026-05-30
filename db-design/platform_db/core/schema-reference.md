@@ -207,7 +207,7 @@ CREATE TABLE organization (
   pk           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   public_id    CHAR(26)       NOT NULL,              -- ULID
   type         ENUM('COMPANY','TEAM','PERSONAL') NOT NULL,
-  -- 0008: ACADEMY 제거(서비스 종류는 org_entitlement.service가 결정). 향후: org_kind VARCHAR(30)+CHECK로 전환
+  -- ACADEMY 제거(서비스 종류는 org_entitlement.service가 결정). 향후: org_kind VARCHAR(30)+CHECK로 전환
   slug         VARCHAR(50)    NOT NULL DEFAULT '',
   name         VARCHAR(100)   NOT NULL,
   status       ENUM('ACTIVE','SUSPENDED','CLOSED') NOT NULL DEFAULT 'ACTIVE',
@@ -221,7 +221,7 @@ CREATE TABLE organization (
 ```
 
 **설계 포인트**:
-- **0008**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
+- **구현됨**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
 - ⚠️ **여전히 ENUM**: `org_kind VARCHAR(30)+CHECK` 전환(완전 service-agnostic)은 미완. org.type은 저빈도 변경이라 ENUM 유지가 당장 큰 비용은 아니나, D6 원칙(VARCHAR+CHECK)과는 부분 불일치.
 
 ## D.4 membership
@@ -231,7 +231,7 @@ CREATE TABLE membership (
   user_pk       BIGINT UNSIGNED NOT NULL,
   org_pk        BIGINT UNSIGNED NOT NULL,
   platform_role ENUM('OWNER','MEMBER','SERVICE') NOT NULL DEFAULT 'MEMBER',
-  -- 0008: 서비스 무관 테넌트 권위만 표현. 도메인 역할은 service_membership.role_code(D.4a)
+  -- 서비스 무관 테넌트 권위만 표현. 도메인 역할은 service_membership.role_code(D.4a)
   status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
   created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
   PRIMARY KEY (user_pk, org_pk),
@@ -244,10 +244,10 @@ CREATE TABLE membership (
 
 **설계 포인트**:
 - 복합 PK `(user_pk, org_pk)` → 1 user = N org 멤버십 자연 지원
-- **0008**: `role` → `platform_role`(테넌트 권위) + `service_membership`(서비스 도메인 역할) 2단 분리 완료.
+- **구현됨**: `role` → `platform_role`(테넌트 권위) + `service_membership`(서비스 도메인 역할) 2단 분리 완료.
 - ⚠️ **`ADMIN` 미채택**: 초기 D1 명세는 `OWNER/ADMIN/MEMBER/SERVICE`였으나 구현은 `OWNER/MEMBER/SERVICE`로 단순화(owner 아닌 사람은 전부 MEMBER, 관리 권한은 service_membership 역할/delegation으로 표현). org 레벨 비-owner 관리자 수요가 생기면 `ADMIN` 재도입 재검토.
 
-## D.4a service_membership (0008 신규)
+## D.4a service_membership (신규)
 
 ```sql
 CREATE TABLE service_membership (
@@ -276,7 +276,7 @@ CREATE TABLE membership_invite (
   pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   org_pk     BIGINT UNSIGNED NOT NULL,
   email      VARCHAR(255) NOT NULL,
-  role_code  VARCHAR(50)  NOT NULL,                   -- 0008: ENUM → VARCHAR. 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
+  role_code  VARCHAR(50)  NOT NULL,                   -- ENUM → VARCHAR. 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
   token      CHAR(43)     NOT NULL,                   -- URL-safe base64(32bytes)
   status     ENUM('PENDING','ACCEPTED','EXPIRED','REVOKED') NOT NULL DEFAULT 'PENDING',
   invited_by BIGINT UNSIGNED NOT NULL,
@@ -297,7 +297,7 @@ CREATE TABLE delegation_grant (
   grantee_pk  BIGINT UNSIGNED NOT NULL,
   org_pk      BIGINT UNSIGNED NOT NULL,
   capability  VARCHAR(100) NOT NULL,
-  -- 0008: <service>.<action> 네임스페이스 적용. 향후: capability_code로 컬럼명 변경 검토
+  -- <service>.<action> 네임스페이스 적용. 향후: capability_code로 컬럼명 변경 검토
   scope_json  JSON,
   status      ENUM('ACTIVE','REVOKED') NOT NULL DEFAULT 'ACTIVE',
   expires_at  TIMESTAMP,
@@ -315,7 +315,7 @@ CREATE TABLE delegation_grant (
 ```
 
 **설계 포인트**:
-- **0008**: `ACADEMY.<action>` 네임스페이스 적용 완료(6종). role→capability 매핑은 코드 상수가 권위.
+- **구현됨**: `ACADEMY.<action>` 네임스페이스 적용 완료(6종). role→capability 매핑은 코드 상수가 권위.
 - ⚠️ **CHECK가 여전히 하드코딩**: 멀티서비스(`MARKET.<action>` 등) 추가 시 CHECK 목록을 마이그레이션으로 확장해야 함 — 네임스페이스는 붙였으나 "마이그레이션 없는 개방"(D6 정신)은 아직 아님.
 
 ## D.7 org_relation
@@ -657,7 +657,7 @@ if (!pass) throw PaymentRequiredException();
 
 ```typescript
 // RBAC: service_membership.role_code → ROLE_PERMISSION[service][roleCode] (코드 상수)
-// ReBAC: delegation_grant.capability (0008: 'ACADEMY.<action>' 네임스페이스)
+// ReBAC: delegation_grant.capability (현행: 'ACADEMY.<action>' 네임스페이스)
 // ABAC: resource 소유권 (lecture.teacher_pk === userPk)
 ability = buildAbility(serviceRole, delegationGrants, entitlement);
 if (!ability.can(action, resource)) throw ForbiddenException;
@@ -1233,9 +1233,9 @@ MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적�
 
 | 항목 | 초기 설계 | 자체 비교 분석 결과 | 결정 |
 |---|---|---|---|
-| `organization.type` | ENUM(4종) 고정 | ENUM(3종, ACADEMY 제거). `org_kind VARCHAR+CHECK`는 향후 | 🟡 0008 부분 (D5 일부) |
-| `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **0008 완료** |
-| `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **0008 완료** |
+| `organization.type` | ENUM(4종) 고정 | ENUM(3종, ACADEMY 제거). `org_kind VARCHAR+CHECK`는 향후 | 🟡 부분 구현 (D5 일부) |
+| `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **구현됨** |
+| `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **구현됨** |
 | org 인가 판단 소스 | payment_ledger 직접 | org_entitlement SSOT | **확정 구현** |
 | 감사 로그 동의 이력 | mutable boolean | append-only 이벤트 테이블 | **확정 설계** |
 | 결제·권한 원자성 | 별개 트랜잭션 | 단일 트랜잭션 (§F.1) | **확정 구현** |

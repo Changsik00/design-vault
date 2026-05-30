@@ -17,9 +17,9 @@ tags:
 > 목적: platform_db 도메인 행위 시나리오 — e2e / 통합 테스트 기반  
 > 상위: [[requirements]] · [[schema-reference]]
 >
-> **0008 마이그레이션 반영**: `membership.platform_role` + `service_membership.role_code` 2-layer 구조 적용  
-> **0008 마이그레이션**: `organization.type`에서 `ACADEMY` 제거 → `COMPANY/TEAM/PERSONAL`  
-> **0008 마이그레이션**: `delegation_grant.capability` 네임스페이스 `ACADEMY.*` 적용  
+> **현행 스키마 반영**: `membership.platform_role` + `service_membership.role_code` 2-layer 구조 적용  
+> **현행 스키마**: `organization.type`에서 `ACADEMY` 제거 → `COMPANY/TEAM/PERSONAL`  
+> **현행 스키마**: `delegation_grant.capability` 네임스페이스 `ACADEMY.*` 적용  
 > Gherkin 형식 (English keywords, Korean content). 통합 테스트: vitest + supertest
 
 **상태 범례**: ⚠️ 구현 후 활성화
@@ -49,7 +49,7 @@ Scenario: 신규 학원장 가입 시 platform_db 원자적 생성
   And identity_user.perm_version=1
 ```
 
-> `organization.type='COMPANY'` — 0008 이후 ACADEMY 타입 제거. 서비스 종류는 `org_entitlement.service='ACADEMY'`로 결정.
+> `organization.type='COMPANY'` — 현행 ACADEMY 타입 제거. 서비스 종류는 `org_entitlement.service='ACADEMY'`로 결정.
 
 ### P1-02: 멀티 워크스페이스 — 1 user, N org
 
@@ -687,7 +687,7 @@ Scenario: OTP 5회 연속 실패 → 차단
 | F1-02 약관 동의 | ⚠️ | user_consent_event 미구현. 현재 앱 레이어에서만 처리 |
 | F3-01~04 강사 초대/수락/만료/제거 | ✅ | membership_invite + membership + service_membership 설계 완료 (P1-02/03) |
 | F4-01~04 멀티 워크스페이스 | ✅ | membership 복합 PK(user_pk, org_pk) 설계 완료 (P1-02) |
-| F5-01~05 Trust Grant | ✅ | delegation_grant 구현 완료. capability 네임스페이스 `ACADEMY.*` 0008 적용 (P3-01) |
+| F5-01~05 Trust Grant | ✅ | delegation_grant 구현 완료. capability 네임스페이스 `ACADEMY.*` 적용 (P3-01) |
 | F6-01~04 Agent 인증 | 🟡 | identity_user.type='SERVICE' ✅. api_key 테이블은 미구현 |
 | F7-01~05 권한 거부 | ✅ | 3-gate(Gate A/B/C) + VerifyOnDb 설계 완료 (P2/P3) |
 | F11~F16 파이프라인 | ✅ (academy_db) | platform_db와 직접 무관. entitlement.feature_limits로 cap 확인 |
