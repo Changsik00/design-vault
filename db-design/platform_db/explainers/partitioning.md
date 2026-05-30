@@ -297,4 +297,4 @@ INDEX idx_audit_pk (pk)  -- 필요 시 추가
 - [[online-ddl-migration|온라인 DDL & 마이그레이션]] — 파티션 추가가 온라인 DDL인지 확인하는 방법
 > 소스 문서
 - [[schema-reference]] — D.8 audit_log DDL (파티션 정의, 복합 PK, DATETIME 선택 이유)
-- [[review-checklist]] — P2-3 파티션 자동 추가 미구현 이슈
+- [[schema-reference]] — §D.8 audit_log 파티션 자동 추가 미구현 경고

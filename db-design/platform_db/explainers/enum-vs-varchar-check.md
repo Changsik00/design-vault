@@ -160,7 +160,7 @@ CONSTRAINT chk_entitlement_service
 **여전히 ENUM으로 남아있는 컬럼들:**
 
 ```sql
--- org_subscription.pg_provider (→ [[review-checklist]] P1-6 마이그레이션 계획 참조)
+-- org_subscription.pg_provider (→ [[architecture]] §4 D6 미적용 사례 참조)
 pg_provider ENUM('TOSS','STRIPE','PAYPAL','MANUAL') NOT NULL
 
 -- payment_ledger.pg_provider
@@ -278,4 +278,4 @@ ALTER TABLE product
 > 소스 문서
 - [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.9 product (service 컬럼 예시), D.16-D.18 (pg_provider ENUM 미적용 사례)
-- [[review-checklist]] — P1-6 pg_provider ENUM → VARCHAR+CHECK 마이그레이션 계획
+- [[architecture]] — §4 D6 미적용 사례 (pg_provider ENUM → VARCHAR+CHECK 계획)

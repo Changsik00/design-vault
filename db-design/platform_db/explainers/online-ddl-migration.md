@@ -330,4 +330,4 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 > 소스 문서
 - [[architecture]] — §4 D6 결정, D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.13 org_subscription, D.17 payment_ledger (pg_provider 마이그레이션 대상)
-- [[review-checklist]] — P1-6 ENUM → VARCHAR+CHECK 마이그레이션 계획
+- [[migration-ops]] — 마이그레이션 작성·journal·롤백 절차

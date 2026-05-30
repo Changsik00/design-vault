@@ -12,7 +12,7 @@ tags:
 
 # platform_db — 아키텍처 & 의사결정 핸드북
 
-> 작성일: 2026-05-28 · 유지: dennis
+> 작성일: 2026-05-28
 >
 > **이 문서가 무엇인가**: `platform_db` 설계의 "무엇을·왜·무엇을 일부러 안 했나·운영 중 무슨 일이 생기면 어떻게 하나"를 한 곳에 담은 핸드북. ADR + 설계 결정 + 운영 플레이북을 통합한다.
 >
@@ -99,17 +99,17 @@ tags:
 > 이 항목들은 R3 자체 분석 결과 채택된 장기 설계 방향이다.
 > **현재 코드와 다르므로** 코드 리뷰 체크리스트가 아닌 *로드맵 체크리스트*로 사용한다.
 
-**G1. role 2단 분리** _(D1 · 현재: 단일 `membership.role` ENUM, 목표: `membership.platform_role` + `service_membership.role_code` 분리)_
+**G1. role 2단 분리** _(D1 · ✅ 0008 완료: `membership.platform_role` + `service_membership.role_code`)_
 
-> 현재 `membership.role = OWNER | DIRECTOR | TEACHER | MEMBER | STUDENT | PARENT`는 academy 서비스에 특화된 역할 체계다. 멀티서비스 확장 시 새 서비스마다 role이 폭증·충돌한다. 목표 구조: `platform_role`(OWNER/ADMIN/MEMBER — 테넌트 소속 권위)과 `service_membership.role_code`(academy.TEACHER / market.SELLER 등 서비스 도메인 역할)로 분리.
+> **0008로 구현 완료.** `platform_role`(OWNER/MEMBER/SERVICE — 테넌트 권위)과 `service_membership.role_code`(academy.DIRECTOR/TEACHER 등 서비스 도메인 역할)로 분리. role→action 매핑은 코드 상수 `ROLE_PERMISSION[service]`가 권위. ⚠️ 초기 명세의 `ADMIN`은 미채택 — owner 아닌 사람은 MEMBER, 관리 권한은 서비스 역할/위임으로 표현(org 레벨 비-owner 관리자 수요 시 재검토).
 
-**G2. 권한 어휘 서비스 네임스페이스** _(D2 · 현재: `capability = PUBLISH_VIDEO` 등 평문, 목표: `<service>.<action>`)_
+**G2. 권한 어휘 서비스 네임스페이스** _(D2 · ✅ 0008 완료: `ACADEMY.<action>`)_
 
-> 현재 `delegation_grant.capability` 값은 academy-only 평문(`PUBLISH_VIDEO`, `APPROVE_VIDEO` 등). 멀티서비스에서 어느 서비스의 권한인지 파싱 불가. 목표: `academy.publish_video`, `market.approve_listing` 등 `<service>.<action>` 네임스페이스. role→action 매핑은 코드 상수(`ROLE_PERMISSION[service][role]`) — DB 레지스트리 저장 금지.
+> **0008로 구현 완료.** `delegation_grant.capability`가 `ACADEMY.PUBLISH_VIDEO` 등 `<service>.<action>` 네임스페이스로 전환. ⚠️ CHECK 목록은 여전히 하드코딩이라 멀티서비스(`MARKET.<action>`) 추가 시 마이그레이션이 필요 — 네임스페이스는 적용했으나 "마이그레이션 없는 개방"은 아직.
 
-**G3. `organization.type` → service-agnostic `org_kind`** _(D5 · 현재: `type ENUM(ACADEMY, COMPANY, TEAM, PERSONAL)`, 목표: generic kind + `org_entitlement.service` 조합)_
+**G3. `organization.type` → service-agnostic `org_kind`** _(D5 · 🟡 0008 부분: ACADEMY 제거, ENUM 유지)_
 
-> 현재 `organization.type`에 `ACADEMY`가 포함되어 org 자체가 서비스에 종속됨. 목표: org는 순수 tenant(kind = INDIVIDUAL / TEAM / ENTERPRISE 등), 서비스 접근은 `org_entitlement.service`만으로 판단.
+> **0008로 부분 진행.** `type ENUM('COMPANY','TEAM','PERSONAL')` — ACADEMY 제거로 org가 특정 서비스에 종속되지 않게 됨. 서비스 접근은 `org_entitlement.service`로 판단. 다만 `org_kind VARCHAR+CHECK`(완전 generic) 전환은 미완 — org.type은 저빈도 변경이라 당장 ENUM 유지.
 
 ---
 
@@ -119,11 +119,11 @@ tags:
 
 | ID | 결정 | 구현 상태 | 왜 | 기각/대안 |
 |---|---|---|---|---|
-| **D1** | role 2단: `platform_role` + `service_membership.role_code` | 🟡 **목표** — 현재: `membership.role` ENUM 단일. phase-17 대상 | 서비스마다 role 어휘·hierarchy·matrix가 달라 단일 글로벌 ENUM은 폭증·충돌 | 단일 `membership.role` ENUM(academy 종속) |
-| **D2** | capability 네임스페이스 `<service>.<action>`(`delegation_grant.capability_code`) | 🟡 **목표** — 현재: `capability` 6종 CHECK 고정. phase-17 대상 | academy 어휘(PUBLISH_VIDEO)가 platform에 고착되는 것 방지 | academy-only ENUM |
+| **D1** | role 2단: `platform_role` + `service_membership.role_code` | ✅ **0008 구현** — platform_role(OWNER/MEMBER/SERVICE, ADMIN 미채택) + service_membership 신규 | 서비스마다 role 어휘·hierarchy·matrix가 달라 단일 글로벌 ENUM은 폭증·충돌 | 단일 `membership.role` ENUM(academy 종속) |
+| **D2** | capability 네임스페이스 `<service>.<action>`(`delegation_grant.capability`) | ✅ **0008 구현** — `ACADEMY.*` CHECK. ⚠️ 멀티서비스 추가는 여전히 마이그레이션 | academy 어휘(PUBLISH_VIDEO)가 platform에 고착되는 것 방지 | academy-only ENUM |
 | **D3** | role→action 매핑은 **코드 상수**, DB 레지스트리는 P2 | ✅ 구현됨 | DB에 rule 넣으면 디버깅 지옥·traceability 붕괴(Stripe/Linear도 코드) | DB `role_capability` 레지스트리 보류(테넌트 커스텀롤 트리거 시만) |
 | **D4** | 서비스 계정 = `platform_role='SERVICE'` + `api_key` | 🟡 type='SERVICE' ✅, api_key 테이블 phase-17 | 사람·머신 동일 3-gate, 감사 통합 | 글로벌 `AGENT_*` role / 별도 agent 테이블 |
-| **D5** | `organization.org_kind`(generic) + 서비스는 entitlement | 🟡 **목표** — 현재: `type ENUM('ACADEMY','COMPANY','TEAM','PERSONAL')`. phase-17 대상 | org은 tenant, service는 capability — 분리 | `type ENUM(ACADEMY…)` 서비스 종속 |
+| **D5** | `organization.org_kind`(generic) + 서비스는 entitlement | 🟡 **0008 부분** — ACADEMY 제거(`ENUM('COMPANY','TEAM','PERSONAL')`), `org_kind` VARCHAR+CHECK 전환은 미완 | org은 tenant, service는 capability — 분리 | `type ENUM(ACADEMY…)` 서비스 종속 |
 | **D6** | service 식별자 `VARCHAR(50)+CHECK` | ✅ 구현됨 | 서비스 추가가 온라인 DDL(CHECK 1줄 추가, 테이블 락 없음) | ENUM(변경 시 테이블 락) |
 | **D7** | `user_consent_event` **append-only 이벤트** | ⚠️ 설계 확정, phase-17 구현 | mutable boolean이면 반복 on/off 이력 소실→PIPA 분쟁 입증 불가 | `granted boolean + revoked_at` |
 | **D8** | `api_key` 하드닝(`allowed_ip_cidr`·`rotated_at`·`revoked_reason`) | ⚠️ 설계 확정, phase-17 구현 | B2B 키 유출 대비(Confused Deputy 방지) | — |
@@ -182,8 +182,8 @@ Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 | `getDelegationGrants`, `bumpPermVersion` | identity | ✅ |
 | `getEntitlement`, `getEntitlementByService` | billing | ✅ |
 | `getFeatureLimit`, `getFeatureLimitByProduct` | billing | ✅ |
-| `getPermissionContext`, `checkGateA` | gates | ✅ |
-| `checkGateB(orgPk, service)` | gates | ✅ service 파라미터 지원. 기본값 `"ACADEMY"`. 신규 서비스는 service 명시 필요 |
+| `getPermissionContext`, `checkGateA` | gates | ✅ DB 함수. NestJS `GateAGuard`(실시간 재검증)는 미구현 — 🧊 Icebox. 현재 Firebase custom claims로 간접 커버(취소 시 ~1h stale) |
+| `checkGateB(orgPk, service)` | gates | ✅ `GateBGuard`로 래핑. service 파라미터 지원, 기본값 `"ACADEMY"`. 신규 서비스는 service 명시 필요 |
 
 ---
 

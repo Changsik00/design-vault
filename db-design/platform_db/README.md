@@ -33,7 +33,7 @@ platform_db/
 | [[architecture]] | 아키텍처 핸드북 (진입점) — 8라운드 설계 여정, D1~D12 결정, 운영 플레이북 |
 | [[schema-reference]] | ERD · DDL · 3-gate · billing 흐름 · 멀티테넌시 · 보안 · consent 모델 |
 | [[requirements]] | 요구사항 추적표 104건 + BDD 시나리오 Domain 1~10 |
-| [[review-checklist]] | 설계 검토 체크리스트 P0~P5 (42건, 23 완료) |
+| [[bdd-scenarios]] | BDD 시나리오 — 10개 도메인 행위 시나리오 (통합 테스트 기반) |
 | [[migration-ops]] | Drizzle 마이그레이션 운영 가이드 (0000~0006) |
 
 ---

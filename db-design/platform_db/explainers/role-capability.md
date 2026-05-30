@@ -20,13 +20,13 @@ aliases:
 > **대상**: DB 지식이 많지 않은 개발자  
 > **연관 문서**: [[architecture|architecture.md]] §3.1 불변식, §4 D1-D3, §5.3 RBAC/ABAC/ReBAC · [[schema-reference|schema-reference.md]] §D.4 membership, §D.6 delegation_grant
 
-`platform_db`의 role 체계는 현재 "아직 academy에 묶여 있는 상태"와 "멀티서비스를 향한 설계 목표" 사이 중간 어딘가에 있습니다. 이 문서는 현재 상태의 문제, 목표 구조, 그리고 capability가 무엇인지를 설명합니다.
+`platform_db`의 role 체계는 **0008 마이그레이션으로 2단 분리가 구현**됐습니다(`membership.platform_role` + `service_membership.role_code`). 이 문서는 *왜* academy 종속 단일 ENUM에서 2단 구조로 바꿨는지, platform_role과 service_role이 무엇인지, capability가 무엇인지를 설명합니다.
 
 ---
 
-## Q1. 현재 membership.role에 OWNER, DIRECTOR, TEACHER, MEMBER, STUDENT, PARENT가 있는데, 이게 왜 문제인가요?
+## Q1. 원래 membership.role에 OWNER, DIRECTOR, TEACHER, MEMBER, STUDENT, PARENT가 있었는데, 이게 왜 문제였나요?
 
-현재 `membership` 테이블의 `role` 컬럼은 이렇게 생겼습니다.
+0008 이전 `membership` 테이블의 `role` 컬럼은 이렇게 생겼었습니다.
 
 ```sql
 CREATE TABLE membership (
@@ -71,21 +71,17 @@ OWNER는 조직의 최고 관리자라는 platform-level 개념입니다. TEACHE
 
 ## Q2. platform_role과 service_role로 나누면 어떻게 달라지나요?
 
-목표 구조(D1)는 role을 두 계층으로 분리하는 것입니다.
+**0008로 구현된 구조** — role을 두 계층으로 분리했습니다.
 
 ```
-현재 (단일 ENUM, academy 종속):
+0008 이전 (단일 ENUM, academy 종속):
   membership.role = OWNER | DIRECTOR | TEACHER | MEMBER | STUDENT | PARENT
 
-목표 (2단 분리):
-  membership.platform_role  = OWNER | ADMIN | MEMBER | SERVICE  ← 테넌트 소속 권위 (platform-level)
-  service_membership.role_code = academy.TEACHER                ← 서비스 도메인 역할
-                                  academy.STUDENT
-                                  market.SELLER
-                                  market.BUYER
-                                  fitness.TRAINER
-                                  fitness.TRAINEE
-                                  ...
+0008 이후 (2단 분리):
+  membership.platform_role            = OWNER | MEMBER | SERVICE     ← 테넌트 소속 권위 (platform-level)
+  service_membership(service, role_code) = ('ACADEMY','DIRECTOR')    ← 서비스 도메인 역할
+                                           ('ACADEMY','TEACHER')
+                                           ('MARKET','SELLER') ...
 ```
 
 **분리 후 각 계층의 역할**:
@@ -93,35 +89,32 @@ OWNER는 조직의 최고 관리자라는 platform-level 개념입니다. TEACHE
 ```
 platform_role (membership 테이블에):
   OWNER   - 조직을 만든 사람. 조직 삭제, 결제 관리, 멤버 초대 최고 권한
-  ADMIN   - OWNER가 지정한 관리자. 멤버 관리, 설정 변경
   MEMBER  - 일반 구성원. 서비스별 역할로 세부 권한 결정
   SERVICE - API 키 사용자(봇/머신). 사람이 아닌 서비스 계정
+  ⚠️ 초기 명세의 ADMIN은 미채택 — owner 아닌 사람은 MEMBER, 관리 권한은 서비스 역할/위임으로 표현
 
-service_membership.role_code (서비스별 별도 테이블에):
-  academy.DIRECTOR  - 학원 원장
-  academy.TEACHER   - 강사
-  academy.STUDENT   - 학생
-  academy.PARENT    - 학부모
-  market.SELLER     - 마켓 판매자
-  market.BUYER      - 마켓 구매자
+service_membership (platform_db 안, (service, role_code) 컬럼):
+  ('ACADEMY','DIRECTOR')  - 학원 원장
+  ('ACADEMY','TEACHER')   - 강사
+  ('ACADEMY','STUDENT')   - 학생
+  ('MARKET','SELLER')     - 마켓 판매자
 ```
 
-이 구조의 장점은 서비스가 추가될 때 `platform_db`의 `membership` 테이블을 건드리지 않아도 된다는 것입니다. 새 서비스는 자기 DB에 `service_membership` 테이블을 만들고, `role_code` 값을 자유롭게 정의합니다. 플랫폼 공통 테이블은 변경 없이 유지됩니다.
+이 구조의 장점은 서비스가 추가돼도 `membership` 테이블을 건드리지 않는다는 것입니다. `service_membership`(platform_db 공통)에 `(service, role_code)` 행만 추가하면 되고, role 어휘는 코드 상수 `ROLE_PERMISSION[service]`가 권위라 DB 스키마 변경이 없습니다.
 
 ```sql
--- 목표 구조의 쿼리 패턴
 -- "행복학원에서 이 사용자의 academy 역할은?"
 SELECT role_code FROM service_membership
 WHERE user_pk = ? AND org_pk = ? AND service = 'ACADEMY';
--- 결과: 'academy.TEACHER'
+-- 결과: 'DIRECTOR'
 
--- "이 사용자가 조직의 ADMIN 이상인가?" (platform-level)
+-- "이 사용자가 조직 OWNER인가?" (platform-level)
 SELECT platform_role FROM membership
 WHERE user_pk = ? AND org_pk = ?;
--- 결과: 'ADMIN'
+-- 결과: 'OWNER'
 ```
 
-> 💡 **한 줄 요약**: platform_role은 "조직에서의 지위"(관리자인가 아닌가), service_role은 "서비스 내 도메인 역할"(강사인가 학생인가)로 관심사를 분리합니다.
+> 💡 **한 줄 요약**: platform_role은 "조직에서의 지위"(OWNER/MEMBER/SERVICE), service_role(role_code)은 "서비스 내 도메인 역할"(DIRECTOR/TEACHER/STUDENT)로 관심사를 분리합니다. 0008로 구현 완료.
 
 ---
 
