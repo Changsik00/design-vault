@@ -131,5 +131,5 @@ Firebase에서 다른 AuthN 제공자(Auth0, Cognito 등)로 교체 시:
 - [[gate-abc-flow]] — Firebase 인증 통과 후 우리 DB가 도는 3-gate 흐름
 - [[role-as-code]] · [[auth-projection]] — "우리 DB가 인가한다"의 구체 내용
 > 소스 문서
-- [[architecture]] — §3.1 불변식 #1 (Firebase = 인증, 인가 = 우리 DB)
+- [[architecture]] — §2.1 불변식 #1 (Firebase = 인증, 인가 = 우리 DB)
 - [[schema-reference]] — §D.1 identity_user(firebase_uid), §E 3-gate 구조

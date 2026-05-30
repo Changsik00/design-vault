@@ -18,7 +18,7 @@ aliases:
 # role 2단 분리와 capability 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture|architecture.md]] §3.1 불변식, §4 D1-D3, §5.3 RBAC/ABAC/ReBAC · [[schema-reference|schema-reference.md]] §D.4 membership, §D.6 delegation_grant
+> **연관 문서**: [[architecture|architecture.md]] §2.1 불변식, §3.1 D1-D3, §1.2 RBAC/ABAC/ReBAC · [[schema-reference|schema-reference.md]] §D.4 membership, §D.6 delegation_grant
 
 `platform_db`의 role 체계는 **0008 마이그레이션으로 2단 분리가 구현**됐습니다(`membership.platform_role` + `service_membership.role_code`). 이 문서는 *왜* academy 종속 단일 ENUM에서 2단 구조로 바꿨는지, platform_role과 service_role이 무엇인지, capability가 무엇인지를 설명합니다.
 
@@ -393,5 +393,5 @@ const canDo = ability.can('approve', lecture);
 - [[gate-b-entitlement|Gate B & 엔타이틀먼트]] — Gate B(이용권) vs Gate C(세부 정책) 차이
 - [[multitenancy-rls|Pool 모델 + RLS]] — org_pk 격리와 role 체계의 관계
 > 소스 문서
-- [[architecture]] — §3.1 불변식, §4 D1/D2/D3 결정, §5.3 RBAC/ABAC/ReBAC 정의
+- [[architecture]] — §2.1 불변식, §3.1 D1/D2/D3 결정, §1.2 RBAC/ABAC/ReBAC 정의
 - [[schema-reference]] — D.4 membership DDL, D.6 delegation_grant DDL

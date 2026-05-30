@@ -47,7 +47,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | EXT-3 | role→action 매핑은 **코드 상수** (서비스 역할 추가 = 코드 배포, 스키마 무변경) | 새 서비스 역할 권한 추가 시 DB DDL = 0 | ✅ [[role-as-code]] `ROLE_PERMISSION[service]` |
 | EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 0008 |
 | EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 — `checkGateB(...="ACADEMY")` 기본값. 2번째 서비스 도입 시 중립화 ([[service-extensibility]]) |
-| EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §12.1 단편) |
+| EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §2.4 단편) |
 
 > **결정 완료**: EXT-1/EXT-2/EXT-5의 service·capability 결합은 [[service-extensibility]]에서 종결 — **Option A(CHECK 유지) 채택**(온라인 저비용 + YAGNI, 코어가 어휘를 아는 건 의도적 수용). 2번째 서비스 churn 시 코드/데이터 기반(B/C)으로 전환(트리거 명시). 그래서 🔴(미관리 부채)가 아니라 **🟡(의도적·시한부 트레이드오프)**.
 
@@ -79,7 +79,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | USR-1 | 1 firebase_uid = 전 서비스 동일 사용자(SSOT) | R0 | identity_user 중앙화 | ✅ |
 | USR-2 | 내부 PK BIGINT, 외부 노출 ULID(`public_id`) | R0 | 불변식 #2 | ✅ |
 | USR-3 | HUMAN/SERVICE/SYSTEM 동일 모델 + type 구분 | R0 | identity_user.type | ✅ |
-| USR-4 | 표시이름 SSOT는 `user_profile`, 서비스별 프로필은 서비스 DB | R0 | §3.1 | ✅ |
+| USR-4 | 표시이름 SSOT는 `user_profile`, 서비스별 프로필은 서비스 DB | R0 | §2.1 | ✅ |
 | USR-5 | email은 ACTIVE 중 unique(탈퇴 후 재사용 허용) | R2 | unique index (DDL 규약) | 🟡 P0 |
 | USR-6 | 상태 ACTIVE/SUSPENDED/DELETED, soft→hard delete, anonymize | R0 | identity_user.status + deleted_at | ✅ |
 | USR-7 | 1 user = N org (멀티 워크스페이스) | R0 | membership 복합 PK | ✅ |
@@ -108,7 +108,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
 | RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
 | RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
-| RBAC-8 | ROLE_PERMISSION 변경 배포 SLA 명시 — hot-fix vs weekly | R6 | §15 열린 결정 | ❓ |
+| RBAC-8 | ROLE_PERMISSION 변경 배포 SLA 명시 — hot-fix vs weekly | R6 | §5.3 열린 결정 | ❓ |
 | ABAC-1 | 소유권(`owner_pk == principal`) 기반 통제 | R0 | CASL ability | ✅ |
 | ABAC-2 | 테넌트 속성(`org_pk` 일치) 모든 도메인 강제 | R0 | 불변식 #3 | ✅ |
 | ABAC-3 | feature_limit 한도 평가(entitlement), 카운터는 서비스측 | R2 | org_entitlement.feature_limits | ✅ |
@@ -129,9 +129,9 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| BILL-1 | cross-service 단일 상품 카탈로그(product/product_sku) | R0 | §3.2 | ✅ |
+| BILL-1 | cross-service 단일 상품 카탈로그(product/product_sku) | R0 | §2.3 | ✅ |
 | BILL-2 | `org_entitlement` = 런타임 권위 (Gate B만, ledger 직접 조회 금지) | R0 | 불변식 #4 | ✅ |
-| BILL-3 | 결제→entitlement 단일 트랜잭션 + perm_version + outbox | R0 | §6.1 | ✅ |
+| BILL-3 | 결제→entitlement 단일 트랜잭션 + perm_version + outbox | R0 | §1.3 | ✅ |
 | BILL-4 | 멱등(webhook `event_id` UNIQUE, payment `idempotency_key` UNIQUE) | R0 | pg_webhook_event / payment_ledger | ✅ |
 | BILL-5 | 환불/chargeback append-only, 금액은 정수 minor(float 금지) | R0 | payment_ledger | ✅ |
 | BILL-6 | GRACE 유예기간, grace_until | R0 | org_entitlement.grace_until | ✅ |
@@ -151,7 +151,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | TEN-5 | Qdrant payload 필터 + `org_id` 인덱스 | R1 | [[rag-multitenancy]] | 🟡 |
 | TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | — | 🟡 |
 | TEN-7 | 분리 트리거 T1~T4 사전 정의 | R0 | [[multitenancy-pool]] | ✅ |
-| TEN-9 | rate-limit 정책 위치 — org=`feature_limits` / 머신=`api_key.rate_limit_tier`, 강제는 Gateway | R6 | §4 결정 | 🟡 |
+| TEN-9 | rate-limit 정책 위치 — org=`feature_limits` / 머신=`api_key.rate_limit_tier`, 강제는 Gateway | R6 | §3.1 결정 | 🟡 |
 
 ### P5 — 감사 & 동의 컴플라이언스
 
@@ -171,7 +171,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ⚠️ phase-17 |
 | CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ⚠️ phase-17 |
 | CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ⚠️ phase-17 |
-| CON-12 | fan-out anonymize — 탈퇴 시 outbox `user.deleted` → 각 서비스 anonymize | R6 | §12.6 | 🟡 P1 |
+| CON-12 | fan-out anonymize — 탈퇴 시 outbox `user.deleted` → 각 서비스 anonymize | R6 | §4 | 🟡 P1 |
 | CON-13 | 동의 `meta_json` canonical(RFC 8785 JCS) + JSON Schema 검증 | R6 | user_consent_event | 🟡 P1 |
 
 ### P6 — 머신·B2B 신원 (api_key)
@@ -199,17 +199,17 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | SEC-3 | 감사 불변성 — UPDATE/DELETE 권한 제거 + 해시 체이닝 + WORM | R4 | append-only ✅ / 해시 🟡 | 🟡 |
 | SEC-4 | secret 관리 — KMS, 평문 로그 금지 | R0 | 정책 | ✅ |
 | SEC-6 | secret rotation cadence — api_key 90/365d, Firebase Admin SDK 180d | R7 | 운영 플레이북 | 🟡 |
-| SEC-8 | 데이터 분류(PII/민감/미성년/결제) + 선별 app-level 암호화(secret·guardian) | R7 | §9 | 🟡 분류 P0·암호화 P1 |
+| SEC-8 | 데이터 분류(PII/민감/미성년/결제) + 선별 app-level 암호화(secret·guardian) | R7 | §2.2 | 🟡 분류 P0·암호화 P1 |
 | NFR-1 | routine read 권한평가 DB hit 0(JWT claims), sensitive write만 DB 재검증 | R0 | @VerifyOnDb | ✅ |
 | NFR-2 | perm_version 무효화 폭 분리(user/org) | R2 | bumpPermVersion | ✅ |
 | NFR-3 | 확장 로드맵 — read replica → 테이블 분리 → DB-per-tenant | R0 | [[multitenancy-pool]] | ✅ |
 | NFR-4 | permission_snapshot 프론트 read-model | R3 | GET /me/permissions | 🟡 |
-| NFR-6 | perm_version 전파 — `/me/permissions {user_pv, org_pv}`, X-PV 헤더, 멀티인스턴스 sync | R6 | §5.4 | ✅(설계)/🟡(P1) |
-| OPS-1 | platform_db 비대화 방어 — 논리 바운디드 컨텍스트(모듈·오너·절단선) | R7 | §12.1 | ✅(원칙)/🟡(구현) |
-| OPS-2 | Break-glass 긴급 운영 접근 — 승인·사유·만료·전건 감사 | R7 | §12.4 / [[break-glass]] | 🟡 P1 |
+| NFR-6 | perm_version 전파 — `/me/permissions {user_pv, org_pv}`, X-PV 헤더, 멀티인스턴스 sync | R6 | §1.2 | ✅(설계)/🟡(P1) |
+| OPS-1 | platform_db 비대화 방어 — 논리 바운디드 컨텍스트(모듈·오너·절단선) | R7 | §2.4 | ✅(원칙)/🟡(구현) |
+| OPS-2 | Break-glass 긴급 운영 접근 — 승인·사유·만료·전건 감사 | R7 | §4 / [[break-glass]] | 🟡 P1 |
 | OPS-3 | service-to-service trust — HTTP 분리 시 mTLS/internal JWT, `internal/*` 내부망 전용 | R7 | Option B 전환 시 | ⛔ |
-| OPS-4 | secret rotation cadence — KMS DEK 연 1회 등 (→ SEC-6) | R6 | §12.3 | 🟡 P1 |
-| USR-9 | 휴면(DORMANT) — 유효기간제 2023 폐지로 법 의무 아님, 선택적 제품정책 | R6 | §11 YAGNI | ⛔→🟡 제품 결정 |
+| OPS-4 | secret rotation cadence — KMS DEK 연 1회 등 (→ SEC-6) | R6 | §4 | 🟡 P1 |
+| USR-9 | 휴면(DORMANT) — 유효기간제 2023 폐지로 법 의무 아님, 선택적 제품정책 | R6 | §2.4 YAGNI | ⛔→🟡 제품 결정 |
 
 ---
 

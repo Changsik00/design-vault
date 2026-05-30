@@ -16,7 +16,7 @@ aliases:
 # feature_limits 3중 정의 우선순위 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §3.1 불변식 #10, [[schema-reference]] §D.10, §D.12, §D.15
+> **연관 문서**: [[architecture]] §2.1 불변식 #10, [[schema-reference]] §D.10, §D.12, §D.15
 
 코드를 처음 보면 `feature_limits`가 여러 테이블에 나뉘어 있어서 "이걸 어디서 읽어야 하지?"라는 의문이 생깁니다. 결론부터 말하면: **[[gate-b-entitlement|org_entitlement]]`.feature_limits`만 읽으면 됩니다.** 나머지는 이 값을 만들 때 참고용입니다.
 
@@ -353,5 +353,5 @@ const limit = await getFeatureLimit(orgPk, service, 'daily_uploads');
 - [[subscription-lifecycle|구독 상태 머신]] — 플랜 변경 시 feature_limits 갱신 시점
 - [[index-design|인덱스 설계]] — JSON 컬럼 조회 방식
 > 소스 문서
-- [[architecture]] — §3.1 불변식 #10 (feature_limits SSOT)
+- [[architecture]] — §2.1 불변식 #10 (feature_limits SSOT)
 - [[schema-reference]] — D.10 product_feature, D.15 plan_definition, D.12 org_entitlement

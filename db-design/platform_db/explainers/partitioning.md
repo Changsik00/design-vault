@@ -18,7 +18,7 @@ aliases:
 # DB 파티셔닝 설명 (audit_log 파티션 예시)
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[schema-reference]] §D.8, [[architecture]] §12.11
+> **연관 문서**: [[schema-reference]] §D.8, [[architecture]] §4
 
 [[audit-hash-chain|audit_log]]는 서비스가 살아있는 한 매일 쌓이는 테이블입니다. 1년만 운영해도 수천만 건이 넘을 수 있어요. 이 문서는 "왜 파티셔닝을 썼는지, 어떻게 동작하는지"를 처음 접하는 분도 이해할 수 있도록 설명합니다.
 
@@ -173,7 +173,7 @@ p_future: 7월~무한대 데이터 (5000만 행!) → 거대한 파티션 → �
 그래서 **운영 정기 작업(분기 1회)** 으로 새 파티션을 미리 [[online-ddl-migration|온라인 DDL]]로 추가해야 합니다.
 
 ```sql
--- architecture.md §12.11 정기 운영 작업:
+-- architecture.md §4 정기 운영 작업:
 -- "audit_log 파티션 추가: 분기 1회"
 ALTER TABLE audit_log
   REORGANIZE PARTITION p_future INTO (
@@ -286,7 +286,7 @@ INDEX idx_audit_pk (pk)  -- 필요 시 추가
 2. **어떻게 동작하나**: RANGE 파티셔닝으로 `created_at` 날짜 범위에 따라 자동 분류, 조회 시 관련 파티션만 스캔
 3. **유지보수 포인트**: 분기마다 새 파티션을 미리 추가해야 `p_future` 비대화를 방지
 
-관련 운영 작업은 [[architecture]] §12.11 정기 운영 섹션을 참고하세요.
+관련 운영 작업은 [[architecture]] §4 정기 운영 섹션을 참고하세요.
 
 ---
 

@@ -19,7 +19,7 @@ aliases:
 # 삭제·이력 보존 패턴 설명 (status / deleted_at / append-only)
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[schema-reference]] §D.1·§D.4·§I, [[architecture]] §3.1, [[pipa-consent]], [[audit-hash-chain]]
+> **연관 문서**: [[schema-reference]] §D.1·§D.4·§I, [[architecture]] §2.1, [[pipa-consent]], [[audit-hash-chain]]
 
 `platform_db`에는 `DELETE FROM ...`로 row를 진짜 지우는 코드가 거의 없습니다. 대신 세 가지 "삭제처럼 보이는" 패턴을 씁니다. 왜 그런지, 언제 무엇을 쓰는지 설명합니다.
 
@@ -153,4 +153,4 @@ GRANT INSERT ON platform_db.audit_log TO 'audit_append'@'%';
 - [[idempotency-key]] — payment_ledger append-only 원장과 멱등 처리
 > 소스 문서
 - [[schema-reference]] — §D.1 identity_user(status+deleted_at), §D.4 membership(status), §I user_consent_event(append-only), §M DB 계정 최소 권한
-- [[architecture]] — §3.1 불변식(soft-delete 3종), §7 정책·동의
+- [[architecture]] — §2.1 불변식(soft-delete 3종), §1.5 정책·동의

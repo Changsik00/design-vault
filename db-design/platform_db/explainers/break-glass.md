@@ -17,7 +17,7 @@ aliases:
 # Break-glass 긴급 접근 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[architecture]] §9 보안, §12.4 · [[schema-reference]] §D.8 audit_log
+> **연관 문서**: [[architecture]] §2.2 보안, §4 · [[schema-reference]] §D.8 audit_log
 
 운영 중에 예기치 못한 장애가 발생하면 "DB를 직접 수정해야 한다"는 압박을 받는 순간이 옵니다. 이 문서는 그 상황을 어떻게 안전하게 다루는지, 왜 아무나 아무 때나 DB를 건드리면 안 되는지를 설명합니다.
 
@@ -132,7 +132,7 @@ INSERT INTO audit_log (
 
 ## Q4. break-glass 접근 절차는 어떻게 되나요?
 
-`architecture.md §12.4`에 명시된 절차를 단계별로 설명합니다:
+`architecture.md §4`에 명시된 절차를 단계별로 설명합니다:
 
 ```
 Step 1: 요청 (운영자)
@@ -302,5 +302,5 @@ Break-glass는 "통제된 비상구"입니다. 없으면 장애 대응이 불가
 - [[audit-hash-chain|audit_log 해시 체인]] — break_glass=true 이벤트의 무결성 보장
 - [[pipa-consent|PIPA 동의]] — 동의 없는 비상 접근이 가져오는 법적 리스크
 > 소스 문서
-- [[architecture]] — §9 보안, §12.4 Break-glass 절차
+- [[architecture]] — §2.2 보안, §4 Break-glass 절차
 - [[schema-reference]] — D.8 audit_log DDL (break_glass 컬럼, idx_audit_break_glass 인덱스)

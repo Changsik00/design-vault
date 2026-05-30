@@ -18,7 +18,7 @@ aliases:
 # 구독 상태 머신 설명 (TRIALING → ACTIVE → CANCELED → EXPIRED)
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §6, [[schema-reference]] §D.12~D.13, §F.2~F.3, [[explainers/gate-b-billing-grace|Gate B 유예 기간 설계]]
+> **연관 문서**: [[architecture]] §1.3, [[schema-reference]] §D.12~D.13, §F.2~F.3, [[explainers/gate-b-billing-grace|Gate B 유예 기간 설계]]
 
 SaaS 구독에는 단순히 "결제됨/안됨" 이상의 상태가 있습니다. 무료 체험, 결제 실패, 취소 후 만료까지 — 각 상태가 사용자 경험과 직결됩니다. `platform_db`는 이 흐름을 두 개의 테이블(`org_subscription`, [[gate-b-entitlement|org_entitlement]])로 나눠서 관리합니다.
 
@@ -182,7 +182,7 @@ org_subscription.current_period_end → 2026-05-31T... (이미 정해져 있음)
 이 동작을 구현하는 배치 쿼리:
 
 ```sql
--- 매일 실행되는 배치 (architecture.md §12.11)
+-- 매일 실행되는 배치 (architecture.md §4)
 UPDATE org_entitlement
 SET status = 'EXPIRED'
 WHERE valid_until < NOW()
@@ -253,7 +253,7 @@ VALUES (?, 'ACADEMY', 'ACTIVE', 'PROMO', DATE_ADD(NOW(), INTERVAL 30 DAY));
 **이걸 방어하는 구조가 Gate B의 이중 체크입니다:**
 
 ```typescript
-// Gate B 실제 구현 (architecture.md §5.2 불변식 #9)
+// Gate B 실제 구현 (architecture.md §1.2 불변식 #9)
 const entitlement = await getEntitlementByService(orgPk, service);
 const now = new Date();
 
@@ -272,7 +272,7 @@ if (!pass) throw new PaymentRequiredException();
 **수동 복구가 필요한 경우:**
 
 ```sql
--- 운영 플레이북 (architecture.md §12.7)
+-- 운영 플레이북 (architecture.md §4)
 -- 1. 상태 확인
 SELECT status, valid_until, grace_until
 FROM org_entitlement
@@ -327,5 +327,5 @@ TRIALING (무료 체험)
 - [[outbox-pattern|Outbox 패턴]] — 구독 활성화 이벤트 비동기 fan-out 처리
 - [[webhook-processing|PG 웹훅 처리]] — PG webhook이 구독 상태를 갱신하는 흐름
 > 소스 문서
-- [[architecture]] — §6 데이터 일관성, §12.11 TRIALING→EXPIRED 자동 전환 배치
+- [[architecture]] — §1.3 데이터 일관성, §4 TRIALING→EXPIRED 자동 전환 배치
 - [[schema-reference]] — D.13 org_subscription DDL, F.2 구독 상태 머신

@@ -113,5 +113,5 @@ Admin role은 본질적으로 "role 파괴자"다 — 격리 불변식을 코드
 - [[multitenancy-pool]] — org_pk 행 격리 본문 (이 분리가 보호하는 불변식)
 - [[rag-multitenancy]] — Qdrant payload 필터 격리 (같은 원칙의 벡터 적용)
 > 소스 문서
-- [[architecture]] — §8 멀티테넌시 격리 전략
+- [[architecture]] — §1.4 멀티테넌시 격리 전략
 - [[schema-reference]] — §G 저장소별 격리 구현 현황

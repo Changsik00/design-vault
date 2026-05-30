@@ -17,7 +17,7 @@ aliases:
 # Outbox 패턴 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §3.1 불변식 #7, §6.2, [[schema-reference]] §D.19, §F.1
+> **연관 문서**: [[architecture]] §2.1 불변식 #7, §1.3, [[schema-reference]] §D.19, §F.1
 
 결제 성공 후 이메일을 보내고, 알림을 전송하고, 검색 인덱스를 갱신해야 합니다. 이런 "부수효과"를 어떻게 안정적으로 처리할까요? Outbox 패턴은 이 문제에 대한 검증된 해법입니다.
 
@@ -554,6 +554,6 @@ outbox가 없으면 MQ에도 at-least-once 보장이 깨집니다.
 - [[webhook-processing|PG 웹훅 처리]] — PG webhook(인바운드) vs outbox(아웃바운드) 역할 구분
 - [[subscription-lifecycle|구독 상태 머신]] — subscription.activated 이벤트가 outbox에 INSERT되는 시점
 > 소스 문서
-- [[architecture]] — §3.1 불변식 #7 (strong consistency = 단일 트랜잭션, async = outbox), §6.2 결제 단일 트랜잭션
+- [[architecture]] — §2.1 불변식 #7 (strong consistency = 단일 트랜잭션, async = outbox), §1.3 결제 단일 트랜잭션
 - [[schema-reference]] — D.19 outbox_event DDL, F.1 결제-권한 단일 트랜잭션 SQL
 - [[payment-atomicity]] — Kafka 대신 단일 트랜잭션 + outbox로 결제 원자성을 보장한 결정

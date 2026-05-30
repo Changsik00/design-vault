@@ -16,7 +16,7 @@ aliases:
 # ENUM vs VARCHAR+CHECK (D6 원칙) 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §4 D6, [[schema-reference]] §D.9, §K
+> **연관 문서**: [[architecture]] §3.1 D6, [[schema-reference]] §D.9, §K
 
 `platform_db`에서 서비스 식별자(`service` 컬럼)는 ENUM 대신 `VARCHAR(50) + CHECK constraint`로 설계되어 있습니다. 처음 보면 "ENUM이 더 간단하지 않나?" 싶겠지만, 여기엔 운영 장애를 막기 위한 명확한 이유가 있습니다.
 
@@ -160,7 +160,7 @@ CONSTRAINT chk_entitlement_service
 **여전히 ENUM으로 남아있는 컬럼들:**
 
 ```sql
--- org_subscription.pg_provider (→ [[architecture]] §4 D6 미적용 사례 참조)
+-- org_subscription.pg_provider (→ [[architecture]] §3.1 D6 미적용 사례 참조)
 pg_provider ENUM('TOSS','STRIPE','PAYPAL','MANUAL') NOT NULL
 
 -- payment_ledger.pg_provider
@@ -263,7 +263,7 @@ ALTER TABLE product
   ADD CONSTRAINT chk_product_service
     CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE','NEW_SERVICE'));
 
--- 3. architecture.md §3.1 불변식 #5 목록 업데이트
+-- 3. architecture.md §2.1 불변식 #5 목록 업데이트
 -- 4. checkGateB() 호출 시 service 파라미터 명시적 전달 확인
 ```
 
@@ -276,6 +276,6 @@ ALTER TABLE product
 - [[online-ddl-migration|온라인 DDL & 마이그레이션]] — 테이블 락이 서비스에 미치는 영향 상세
 - [[index-design|인덱스 설계]] — CHECK constraint와 인덱스의 조합
 > 소스 문서
-- [[architecture]] — §4 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 AI 리뷰)
+- [[architecture]] — §3.1 D6 결정 (service VARCHAR+CHECK)과 D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.9 product (service 컬럼 예시), D.16-D.18 (pg_provider ENUM 미적용 사례)
-- [[architecture]] — §4 D6 미적용 사례 (pg_provider ENUM → VARCHAR+CHECK 계획)
+- [[architecture]] — §3.1 D6 미적용 사례 (pg_provider ENUM → VARCHAR+CHECK 계획)

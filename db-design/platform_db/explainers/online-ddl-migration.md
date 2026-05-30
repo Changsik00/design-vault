@@ -19,7 +19,7 @@ aliases:
 # 온라인 DDL과 대형 테이블 마이그레이션 위험 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[architecture]] §4 D6, §12.10, [[schema-reference]] §K
+> **연관 문서**: [[architecture]] §3.1 D6, §4, [[schema-reference]] §K
 
 "컬럼 하나 추가했을 뿐인데 서비스가 멈췄다" — 실제 운영에서 자주 발생하는 사고입니다. 이 문서는 DDL 마이그레이션이 왜 위험하고, 어떻게 안전하게 할 수 있는지를 설명합니다.
 
@@ -147,7 +147,7 @@ ALTER TABLE membership
 | `VARCHAR` 길이 증가 | ✅ 온라인 (일부 조건부) |  |
 | `VARCHAR` 길이 감소 | ❌ 테이블 전체 재빌드 |  |
 
-[[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK]]를 쓰면 `ENUM`은 값을 추가할 때마다 전체 재빌드가 필요합니다. 이게 바로 [[architecture|D6 원칙]] §4에서 `service` 컬럼을 `ENUM` 대신 `VARCHAR(50) + CHECK`로 쓰는 이유입니다.
+[[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK]]를 쓰면 `ENUM`은 값을 추가할 때마다 전체 재빌드가 필요합니다. 이게 바로 [[architecture|D6 원칙]] §3.1에서 `service` 컬럼을 `ENUM` 대신 `VARCHAR(50) + CHECK`로 쓰는 이유입니다.
 
 > 💡 **한 줄 요약**: MySQL 8의 온라인 DDL은 많은 작업을 잠금 없이 처리하지만, MODIFY COLUMN이나 ENUM 수정은 여전히 전체 테이블 재빌드가 필요해서 위험합니다.
 
@@ -318,7 +318,7 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 2. **staging에서 먼저 시간 측정**: 운영과 비슷한 데이터 양으로 테스트합니다.
 3. **배포 전 SQL을 직접 읽을 것**: Drizzle이 생성한 migration이 `MODIFY COLUMN`이면 반드시 확인합니다.
 
-관련 아키텍처 결정은 [[architecture]] §4 D6 원칙과 [[schema-reference]] §K 서비스 확장 방법을 참고하세요.
+관련 아키텍처 결정은 [[architecture]] §3.1 D6 원칙과 [[schema-reference]] §K 서비스 확장 방법을 참고하세요.
 
 ---
 
@@ -328,5 +328,5 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 - [[index-design|인덱스 설계]] — 인덱스 추가 DDL의 온라인 여부
 - [[partitioning|DB 파티셔닝]] — 파티션 추가 운영과 DDL 특성
 > 소스 문서
-- [[architecture]] — §4 D6 결정, D6 미적용 사례 (R8 AI 리뷰)
+- [[architecture]] — §3.1 D6 결정, D6 미적용 사례 (R8 AI 리뷰)
 - [[schema-reference]] — D.13 org_subscription, D.17 payment_ledger (pg_provider 마이그레이션 대상), §K 서비스 확장 DDL

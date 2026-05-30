@@ -129,4 +129,4 @@ market-api   →  market_db   (identity 복사본 + 상품 데이터)
 - [[payment-atomicity]] — 단일 트랜잭션이 비대칭 분리에서만 가능한 이유
 - [[identity-billing-access]] — 공통 코어를 무엇으로 감싸 노출하는가
 > 소스 문서
-- [[architecture]] — §1 개요, §2 설계 여정, §12.1 비대화 대응 플레이북
+- [[architecture]] — §1.1 개요, §3 설계 여정, §2.4 비대화 대응 플레이북

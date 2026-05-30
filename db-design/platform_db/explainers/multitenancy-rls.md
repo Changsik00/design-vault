@@ -16,7 +16,7 @@ aliases:
 # Pool 모델 멀티테넌시와 RLS 개념 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[architecture|architecture.md §8]] · [[schema-reference|schema-reference.md §G]]
+> **연관 문서**: [[architecture|architecture.md §1.4]] · [[schema-reference|schema-reference.md §G]]
 
 "멀티테넌트", "RLS", "Pool 모델" — `platform_db` 코드를 처음 보면 이 단어들이 낯설게 느껴집니다. 이 문서는 우리 시스템이 왜 이 구조를 택했고, 어떻게 테넌트 간 데이터를 격리하는지 설명합니다.
 
@@ -336,5 +336,5 @@ T4: ISMS-P/GDPR 계약 체결
 - [[index-design|인덱스 설계]] — org_pk가 모든 복합 인덱스 첫 컬럼인 이유
 - [[pipa-consent|PIPA 동의]] — 테넌트별 동의 데이터 격리의 법적 맥락
 > 소스 문서
-- [[architecture]] — §8 멀티테넌시 & 격리, §4 D10 (RLS 없음 → CI 린트 보강)
+- [[architecture]] — §1.4 멀티테넌시 & 격리, §3.1 D10 (RLS 없음 → CI 린트 보강)
 - [[schema-reference]] — G.1-G.2 멀티테넌시 격리 현황

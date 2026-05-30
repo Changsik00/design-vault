@@ -19,7 +19,7 @@ aliases:
 # PIPA 개인정보 동의 요건 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[schema-reference]] §I.1, §I.2 · [[architecture]] §7, §12.6
+> **연관 문서**: [[schema-reference]] §I.1, §I.2 · [[architecture]] §1.5, §4
 
 동의 처리는 "그냥 체크박스 결과 저장하면 되는 거 아닌가?"라고 생각하기 쉽습니다. 하지만 한국 개인정보보호법(PIPA)은 생각보다 구체적인 요건을 요구합니다. 이 문서는 왜 `user_consent_event`가 단순한 boolean 컬럼이 아니라 이벤트 로그 테이블인지, 그 이유를 설명합니다.
 
@@ -329,5 +329,5 @@ user_consent_event INSERT (action='REVOKED')
 - [[multitenancy-rls|Pool 모델 + RLS]] — 테넌트별 동의 데이터 격리
 - [[gate-abc-flow|Gate A/B/C 전체 흐름]] — 동의 철회 후 JWT stale 문제와 @VerifyOnDb의 관계
 > 소스 문서
-- [[architecture]] — §7 정책 & 동의 전체, §12.6 정보주체 권리 운영
+- [[architecture]] — §1.5 정책 & 동의 전체, §4 정보주체 권리 운영
 - [[schema-reference]] — I.1-I.2 user_consent_event DDL

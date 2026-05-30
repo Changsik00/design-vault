@@ -21,7 +21,7 @@ aliases:
 # audit_log 해시 체인 무결성 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[architecture]] §12.5 감사 무결성, §12.4 break-glass, [[schema-reference]] §D.8, §H.2
+> **연관 문서**: [[architecture]] §4 감사 무결성, §4 break-glass, [[schema-reference]] §D.8, §H.2
 
 보안 감사 로그는 "기록이 있다"는 것만큼이나 "기록이 변조되지 않았다"는 것도 중요합니다. 이 문서는 audit_log 무결성을 어떻게 보장하는지, 해시 체인이 무엇인지 설명합니다.
 
@@ -215,7 +215,7 @@ row #5의 prev_hash = "xyz789..." (row #4의 row_hash)
   → 이걸 막으려면 외부 WORM 스토리지가 필요합니다 (다음 Q6 참조)
 ```
 
-이 문제 때문에 architecture.md §9에서 "audit `BEFORE UPDATE` 트리거로 불변성" 제안을 거부했습니다. root가 `DROP TRIGGER`를 실행하면 트리거 자체가 사라지거든요. 해시 체인 + 외부 WORM이 정답입니다.
+이 문제 때문에 architecture.md §2.2에서 "audit `BEFORE UPDATE` 트리거로 불변성" 제안을 거부했습니다. root가 `DROP TRIGGER`를 실행하면 트리거 자체가 사라지거든요. 해시 체인 + 외부 WORM이 정답입니다.
 
 ```
 방어 레이어 (강도 순):
@@ -367,7 +367,7 @@ async function verifyAuditHashChain() {
 
 [[break-glass|break-glass]] — `audit_log.break_glass BOOLEAN NOT NULL DEFAULT FALSE` 컬럼이 보이시죠?
 
-이건 [[architecture]] §12.4 Break-glass 정책과 연관됩니다. 긴급 운영 상황(서비스 장애, 법적 요청)에서 운영자가 평소에는 권한이 없는 작업을 승인을 받고 실행할 때, 그 행위를 명시적으로 표시하는 플래그입니다.
+이건 [[architecture]] §4 Break-glass 정책과 연관됩니다. 긴급 운영 상황(서비스 장애, 법적 요청)에서 운영자가 평소에는 권한이 없는 작업을 승인을 받고 실행할 때, 그 행위를 명시적으로 표시하는 플래그입니다.
 
 ```sql
 -- break_glass=TRUE인 감사 로그만 빠르게 조회
@@ -402,7 +402,7 @@ Level 3        P2/T4 조건  DB root의 해시까지 조작
 
 지금 당장 완벽하지 않더라도, 각 레이어의 역할과 한계를 이해하고 있으면 보안 개선 계획에 기여할 수 있습니다.
 
-관련 운영 절차는 [[architecture]] §12.5 감사 무결성 운영 섹션을 참고하세요.
+관련 운영 절차는 [[architecture]] §4 감사 무결성 운영 섹션을 참고하세요.
 
 ---
 
@@ -412,5 +412,5 @@ Level 3        P2/T4 조건  DB root의 해시까지 조작
 - [[pipa-consent|PIPA 동의]] — user_consent_event에도 동일하게 적용되는 해시 체인
 - [[break-glass|Break-glass 긴급 접근]] — break_glass=true 이벤트를 해시 체인으로 탐지
 > 소스 문서
-- [[architecture]] — §9 보안 D11 (해시 체이닝→WORM), §12.5 감사 무결성 운영
+- [[architecture]] — §2.2 보안 D11 (해시 체이닝→WORM), §4 감사 무결성 운영
 - [[schema-reference]] — D.8 audit_log DDL (prev_hash/row_hash — P1 미구현 명시)

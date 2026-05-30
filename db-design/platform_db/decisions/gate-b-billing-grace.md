@@ -115,4 +115,4 @@ function isEntitlementValid(e: OrgEntitlement | null): boolean {
 - [[subscription-lifecycle]] — 구독 상태와 GRACE 전이
 > 소스 문서
 - [[schema-reference]] — §D.12 org_entitlement 명세, §E.2 Gate B 구현, idx_entitlement_expiry 인덱스
-- [[architecture]] — §3.1 불변식 #9 (status + valid_until 복합 체크)
+- [[architecture]] — §2.1 불변식 #9 (status + valid_until 복합 체크)

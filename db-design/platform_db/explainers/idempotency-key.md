@@ -15,7 +15,7 @@ aliases:
 # 멱등성 키 (payment_ledger) 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture]] §6.2, [[schema-reference]] §D.17~D.18, §F.4
+> **연관 문서**: [[architecture]] §1.3, [[schema-reference]] §D.17~D.18, §F.4
 
 결제는 실수가 허용되지 않는 영역입니다. "같은 결제를 두 번 처리했다"는 건 사용자에게 이중 청구가 된다는 뜻이고, 이건 단순 버그가 아니라 법적 분쟁까지 이어질 수 있습니다. `idempotency_key`는 이 문제를 DB 레벨에서 원천 차단하는 장치입니다.
 

@@ -16,7 +16,7 @@ aliases:
 # BIGINT pk + ULID public_id 전략 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[schema-reference|schema-reference.md §B]] · [[architecture|architecture.md §3.1 불변식 #2]]
+> **연관 문서**: [[schema-reference|schema-reference.md §B]] · [[architecture|architecture.md §2.1 불변식 #2]]
 
 `platform_db`의 모든 테이블에는 `pk`와 `public_id`가 함께 존재합니다. 처음 스키마를 보면 "왜 ID가 두 개야?"라는 의문이 자연스럽게 생깁니다. 이 문서는 그 이유와 실제 사용 방법을 설명합니다.
 
@@ -308,7 +308,7 @@ Firebase ──[firebase_uid]──▶ identity_user.firebase_uid (조회 키)
 
 코드를 작성할 때 가장 실수하기 쉬운 부분은 API 응답에 `pk`가 슬쩍 섞이는 것입니다. 응답 DTO를 작성할 때 `id` 필드가 숫자인지 문자열 ULID인지 한 번 더 확인하는 습관이 중요합니다.
 
-세 필드는 `schema-reference.md §B` 식별자 체계 표에 정리되어 있고, 불변식 #1·#2는 `architecture.md §3.1`에서 PR 반려 기준으로 명시되어 있습니다.
+세 필드는 `schema-reference.md §B` 식별자 체계 표에 정리되어 있고, 불변식 #1·#2는 `architecture.md §2.1`에서 PR 반려 기준으로 명시되어 있습니다.
 
 ---
 
@@ -317,5 +317,5 @@ Firebase ──[firebase_uid]──▶ identity_user.firebase_uid (조회 키)
 - [[gate-abc-flow|Gate A/B/C 전체 흐름]] — firebase_uid → user_pk 변환이 Gate 흐름의 시작점
 - [[multitenancy-rls|Pool 모델 + RLS]] — org_pk가 멀티테넌시 격리 키인 이유
 > 소스 문서
-- [[architecture]] — §3.1 불변식 #2 (내부 PK는 BIGINT, 외부 노출은 ULID)
+- [[architecture]] — §2.1 불변식 #2 (내부 PK는 BIGINT, 외부 노출은 ULID)
 - [[schema-reference]] — B. 식별자 체계, D.1 identity_user DDL

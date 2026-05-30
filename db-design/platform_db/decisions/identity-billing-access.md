@@ -106,4 +106,4 @@ const ctx = await getPermissionContext(userPk, orgPk)
 - [[design-asymmetry]] — platform_db 경계(무엇을 공유 패키지가 감싸는가)
 - [[auth-projection]] · [[role-as-code]] — 패키지가 노출하는 Gate 로직의 내용
 > 소스 문서
-- [[architecture]] — §2 R0, §12.1 논리 소유권·전환 단계
+- [[architecture]] — §3 R0, §2.4 논리 소유권·전환 단계

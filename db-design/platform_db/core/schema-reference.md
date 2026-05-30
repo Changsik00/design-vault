@@ -163,7 +163,7 @@ CREATE TABLE identity_user (
   phone_verified_at TIMESTAMP,
   type              ENUM('HUMAN','SERVICE','SYSTEM') NOT NULL DEFAULT 'HUMAN',
   status            ENUM('ACTIVE','SUSPENDED','DELETED') NOT NULL DEFAULT 'ACTIVE',
-  -- DORMANT: 열린결정(architecture.md §15.5) — 법 의무 아님, 제품 정책 결정 후 ENUM 추가
+  -- DORMANT: 열린결정(architecture.md §5.3) — 법 의무 아님, 제품 정책 결정 후 ENUM 추가
   perm_version      BIGINT UNSIGNED NOT NULL DEFAULT 1,
   created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
@@ -1186,11 +1186,50 @@ CREATE TABLE store_purchase (
 
 ---
 
-# N. 자체 비교 분석 — 무엇이 바뀌었나
+# N. 운영 안전장치 (Operational Safeguards)
+
+> 스키마는 만들어졌으나 **운영 안전장치**가 부족하다. *"DB가 구조적으로 강제하는 것"* vs *"앱/배치가 강제해야 하는 것(+ 현재 갭)"*을 분리해 드러낸다. 운영 모델 전체는 [[operability]].
+
+## N.1 DB가 강제하는 것 (구조적 보장)
+
+| 보장 | 메커니즘 | 상태 |
+|---|---|---|
+| 테넌트 격리 | `org_pk NOT NULL` + 질의 필터 강제 | ✅ |
+| 결제 멱등 | `UNIQUE(idempotency_key)` · `UNIQUE(pg_provider, event_id)` | ✅ |
+| append-only | `audit_append` 계정 INSERT-only + 전 계정 DELETE 권한 0(§M) | 🟡 GRANT 점검 CI 필요 |
+| 참조 정합 | 스키마 내 FK(cross-schema는 앱 검증, [[fk-strategy]]) | ✅ |
+| 자기참조 차단 | `chk_no_self_ref`(org_relation) | ✅ |
+| 결제↔권한 원자성 | 단일 InnoDB 트랜잭션(§F.1) | ✅ |
+
+## N.2 앱/배치가 강제해야 하는 것 (DB로는 부족 — 갭)
+
+| 안전장치 | 현재 | 위험 | 보강 |
+|---|---|---|---|
+| **마지막 OWNER 보호** | 앱 트랜잭션만, **DB 무방비** | 유일 OWNER 삭제 → org 좀비화 | 앱 가드 + 모니터링(N.3) |
+| append-only 위반 | GRANT 누락 시 UPDATE 가능 | 감사 증거 훼손 | DDL 단계 GRANT 점검 CI |
+| 파티션 자동 추가 | 미구현(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
+| sweeper(outbox/webhook) | 미구현 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
+| webhook reconciliation | 미구현 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |
+| 보존·파기 | 미구현 | PIPA 5년 후 파기 안 됨 | 보존 매트릭스 배치(O3) |
+| operator 계정 분리 | 미설계 | 운영자=OWNER 수렴 | operator plane([[operator-plane]]) |
+| entitlement 캐시 미스 | 명문화 안 됨 | Redis 장애 시 거동 불명 | fail-open 아님 — DB 직격(느려도 정상, O5) |
+
+## N.3 마지막 OWNER 보호 — DB 레벨이 약한 이유
+
+MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적으로 못 건다**. 트리거는 가능하나 root가 DROP 가능·우회되어 채택하지 않는다(감사 트리거와 동일 이유, §H.2).
+
+→ **다층 방어**:
+- **1차 (앱 트랜잭션)**: `SELECT COUNT(*) ... WHERE platform_role='OWNER' AND status='ACTIVE' FOR UPDATE` → 1이면 마지막 OWNER 강등/삭제 거부.
+- **2차 (모니터링)**: `platform_role='OWNER'` ACTIVE count = 0 인 org 탐지 → 알림([[operability]] O6).
+- 트리거·DB 제약은 미채택(MySQL 한계 + root 우회).
+
+---
+
+# O. 자체 비교 분석 — 무엇이 바뀌었나
 
 자체 비교 분석 (R0–R7, 8라운드) 결과로 확정된 주요 설계 변경 사항.
 
-## N.1 핵심 변경 비교표
+## O.1 핵심 변경 비교표
 
 | 항목 | 초기 설계 | 자체 비교 분석 결과 | 결정 |
 |---|---|---|---|
@@ -1203,7 +1242,7 @@ CREATE TABLE store_purchase (
 | 멀티테넌시 격리 | 앱 레이어 관례 | org_pk NOT NULL + CI 린트 P1 | 진행 중 |
 | PG webhook 멱등 | 앱 레이어 처리 | UNIQUE(provider, event_id) + append | **확정 구현** |
 
-## N.2 MySQL vs PostgreSQL 구조적 차이
+## O.2 MySQL vs PostgreSQL 구조적 차이
 
 자체 분석에서 도출된 MySQL 선택의 구조적 제약:
 

@@ -18,7 +18,7 @@ aliases:
 # PG 웹훅 수신·처리 흐름 설명
 
 > **대상**: DB 지식이 많지 않은 개발자
-> **연관 문서**: [[schema-reference]] §D.18, §F.4 · [[architecture]] §6, §12.7
+> **연관 문서**: [[schema-reference]] §D.18, §F.4 · [[architecture]] §1.3, §4
 
 결제 PG(Payment Gateway)가 보내는 웹훅은 "돈이 들어왔어요/나갔어요"를 우리 서버에 알려주는 신호입니다. 이 신호를 잘못 처리하면 "결제는 됐는데 서비스 이용이 안 된다"는 최악의 UX가 발생합니다. `pg_webhook_event` 테이블은 그 신호를 안전하게 받고 처리하는 안전망입니다.
 

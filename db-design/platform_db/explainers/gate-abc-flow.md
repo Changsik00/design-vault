@@ -14,7 +14,7 @@ aliases:
 # Gate A/B/C 전체 흐름 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture|architecture.md]] §5 권한모델 · [[schema-reference|schema-reference.md]] §E 3-gate 인가 모델
+> **연관 문서**: [[architecture|architecture.md]] §1.2 권한모델 · [[schema-reference|schema-reference.md]] §E 3-gate 인가 모델
 
 HTTP 요청 하나가 실제로 허용되거나 거부되기까지, `platform_db`는 딱 3개의 체크포인트를 통과시킨다. 이 3개를 Gate A, Gate B, Gate C라고 부른다. 이 문서는 그 3개가 무엇인지, 왜 3개인지, 어떤 순서로 동작하는지를 설명한다.
 
@@ -282,5 +282,5 @@ Gate A/B/C는 각각 `membership`, `org_entitlement`, `delegation_grant` + 코�
 - [[pk-ulid-strategy|BIGINT pk + ULID public_id]] — firebase_uid로 user_pk 찾는 흐름
 - [[index-design|인덱스 설계]] — Gate B 핫패스 복합 인덱스 설계
 > 소스 문서
-- [[architecture]] — §5 권한모델 3-gate 전체 구조
+- [[architecture]] — §1.2 권한모델 3-gate 전체 구조
 - [[schema-reference]] — E.1-E.4 3-gate 인가 모델 DDL과 구현

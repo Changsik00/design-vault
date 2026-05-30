@@ -123,7 +123,7 @@ COMMIT;
 | 파일 | 내용 |
 |---|---|
 | [[schema-reference]] §F.1 | 결제 단일 트랜잭션 SQL 전문 |
-| [[architecture]] §6.2 | 결제 단일 트랜잭션 설계 원칙 |
+| [[architecture]] §1.3 | 결제 단일 트랜잭션 설계 원칙 |
 | [[auth-projection]] | 이 트랜잭션에서 org_entitlement가 투영되는 이유 |
 | [[outbox-pattern]] | outbox_event가 async 부수효과를 처리하는 방법 |
 | [[idempotency-key]] | idempotency_key로 중복 결제를 막는 방법 |

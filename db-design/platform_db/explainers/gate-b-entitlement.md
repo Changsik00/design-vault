@@ -15,7 +15,7 @@ aliases:
 # Gate B와 엔타이틀먼트 개념 설명
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[architecture|architecture.md]] §3.1 불변식 4/9/10 · [[schema-reference|schema-reference.md]] §D.12 org_entitlement · §E.2 Gate B · §F Billing 흐름
+> **연관 문서**: [[architecture|architecture.md]] §2.1 불변식 4/9/10 · [[schema-reference|schema-reference.md]] §D.12 org_entitlement · §E.2 Gate B · §F Billing 흐름
 
 `platform_db`에서 결제와 서비스 접근 권한은 의도적으로 다른 테이블에 분리되어 있습니다. 이 문서는 [[gate-abc-flow|Gate A/B/C]] 인가 흐름 중 그 중심에 있는 `org_entitlement` 테이블과 Gate B가 어떻게 동작하는지를 설명합니다.
 

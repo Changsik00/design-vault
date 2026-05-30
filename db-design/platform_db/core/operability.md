@@ -75,7 +75,25 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 
 운영자 override(entitlement 강제 부여·Trial 연장·구독 정지)는 **Support Action 경로**로만 — 별도 권한(FINANCE 등) + `who/when/why` 컴플라이언스 audit 필수. "결제했는데 권한 안 열림"의 운영자 복구.
 
-**현재**: 🔴 (debug 계약·support-action 미설계).
+### 수동 진단·복구 절차 (Debugger 미구현 시 임시)
+
+**권한이 갑자기 안 먹힐 때**:
+```
+1. identity_user.status, membership.status 확인
+2. org_entitlement.status / valid_until → GRACE/EXPIRED 전환 여부
+3. org.perm_version vs 클라이언트 X-Perm-Version 비교
+4. Redis 캐시 flush: DEL "perm:{user_pk}:{org_pk}"
+5. audit_log.result='DENY' 최근 30분 조회
+```
+
+**결제는 됐는데 권한이 안 풀릴 때**(Webhook Replay 전 수동):
+```
+1. payment_ledger에서 idempotency_key로 SUCCEEDED 확인
+2. outbox_event.status='PENDING'인 subscription.activated 조회
+3. outbox 워커 재시도 또는 수동 org_entitlement UPDATE + perm_version 갱신
+```
+
+**현재**: 🔴 (debug 계약·support-action 미설계 — 위 절차는 운영자 수동).
 
 ---
 
@@ -96,6 +114,20 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 
 - **파기 트리거**: 월별 파티션 배치 · sweeper job(PROCESSED 정리) · 탈퇴 30일 배치.
 - ⚠️ **현재 🔴**: sweeper·retention 배치 미구현. 파티션 자동 추가도 미구현([[schema-reference]] §D.8). → 이 표가 그 응집점.
+
+### 정기 배치 (platform_db 위에서 도는 운영 작업)
+
+| 작업 | 주기 | 방법 |
+|---|---|---|
+| TRIALING→EXPIRED 전환 | 일 1회 | `UPDATE org_entitlement SET status='EXPIRED' WHERE valid_until<NOW() AND status='TRIALING'` |
+| 만료 구독 정리 | 일 1회 | `... status='EXPIRED' WHERE valid_until<NOW() AND status='ACTIVE'` |
+| GRACE 전환 | 일 1회 | `valid_until<NOW() AND grace_until>NOW() → status='GRACE'` |
+| 만료 초대 토큰 정리 | 일 1회 | `membership_invite SET status='EXPIRED' WHERE expires_at<NOW() AND status='PENDING'` |
+| audit_log 파티션 추가 | 분기 1회(→월별 자동화 필요) | `ALTER TABLE audit_log REORGANIZE PARTITION p_future ...` |
+| outbox/webhook sweeper | 일 1회 | PROCESSED + 30/90일 경과 DELETE |
+| 해시 사슬 검증 | 월 1회 | audit_log + user_consent_event 재계산(해시 컬럼 활성화 후) |
+
+> ⚠️ 위 배치 다수가 **현재 미구현/수동**. 미구현 시 무한 TRIALING·파티션 과부하·로그 누적이 발생.
 
 ---
 

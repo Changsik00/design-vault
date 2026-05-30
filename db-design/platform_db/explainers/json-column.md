@@ -16,7 +16,7 @@ aliases:
 # JSON 컬럼 설명 (언제 쓰고 언제 정규화하나)
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[schema-reference]] §D.12·§D.8·§I.2, [[architecture]] §3.1, [[feature-limits]]
+> **연관 문서**: [[schema-reference]] §D.12·§D.8·§I.2, [[architecture]] §2.1, [[feature-limits]]
 
 MySQL은 JSON 타입 컬럼을 지원합니다. 스키마 없이 유연하게 저장할 수 있어 매력적이지만, "언제나 JSON"은 나쁜 선택입니다. 어디에 쓰고 어디에 쓰면 안 되는지 설명합니다.
 
@@ -113,4 +113,4 @@ CREATE INDEX ON org_entitlement USING GIN (feature_limits);
 - [[multitenancy-rls]] — org_pk는 JSON이 아니라 별도 컬럼이어야 하는 이유(검색·격리)
 > 소스 문서
 - [[schema-reference]] — §D.12 feature_limits, §D.8 audit_log meta_json, §I.2 user_consent_event meta_json
-- [[architecture]] — §3.1 불변식(임의 JSON 권한 블롭 금지), §8 MySQL vs PostgreSQL
+- [[architecture]] — §2.1 불변식(임의 JSON 권한 블롭 금지), §1.4 MySQL vs PostgreSQL

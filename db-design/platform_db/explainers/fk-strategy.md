@@ -17,7 +17,7 @@ aliases:
 # FK 전략 설명 (언제 걸고, cross-schema에서 왜 끊나)
 
 > **대상**: DB 지식이 많지 않은 개발자  
-> **연관 문서**: [[schema-reference]] §C.3·§A.1, [[architecture]] §3.1, [[multitenancy-rls]]
+> **연관 문서**: [[schema-reference]] §C.3·§A.1, [[architecture]] §2.1, [[multitenancy-rls]]
 
 `platform_db`는 같은 DB 안에서는 FK를 적극적으로 걸지만, DB(스키마)가 다르면 **일부러 FK를 걸지 않습니다.** 왜 같은 도구를 어떤 데선 쓰고 어떤 데선 안 쓰는지 설명합니다.
 
@@ -106,4 +106,4 @@ async function createLecture(teacherPk: bigint, orgPk: bigint) {
 - [[gate-abc-flow]] — Gate A(membership 확인)가 암묵적 FK 역할을 하는 흐름
 > 소스 문서
 - [[schema-reference]] — §C.3 FK 관계 요약표, §A.1 cross-DB 방향 규칙
-- [[architecture]] — §3.1 불변식 #6 (cross-DB는 아래로만)
+- [[architecture]] — §2.1 불변식 #6 (cross-DB는 아래로만)
