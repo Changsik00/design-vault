@@ -14,9 +14,9 @@ tags:
 # platform_db — BDD 시나리오
 
 > 분리: [[requirements]] §B/C에서 2026-05-30 독립 파일로 분리  
-> 목적: platform_db 도메인 행위 시나리오 — e2e / 통합 테스트 기반  
+> 목적: platform_db 도메인 행위 시나리오 — **화이트박스 통합 테스트**(DB row·상태 단언 포함). 블랙박스 e2e 사용자 여정은 [[e2e-journeys]].  
 > **구성**: Part A(Domain 1~10, 핵심 흐름) · Part B(Domain 11~19, 요구·설계 전수) · 끝에 요구사항 추적 매트릭스  
-> 상위: [[requirements]] · [[schema-reference]]
+> 상위: [[requirements]] · [[schema-reference]] · 블랙박스 e2e: [[e2e-journeys]]
 >
 > **현행 스키마 반영**: `membership.platform_role` + `service_membership.role_code` 2-layer 구조 적용  
 > **현행 스키마**: `organization.type`에서 `ACADEMY` 제거 → `COMPANY/TEAM/PERSONAL`  
