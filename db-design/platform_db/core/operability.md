@@ -75,7 +75,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 
 운영자 override(entitlement 강제 부여·Trial 연장·구독 정지)는 **Support Action 경로**로만 — 별도 권한(FINANCE 등) + `who/when/why` 컴플라이언스 audit 필수. "결제했는데 권한 안 열림"의 운영자 복구.
 
-### 수동 진단·복구 절차 (Debugger 미구현 시 임시)
+### 수동 진단·복구 절차 (Debugger 미작성 시 임시)
 
 **권한이 갑자기 안 먹힐 때**:
 ```
@@ -113,7 +113,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 | chat/usage 이벤트 | 1년 → S3 아카이브 | 서비스 DB 소관 | 비용 |
 
 - **파기 트리거**: 월별 파티션 배치 · sweeper job(PROCESSED 정리) · 탈퇴 30일 배치.
-- ⚠️ **현재 🔴**: sweeper·retention 배치 미구현. 파티션 자동 추가도 미구현([[schema-reference]] §D.8). → 이 표가 그 응집점.
+- ⚠️ **현재 🔴**: sweeper·retention 배치 미작성. 파티션 자동 추가도 미작성([[schema-reference]] §D.8). → 이 표가 그 응집점.
 
 ### 정기 배치 (platform_db 위에서 도는 운영 작업)
 
@@ -127,7 +127,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 | outbox/webhook sweeper | 일 1회 | PROCESSED + 30/90일 경과 DELETE |
 | 해시 사슬 검증 | 월 1회 | audit_log + user_consent_event 재계산(해시 컬럼 활성화 후) |
 
-> ⚠️ 위 배치 다수가 **현재 미구현/수동**. 미구현 시 무한 TRIALING·파티션 과부하·로그 누적이 발생.
+> ⚠️ 위 배치 다수가 **현재 미작성/수동**. 미작성 시 무한 TRIALING·파티션 과부하·로그 누적이 발생.
 
 ---
 
@@ -159,7 +159,7 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 | **MySQL(platform_db)** | 전 서비스 auth 불가 (SPOF) | read replica로 read 지속(NFR-3 트리거 T2). RTO/RPO·백업은 ops 소관이나 **단일 인스턴스=SPOF임을 명시**. |
 | **Redis** (권한 캐시) | 캐시 미스 → DB 직격(느려짐) | **fail-open 아님** — 캐시는 가속용, 권위 아님. 없으면 DB 조회로 *느려도 정상 동작*. |
 | **Firebase** | 신규 로그인 불가 | 기존 JWT(TTL 1h)는 유효 → 진행 세션 영향 적음. `firebase_uid`는 조회 키라 vendor 교체 가능([[firebase-boundary]]). |
-| **PG webhook 유실/지연** | entitlement 갱신 지연 | Gate B `validUntil` 복합체크가 2차 방어([[decisions/gate-b-billing-grace|gate-b-billing-grace]]). + reconciliation 폴링(🔴 미구현) + Webhook Replay(O2). |
+| **PG webhook 유실/지연** | entitlement 갱신 지연 | Gate B `validUntil` 복합체크가 2차 방어([[decisions/gate-b-billing-grace|gate-b-billing-grace]]). + reconciliation 폴링(🔴 미작성) + Webhook Replay(O2). |
 | **Qdrant/Neo4j** | RAG 검색 불가 | platform auth와 무관(서비스 도메인). org 격리만 보장([[rag-multitenancy]]). |
 
 - **entitlement 가용성(AVAIL-1)**: entitlement는 billing 장애와 **구조적으로 격리**됨([[auth-projection]]) — billing/PG가 죽어도 *기존 entitlement read는 영향 없음*. "결제 시스템 장애 시 기존 권한 최소 N시간 유지"의 근거가 이미 설계에 있다(명문화만 필요).

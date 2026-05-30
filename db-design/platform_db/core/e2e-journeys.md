@@ -19,6 +19,9 @@ tags:
 >
 > **이 문서**: 사용자/머신 입장의 **black-box e2e 여정**. API 경계에서만 관찰하고, platform 행위(3-gate·billing projection·perm_version·consent 게이트·BOLA·audit)를 *결과로* 검증한다.
 
+>
+> 📄 **설계 시나리오 — 구현 코드는 없습니다.** ⚠️ 표시 시나리오는 *기능 코드가 생기면* 테스트로 활성화하며, 설계 자체는 본 문서·[[schema-reference]] 기준으로 완결입니다.
+
 ## 왜 별도인가 — 테스트 피라미드
 
 | | [[bdd-scenarios]] (Part A/B) | **이 문서 (Part C)** |
@@ -166,6 +169,7 @@ Scenario: 이수민이 탈퇴하면 모든 서비스가 즉시 닫히고, 같은
 
 > **검증 관점**: 탈퇴 후 (a) 기존 토큰의 전 서비스 호출이 즉시 401/403, (b) 갱신·재로그인 불가, (c) 동일 이메일 재가입이 201이며 새 계정의 me 에 과거 멤버십 없음을 검증. 30일 익명화 배치는 내부라 단언하지 않고 "재가입 가능"이라는 관찰 결과로만 확인.
 > **통합 화이트박스 / 커버**: P9-04 · P9-05 / USR-5 · AUTHN-6 · USR-6 · CON-10 · CON-12
+> **academy-api 구현**: `withdrawal-cascade.e2e.ts` 12-A — `DELETE /auth/account` → `200 {withdrawn:true}`, identity_user email 익명화(`deleted_{pk}@deleted`), status=DELETED 확인. 12-C — 탈퇴 후 membership+service_membership SUSPENDED 전이 확인. `withdrawal.e2e.ts` — 단일 OWNER 탈퇴 lockout 시나리오. 🔴 미커버: 탈퇴 후 기존 토큰으로 서비스 API 호출 시 즉시 차단 확인(`GET /me` 엔드포인트 없음), 재가입 플로우 확인 없음
 
 ### C-04: 위임 가치흐름 — 부여 → 행사 → 회수 → 즉시 차단
 
@@ -239,6 +243,7 @@ Scenario: 단일 신원이 org 헤더에 따라 다른 권한·가시성을 갖�
 
 > **검증 관점**: 같은 firebase_uid·같은 토큰으로 `x-org-pk`만 바꿔도 (1) me 는 두 멤버십을 노출, (2) 같은 작업이 A에서 403·B에서 200, (3) 타 org 리소스 ID 접근은 404(존재 비공개)로 갈림. 권한·가시성 격리를 서비스 API status·`body.code`·가시성으로만 단언.
 > **통합 화이트박스 / 커버**: P1-02 · P7-01 / USR-7 · TEN-2 · SEC-1 · RBAC-1
+> **academy-api 구현**: `multi-org.e2e.ts` 11-A — org1 폐원 후 org2 service_membership ACTIVE 유지 확인. 11-B — `withdrawUser()` 시 모든 org의 service_membership SUSPENDED 전이(org별 격리). 11-C — org B 초대를 org A 멤버(User A)가 수락 → org B membership 추가(멀티 org 가입). 🔴 미커버: `x-org-pk` 헤더 기반 동적 권한 전환(`GET /me` 없음), 단일 토큰으로 컨텍스트 전환 시나리오
 
 ### C-06: ⚠️ break-glass 운영자 개입 — 장애 복구 + 전건 감사 + 만료 자동회수
 
@@ -384,6 +389,7 @@ Scenario: OWNER가 멤버를 퇴출하면 그 org 컨텍스트만 즉시 403, �
 > **검증 관점**: 퇴출이 (a) 해당 org 컨텍스트만 즉시 403/`NOT_A_MEMBER`, (b) 본인 me·publicId·타 org 200 유지, (c) 게시했던 강의는 OWNER 조회로 잔존 확인, (d) 재초대 수락 후 다시 200 — 멤버십이 *hard delete 가 아닌 가역적 비활성*임을 후속 GET·status·가시성으로만 검증.
 > **설계 노트**: 멤버십은 hard delete 금지 — SUSPENDED/제거는 행 보존, org 데이터 소유권은 user 가 아닌 org 에 귀속.
 > **통합 화이트박스 / 커버**: P2-01 · P2-02 / RBAC-5 · USR-6 · TEN-2
+> **academy-api 구현**: `member-removal.e2e.ts` 8-B — `DELETE /orgs/:orgId/members/:userId` → `200 {removed:true}`, 이후 `GET /orgs/:orgId/members` 로 멤버 수 감소 확인. 🔴 미커버: identity·프로필 보존 관찰(`GET /me` 엔드포인트 없음), 타 org 멤버십 영향 없음 확인, 강의 잔존 관찰, 재초대 복귀 플로우
 
 #### D1-02: 초대 무응답 → 24h 자동 만료 — 만료 후 수락 거부
 
@@ -412,6 +418,7 @@ Scenario: 초대가 24h 무응답으로 만료되면 그 토큰의 수락은 거
 
 > **검증 관점**: 24h 만료를 (a) 만료 후 accept 가 410/`INVITE_EXPIRED`, (b) 정선생 me 에 멤버십 부재, (c) 목록 GET status="EXPIRED" 로만 검증. 자동 만료 배치는 내부라 단언하지 않고 *관찰 가능한 수락 거부·목록 상태*로만 확인.
 > **통합 화이트박스 / 커버**: P1-03 / RBAC-1 · AUTHN-6
+> **academy-api 구현**: `invitation-cycle.e2e.ts` 5-E — 만료 초대 `GET /invitations/:token` → 410 Gone, `POST /invitations/:token/accept` → 410 Gone. 🔴 미커버: `GET /orgs/:orgId/invitations` 목록에서 status="EXPIRED" 확인(목록 API 미구현)
 
 #### D1-03: 초대 수동 취소(REVOKED) — 발송 후 OWNER 가 회수
 
@@ -436,6 +443,7 @@ Scenario: OWNER 가 초대를 취소하면 발급된 토큰으로는 더 이상 
 
 > **검증 관점**: 수동 취소가 (a) DELETE 204, (b) 목록 status="REVOKED", (c) 취소된 토큰 accept 가 403/`INVITE_REVOKED` 로 전환됨을 검증. 만료(EXPIRED, D1-02)와 달리 *능동적 회수*라는 점이 `body.code` 로 구분된다.
 > **통합 화이트박스 / 커버**: P1-03 / RBAC-1 · RBAC-5
+> **academy-api 구현**: `invitation-revoke.e2e.ts` 7-A — `DELETE /orgs/:orgId/invitations/:invitationId` → 200 `{revoked:true}`, 취소 후 `GET /invitations/:token` → 410. ⚠️ body.code 차이: 현재 구현은 revoke 후 토큰 조회 시 token row = null → 410 (문서 기대 403/"INVITE_REVOKED"). 🔴 미커버: `GET /orgs/:orgId/invitations` 에서 status="REVOKED" 목록 확인
 
 #### D1-04: 초대 재발송 — 구 토큰 무효화, 새 토큰만 유효
 
@@ -464,6 +472,7 @@ Scenario: 같은 email 로 초대를 재발송하면 새 토큰만 수락 가능
 
 > **검증 관점**: 재발송이 (a) old-token 과 다른 new-token·갱신된 expiresAt, (b) 목록에 활성 PENDING 1건만(중복 누적 없음), (c) 구 토큰 accept 거부·새 토큰 accept 200 으로 전환됨을 검증.
 > **통합 화이트박스 / 커버**: P1-03 / RBAC-1 · USR-7
+> **academy-api 구현**: `invitation-revoke.e2e.ts` 7-C/7-D — 구 토큰 취소 후 동일 email 재발송 → 서로 다른 토큰 201, 구 토큰 수락 → 410, 새 토큰 수락 성공 201. 🔴 미커버: `GET /orgs/:orgId/invitations` 에서 PENDING 중복 누적 없음 목록 확인
 
 #### D1-05: 중복 초대 / 이미 멤버 — 멤버십 중복 생성 방지
 
@@ -490,6 +499,7 @@ Scenario: 이미 멤버인 대상에게 재초대하면 충돌로 거부되고 �
 > **검증 관점**: 중복 초대가 (a) 409/`ALREADY_MEMBER`, (b) me 의 멤버십이 1건으로 불변임을 검증.
 > **설계 노트**: 구현이 멱등이라면 재초대를 201 + 기존 멤버 role 갱신으로 처리할 수도 있으나, 어느 쪽이든 *멤버십 중복 행이 생기지 않음* 이 관찰 불변식 — service_membership PK `(user_pk, org_pk, service)` 가 중복을 구조적으로 차단.
 > **통합 화이트박스 / 커버**: P1-02 · P2-03 / RBAC-1 · USR-7
+> **academy-api 구현**: `invitation-revoke.e2e.ts` 7-C — 동일 email 연속 초대 → 서로 다른 토큰 201 (구 토큰은 새 발송으로 대체). ⚠️ 미검증: 이미 ACTIVE 멤버에게 재초대 시 409/"ALREADY_MEMBER" 응답 여부 — academy-api 현재 구현 미확인
 
 #### D1-06: 마지막 OWNER lockout 방지 — 다른 OWNER 지정 전엔 강등·탈퇴 거부
 
@@ -521,6 +531,7 @@ Scenario: 유일 OWNER 의 자기 강등·탈퇴는 거부되고, 새 OWNER 지�
 
 > **검증 관점**: 마지막 OWNER 보호를 (a) 자기 강등·탈퇴가 동일하게 400/`LAST_OWNER`, (b) 거부 후 OWNER 가 그대로 1건, (c) 새 OWNER 지정 후 같은 강등이 200 으로 전환됨을 검증. §N.3 의 `FOR UPDATE` 가드는 내부라 단언하지 않고 *관찰 가능한 거부·OWNER ≥1 유지*로만 확인.
 > **통합 화이트박스 / 커버**: 17-10 · P2-04 / OWN-1 · RBAC-6 · RBAC-5
+> **academy-api 구현**: `director-cycle.e2e.ts` 1-B/1-C — 유일 OWNER 탈퇴 시도 → `DELETE /auth/account` 400/"LAST_OWNER_LOCKOUT", 2번째 OWNER 추가 후 탈퇴 허용 확인. `member-removal.e2e.ts` 8-D — 두 번째 OWNER 존재 시 `withdrawUser()` 성공 확인. 🔴 미커버: `PATCH /orgs/:orgId/members/:userId/role` 로 OWNER 자기 강등 시 lockout 응답 확인 없음
 
 #### D1-07: 마지막 OWNER 동시 강등(동시성) — 레이스에서 최소 1 OWNER 보존
 
@@ -547,6 +558,7 @@ Scenario: 두 OWNER 가 동시에 서로를 강등하면 하나는 200·하나�
 
 > **검증 관점**: 동시 강등 레이스에서 (a) 한쪽 200·다른 쪽 409/`LAST_OWNER`, (b) 둘 다 200 은 발생하지 않음, (c) 사후 GET 의 OWNER count 가 정확히 ≥1 임을 검증. `FOR UPDATE` 직렬화(§N.3 1차 가드)는 내부라 단언하지 않고 *결과로서의 최소 1 OWNER 보존*만 관찰.
 > **통합 화이트박스 / 커버**: 17-10 (동시 강등 레이스) / OWN-1 · RBAC-6
+> **academy-api 구현**: 🔴 미구현 — 동시 강등 레이스 시나리오 없음. `removeOrgMember` (`packages/db-platform`)에 last-owner 가드가 구현됐으나 동시 접근 검증 테스트 없음
 
 #### D1-08: SUSPENDED 멤버 재활성화 — 정지는 가역(DELETED 와 대비)
 
@@ -575,6 +587,7 @@ Scenario: 정지된 멤버를 OWNER 가 재활성화하면 다시 정상 접근�
 > **검증 관점**: 재활성화가 (a) 200/`MEMBER_REACTIVATED`, (b) 멤버 status 가 ACTIVE 로 관찰, (c) 정지 중 403 → 복원 후 200 으로 같은 호출이 전환됨을 검증. SUSPENDED 의 *가역성* 을 DELETED(C-03 의 비가역 탈퇴)와 대비.
 > **설계 노트**: 멤버십은 hard delete 금지 — 제거/정지는 모두 행 보존이며 ACTIVE↔SUSPENDED 는 가역, identity DELETED 만 비가역.
 > **통합 화이트박스 / 커버**: P2-01 · P2-02 / RBAC-5 · USR-6 · AUTHN-6
+> **academy-api 구현**: 🔴 미구현 — `POST /orgs/:orgId/members/:userId/reactivate` 엔드포인트 없음. `withdrawal-cascade.e2e.ts` 12-C에서 탈퇴 시 membership SUSPENDED 전이는 DB 레벨에서 확인됨. 재활성화 API 및 SUSPENDED→접근차단→복원→접근열림 플로우 테스트 없음
 
 ### Domain D2 — 결제·구독 예외·금전 불만
 
@@ -873,6 +886,7 @@ Scenario Outline: <역할>가 <작업>을 시도하면 권한 모델대로 거�
 
 > **검증 관점**: 동일 엔드포인트라도 호출자 역할에 따라 거부됨을 status·`body.code`로만 단언하고, 직후 GET 으로 "변경 미발생"을 가시성으로 확인한다. SERVICE 계정의 사람 전용 행위(동의)·tenant role의 운영자 평면 작업도 같은 거부 매트릭스로 묶인다 — 명시적 allow 없으면 통과 0.
 > **통합 화이트박스 / 커버**: 12-xx(인가) · P7-01 · 11-06 / RBAC-1 · RBAC-5 · ABAC-1 · TEN-2 · SEC-1
+> **academy-api 구현**: `teacher-permission.e2e.ts` 9-A — TEACHER가 `POST /orgs/:orgId/invitations` → 403, 9-C — TEACHER가 `GET /orgs/:orgId/members` → 403, 9-D — TEACHER가 `GET /orgs/:orgId` → 200(읽기 허용). `member-removal.e2e.ts` 8-C — TEACHER→DIRECTOR 역할변경 전 403, 변경 후 접근열림 확인. 🔴 미커버: STUDENT·MEMBER·SERVICE 계정 케이스, 위임 관련 거부, 운영자 평면 케이스
 
 #### D3-02: BOLA 변형 — 타 org 멤버 ID로 작업
 
@@ -904,6 +918,7 @@ Scenario: A학원 OWNER가 B학원 멤버 ID로 역할변경·정지를 시도�
 
 > **검증 관점**: 권한 보유자(A OWNER)라도 타 org 멤버 ID에는 404(존재 비공개), 헤더 위조로 B를 직접 노려도 멤버십 부재로 403. 변이 미발생은 B 정당 멤버의 GET 으로만 확인 — 호출자 역할이 아니라 org 경계가 변이를 차단함을 status·`body.code`·가시성으로 단언.
 > **통합 화이트박스 / 커버**: P7-01 / TEN-2 · SEC-1 · ABAC-2 · RBAC-1
+> **academy-api 구현**: `cross-org-bola.e2e.ts` 10-A — org A의 초대를 org B 소속 사용자가 수락 시도 → 403("Invitation is for a different user", 이메일 불일치). 10-D — org B 컨텍스트에서 생성된 초대를 org A 토큰으로 수락 시도 → 403. `invitation-cycle.e2e.ts` 5-B에서 본인 이메일 일치 시 수락 성공 기준선 확인. ⚠️ 차이: 현재 구현에서 타 org 리소스 ID 직접 접근은 404 대신 403 반환 — "존재 비공개(404)" 패턴과 일부 불일치. `TestAcademyPolicyGuard`가 `:orgId` param 기반으로 org 스코핑을 적용해 BOLA 방지 설계 확정
 
 #### D3-03: ⚠️ 데이터 삭제 요청(PIPA 권리) — 본인정보 익명화·동의 이력 법적 보존
 
@@ -937,6 +952,7 @@ Scenario: ⚠️ 삭제 요청 후 본인정보는 비워지나 동의 이력의
 
 > **검증 관점**: 삭제권 행사가 (a) 본인 식별정보를 익명화(GET 에서 email=null), (b) 그럼에도 동의 이력은 5년 보존 의무로 남되 그 보존은 컴플라이언스 내부라 본인 조회(`/me/consents`)에는 안 보임, (c) 재가입 가능이라는 관찰 결과로만 익명화 완료를 확인. user_consent_event의 보존 row 자체는 black-box에서 단언 금지(append-only 보존은 화이트박스).
 > **통합 화이트박스 / 커버**: P6-03 · P9-04 / USR-5 · CON-1 · CON-10 · AUTHN-6 · SEC-3  ·  ⚠️ 구현 후 활성화
+> **academy-api 구현**: `withdrawal-cascade.e2e.ts` 12-A — `DELETE /auth/account` 후 identity_user.email=`deleted_{pk}@deleted`, status=DELETED 익명화 확인(DB 화이트박스). 12-B — 탈퇴 시 PENDING 초대 삭제 확인. 12-D — teacher 탈퇴 후 `lecture.teacherPk=null`(PIPA cascade), student.name="탈퇴한 사용자" 익명화 확인. ⚠️ 미구현: `user_consent_event` 기반 동의 이력 보존 검증, 운영자 평면 조회(`GET /v1/users/{id}` 익명화 관찰)
 
 #### D3-04: ⚠️ 동의 철회 후 처리 거부 — 마케팅 발송 즉시 차단
 
@@ -1107,15 +1123,26 @@ Scenario Outline: <비정상 입력>은 deny-by-default 로 닫히고 허용으�
 
 Part C는 *가치 흐름*(happy path), Part D는 *예외·불만·생명주기*(unhappy path)를 다룬다. 각 여정은 화이트박스 시나리오 여러 개를 사용자 관점으로 묶는다(위 "통합 화이트박스" 참조). 요구 ID 단위 전수 추적은 [[bdd-scenarios]]의 **요구사항 추적 매트릭스**가 권위이고, 이 문서는 그 위에 **관찰 가능한 행위 계약**을 얹는다.
 
-| 여정 | 핵심 platform 행위 | 구현 |
-|---|---|---|
-| C-01 가입→유료 게시 | 3-gate · billing projection · perm_version · BOLA | ✅ |
-| C-02 강사 이전 | consent 게이트 · org_pk 데이터 경계 | 🟡 (consent 미구현) |
-| C-03 탈퇴→재가입 | 전 서비스 즉시 차단 · email ACTIVE-unique | ✅ |
-| C-04 위임 가치흐름 | 위임 행사·회수 · sensitive write DB 재검증 | ✅ |
-| C-05 멀티 워크스페이스 | 단일 신원 · org별 권한·가시성 격리 | ✅ |
-| C-06 break-glass | 운영자 평면 · support action · 만료 자동회수 | ⚠️ |
-| C-07 api_key B2B | 머신 3-gate 동등 · IP·구독·revoke·rotation | ⚠️ |
-| **D1** 멤버십·초대 생명주기 (8) | 강퇴 · 초대 만료/취소/재발송 · OWNER lockout · 동시성 · 재활성화 | ✅ |
-| **D2** 결제·금전 불만 (9) | 결제실패 전이 · 재결제 · 환불 · chargeback · 이중과금 · 다운그레이드 · 오과금정정 | ✅ / ⚠️ |
-| **D3** 역할거부·데이터권리 (8) | 역할 거부 매트릭스 · BOLA 변형 · 삭제권 · 동의철회 · 14세 · 정지이의 · fail-closed | ✅ / ⚠️ |
+| 여정 | 핵심 platform 행위 | 구현 | academy-api e2e |
+|---|---|---|---|
+| C-01 가입→유료 게시 | 3-gate · billing projection · perm_version · BOLA | ✅ | 🔴 미구현 (billing·Gate B) |
+| C-02 강사 이전 | consent 게이트 · org_pk 데이터 경계 | 🟡 (consent 미구현) | 🔴 미구현 |
+| C-03 탈퇴→재가입 | 전 서비스 즉시 차단 · email ACTIVE-unique | ✅ | 🟡 `withdrawal-cascade.e2e.ts` 12-A/B/C — 익명화·초대삭제·멤버십SUSPENDED. 🔴 즉시차단·재가입 플로우 미검증 |
+| C-04 위임 가치흐름 | 위임 행사·회수 · sensitive write DB 재검증 | ✅ | 🔴 미구현 (위임 API 없음) |
+| C-05 멀티 워크스페이스 | 단일 신원 · org별 권한·가시성 격리 | ✅ | 🟡 `multi-org.e2e.ts` 11-A/B/C — org 격리 기본 확인. 🔴 x-org-pk 동적 전환 없음 |
+| C-06 break-glass | 운영자 평면 · support action · 만료 자동회수 | ⚠️ | 🔴 미구현 |
+| C-07 api_key B2B | 머신 3-gate 동등 · IP·구독·revoke·rotation | ⚠️ | 🔴 미구현 |
+| **D1-01** 멤버 강제 퇴출 | 해당 org 즉시 차단 · identity 보존 · 강의 잔존 | ✅ | 🟡 `member-removal.e2e.ts` 8-B — DELETE + 멤버 수 감소 확인. 🔴 identity·강의 잔존 미검증 |
+| **D1-02** 초대 만료 | 24h 만료 · 수락 거부 · 목록 EXPIRED | ✅ | 🟡 `invitation-cycle.e2e.ts` 5-E — 410 확인. 🔴 목록 status 미검증 |
+| **D1-03** 초대 취소 | 수동 취소 · 목록 REVOKED · 수락 거부 | ✅ | 🟡 `invitation-revoke.e2e.ts` 7-A — DELETE·수락거부 확인. ⚠️ body.code 차이(410 vs 403) |
+| **D1-04** 초대 재발송 | 구 토큰 무효·새 토큰 유효 | ✅ | ✅ `invitation-revoke.e2e.ts` 7-D — 재발송·구토큰거부·새토큰수락 |
+| **D1-05** 중복 초대 | 이미 멤버 409 · 멤버십 중복 방지 | ✅ | 🟡 `invitation-revoke.e2e.ts` 7-C — 중복 토큰 방지 확인. ⚠️ 이미ACTIVE 멤버 재초대 409 미검증 |
+| **D1-06** 마지막 OWNER lockout | 강등·탈퇴 거부 · 새 OWNER 지정 후 허용 | ✅ | 🟡 `director-cycle.e2e.ts` 1-B/C, `member-removal.e2e.ts` 8-D. 🔴 PATCH role lockout 미검증 |
+| **D1-07** 동시 강등 레이스 | FOR UPDATE · OWNER ≥1 보존 | ✅ | 🔴 미구현 — 동시 요청 시나리오 없음 |
+| **D1-08** SUSPENDED 재활성화 | ACTIVE↔SUSPENDED 가역 · DELETED 비가역 대비 | ✅ | 🔴 미구현 — reactivate API 없음 |
+| **org-close cascade** (부가) | org 폐원 → PENDING초대삭제 · service_membership 삭제 · GateB EXPIRED | ✅ | ✅ `org-close-cascade.e2e.ts` 13-A/B/C/D, `org-close.e2e.ts` |
+| **D2** 결제·금전 불만 (9) | 결제실패 전이 · 재결제 · 환불 · chargeback · 이중과금 · 다운그레이드 · 오과금정정 | ✅ / ⚠️ | 🔴 미구현 (billing API 없음). `gate-b-expired.e2e.ts` — Gate B EXPIRED 확인 |
+| **D3-01** 역할거부 매트릭스 | RBAC deny-by-default · 거부 후 변경 미발생 | ✅ | 🟡 `teacher-permission.e2e.ts` 9-A/C/D, `member-removal.e2e.ts` 8-C. 🔴 STUDENT·SERVICE 케이스 없음 |
+| **D3-02** BOLA 변형 | 타 org 404/403 · 헤더 위조 거부 | ✅ | 🟡 `cross-org-bola.e2e.ts` 10-A/D — 이메일 불일치·403. ⚠️ 404(존재비공개) 대신 403 반환 |
+| **D3-03** PIPA 삭제권 | 식별정보 익명화 · 동의이력 보존 | ⚠️ | 🟡 `withdrawal-cascade.e2e.ts` 12-D — teacherPk null·student 익명화. ⚠️ consent 이력 미구현 |
+| **D3-04~08** 동의철회·14세·정지이의 | 동의 가역 · 미성년 차단 · SUSPENDED 이의 | ⚠️ | 🔴 미구현 |
