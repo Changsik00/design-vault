@@ -373,6 +373,7 @@ CREATE TABLE audit_log (
   ip            VARBINARY(16),                        -- IPv4(4byte) or IPv6(16byte). PIPA 감사 요건
   meta_json     JSON,
   break_glass   BOOLEAN NOT NULL DEFAULT FALSE,        -- P1: break-glass 비상접근 플래그 (ISMS-P §6.4)
+  support_action BOOLEAN NOT NULL DEFAULT FALSE,        -- 운영자 override(entitlement 강제부여·환불·Trial 연장 등) 표식 (SUPP-1, who/when/why는 meta_json·actor_pk → operator.pk)
   created_at    DATETIME NOT NULL DEFAULT (NOW()),     -- RANGE 파티셔닝 호환 (TIMESTAMP 불가)
   PRIMARY KEY (pk, created_at),                       -- 파티션 테이블 PK = 파티션 키 포함 필수 (MySQL 규칙)
   INDEX idx_audit_org_created (org_pk, created_at),
@@ -650,6 +651,31 @@ CREATE TABLE usage_snapshot (
 - PK `(org_pk, service, metric, period)`로 멱등 upsert. `source_ts`로 신선도(집계 파이프라인 정지) 감지.
 - 과금형(usage-based billing)도 같은 스냅샷에서 산출.
 - ⚠️ 집계 push 배치 자체는 *미작성*(운영 코드 트랙) — 표는 설계 확정.
+
+## D.21 operator (운영자 신원 평면)
+
+```sql
+CREATE TABLE operator (
+  pk            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  public_id     CHAR(26) NOT NULL,                    -- ULID
+  email         VARCHAR(255) NOT NULL,                -- 회사 IdP 계정 (테넌트 identity_user와 분리)
+  operator_role ENUM('SUPER_ADMIN','CS','FINANCE','SUPPORT','SECURITY','SRE','AUDITOR') NOT NULL,
+  mfa_enabled   BOOLEAN NOT NULL DEFAULT TRUE,         -- 운영자 MFA 강제
+  status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  deleted_at    TIMESTAMP,
+  UNIQUE KEY uq_operator_public_id (public_id),
+  UNIQUE KEY uq_operator_email (email),
+  INDEX idx_operator_role (operator_role)
+);
+```
+
+**설계 포인트** ([[operator-plane]] B안 — OPER-1·OPER-2 설계 확정):
+- **테넌트 `membership`과 완전 분리** — `org_pk` 없음(운영자는 특정 org에 안 묶임). 불변식 #3의 명시적 예외(전역 평면 — §G.1의 audit·전역 카탈로그와 같은 부류).
+- `operator_role`→action 매핑은 **코드 상수 `OPERATOR_PERMISSION[role]`**가 권위(DB 레지스트리 회피, [[role-as-code]] 동일 원칙). 역할 매트릭스는 [[operator-plane]] 결정 문서.
+- 운영자 행위는 `audit_log`에 `actor_type='OPERATOR'` + `support_action`/`break_glass`로 **100% 기록**(§D.8).
+- cross-tenant 조회·override는 `internal/`·admin 서비스 **코드 경로 + break-glass**로만([[cross-tenant-separation]]·[[break-glass]]). 일반 테넌트 토큰으론 도달 불가.
+- ⚠️ 운영자 *인증 인프라*(전용 IdP/MFA)·콘솔 UI는 별도 코드 트랙(범위 밖). 전환 조건: 운영자 증가·SOC2 → 외부 IAM 위임([[operator-plane]] C안).
 
 ---
 

@@ -19,7 +19,7 @@ tags:
 > 답하려는 질문: ***"이걸 3년 운영하면 무슨 사고가 나나, 그때 platform_db는 무엇을 제공하나."***
 >
 > **범위 규율**: 여기는 platform_db가 **소유하는 데이터·계약**만 둔다. 콘솔 UI·알림 임계치·DR 런북·Feature Flag rollout은 platform_db가 *enable*만 하고 *소유*는 별도 ops 제품. **단 Permission Debugger는 UI가 아니라 계약으로서 platform_db 책임**.  
-> **상태**: 대부분 🔴/🟡 — 이 문서는 *식별된 갭*의 계약을 정의한다(구현은 후속).
+> **상태**: 설계는 결정·explainer·스키마(§D.20 usage_snapshot·§D.21 operator)로 대부분 **확정/착수**, 구현(배치·콘솔)은 후속. 이 문서는 그 *계약*을 정의한다.
 
 ---
 
@@ -39,7 +39,7 @@ operator_session   (운영자 세션 — 짧은 TTL, 행위 추적)
 - cross-tenant 도달 = `internal/`·admin 서비스 코드 경로 + [[break-glass]]만. 일반 API 토큰 불가.
 - 운영자 행위는 **컴플라이언스 audit 100%**(`actor_type='OPERATOR'`, [[audit-two-lane]]).
 
-**현재**: 🔴 미설계 (운영자=OWNER로 수렴 중).
+**현재**: 🟡 (operator-plane 결정 + operator 테이블 [[schema-reference]] §D.21 설계 / 인증 인프라는 코드 트랙).
 
 ---
 
@@ -93,7 +93,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 3. outbox 워커 재시도 또는 수동 org_entitlement UPDATE + perm_version 갱신
 ```
 
-**현재**: 🔴 (debug 계약·support-action 미설계 — 위 절차는 운영자 수동).
+**현재**: 🟡 (debug 계약 [[permission-debugger]]·support_action §D.8 설계 / 구현은 후속 — 그 전까진 수동).
 
 ---
 
@@ -113,7 +113,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 | chat/usage 이벤트 | 1년 → S3 아카이브 | 서비스 DB 소관 | 비용 |
 
 - **파기 트리거**: 월별 파티션 배치 · sweeper job(PROCESSED 정리) · 탈퇴 30일 배치.
-- ⚠️ **현재 🔴**: sweeper·retention 배치 미작성. 파티션 자동 추가도 미작성([[schema-reference]] §D.8). → 이 표가 그 응집점.
+- **현재 🟡**: 보존 정책·매트릭스는 설계 완료([[data-lifecycle-retention]]), sweeper·retention·파티션 자동 추가 *배치*만 미작성([[schema-reference]] §D.8). → 이 표가 그 응집점.
 
 ### 정기 배치 (platform_db 위에서 도는 운영 작업)
 
@@ -146,7 +146,7 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 - **한도 실시간 enforcement 카운터는 서비스측**(ABAC-3) — 실시간 차단은 빠른 서비스 카운터, *가시성·과금*은 platform.
 - **과금형(metered billing)**: 정산용 `usage_event`를 platform이 받음(정확성 요구↑). usage_snapshot과 동일 경로.
 
-**현재**: 🔴 (snapshot 테이블 없음 — 현재 사용량 불가시).
+**현재**: 🟡 (snapshot 테이블 [[schema-reference]] §D.20 설계 / 집계 push 배치 미작성).
 
 ---
 
@@ -159,12 +159,12 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 | **MySQL(platform_db)** | 전 서비스 auth 불가 (SPOF) | read replica로 read 지속(NFR-3 트리거 T2). RTO/RPO·백업은 ops 소관이나 **단일 인스턴스=SPOF임을 명시**. |
 | **Redis** (권한 캐시) | 캐시 미스 → DB 직격(느려짐) | **fail-open 아님** — 캐시는 가속용, 권위 아님. 없으면 DB 조회로 *느려도 정상 동작*. |
 | **Firebase** | 신규 로그인 불가 | 기존 JWT(TTL 1h)는 유효 → 진행 세션 영향 적음. `firebase_uid`는 조회 키라 vendor 교체 가능([[firebase-boundary]]). |
-| **PG webhook 유실/지연** | entitlement 갱신 지연 | Gate B `validUntil` 복합체크가 2차 방어([[decisions/gate-b-billing-grace|gate-b-billing-grace]]). + reconciliation 폴링(🔴 미작성) + Webhook Replay(O2). |
+| **PG webhook 유실/지연** | entitlement 갱신 지연 | Gate B `validUntil` 복합체크가 2차 방어([[decisions/gate-b-billing-grace|gate-b-billing-grace]]). + reconciliation 폴링(🟡 배치 미작성) + Webhook Replay(O2). |
 | **Qdrant/Neo4j** | RAG 검색 불가 | platform auth와 무관(서비스 도메인). org 격리만 보장([[rag-multitenancy]]). |
 
 - **entitlement 가용성(AVAIL-1)**: entitlement는 billing 장애와 **구조적으로 격리**됨([[auth-projection]]) — billing/PG가 죽어도 *기존 entitlement read는 영향 없음*. "결제 시스템 장애 시 기존 권한 최소 N시간 유지"의 근거가 이미 설계에 있다(명문화만 필요).
 
-**현재**: 🟡 (auth-projection·validUntil은 ✅이나, reconciliation 폴링·단일 MySQL SPOF 대응은 🔴).
+**현재**: 🟡 (auth-projection·validUntil ✅; reconciliation 폴링은 배치 미작성, 단일 MySQL SPOF는 트리거 시 분리).
 
 ---
 
@@ -182,7 +182,7 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 
 - 이 지표가 알림(Alert) 임계치로 이어지나, **임계치·알림 메커니즘은 ops 제품 소관**. platform_db는 *측정 가능하도록 데이터를 노출*할 책임.
 
-**현재**: 🔴 (KPI 정의·노출 미설계).
+**현재**: 🟡 (KPI 정의 [[observability-slo]] 설계 / 노출·대시보드는 후속).
 
 ---
 
