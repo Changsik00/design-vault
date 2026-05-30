@@ -34,7 +34,6 @@ platform_db/
 | [[schema-reference]] | ERD · DDL · 3-gate · billing 흐름 · 멀티테넌시 · 보안 · consent 모델 |
 | [[requirements]] | 요구사항 추적표 104건 + BDD 시나리오 Domain 1~10 |
 | [[bdd-scenarios]] | BDD 시나리오 — 10개 도메인 행위 시나리오 (통합 테스트 기반) |
-| [[migration-ops]] | Drizzle 마이그레이션 운영 가이드 (0000~0006) |
 
 ---
 
@@ -49,6 +48,7 @@ platform_db/
 |---|---|
 | [[design-asymmetry]] | 완전 MSA vs 모놀리스 vs **비대칭 분리** (platform_db + 서비스 DB) |
 | [[identity-billing-access]] | 직접 Drizzle vs **공유 패키지(A)** vs HTTP 서비스(B) |
+| [[service-extensibility]] | service·capability CHECK 허용목록 vs 코드검증 vs 레지스트리 (**A 채택**, 전환 트리거 명시) |
 
 ### 멀티테넌시 · 격리
 

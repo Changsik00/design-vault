@@ -42,15 +42,14 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 | ID | 요구사항 | 측정 기준 | 상태 |
 |---|---|---|---|
-| EXT-1 | 새 서비스 추가가 **platform 스키마 마이그레이션 없이** 가능 | 서비스 N 추가 시 변경되는 platform DDL = 0 | 🔴 **위반** — `org_entitlement.service`·`product.service` CHECK 목록이 하드코딩 → 서비스 추가 = `ALTER` |
-| EXT-2 | 플랫폼 코어 인가에 **서비스 고유 어휘 하드코딩 금지** | `delegation_grant`·`membership` 등 코어 테이블에 academy 동사/역할 리터럴 0 | 🔴 **위반** — `chk_capability`가 `ACADEMY.*` 6종 하드코딩 (네임스페이스만 적용, CHECK는 여전히 서비스 결합) |
+| EXT-1 | 새 서비스 추가가 **platform 스키마 마이그레이션 없이** 가능 | 서비스 N 추가 시 변경되는 platform DDL = 0 | 🟡 **의도적 트레이드오프** — service CHECK는 온라인 1줄 마이그레이션(D6). [[service-extensibility]] Option A 채택 |
+| EXT-2 | 플랫폼 코어 인가에 **서비스 고유 어휘 하드코딩 금지** | 코어 테이블에 academy 동사/역할 리터럴 0 | 🟡 **의도적 트레이드오프** — `chk_capability` `ACADEMY.*` 6종(코드 ROLE_PERMISSION과 중복 안전망). [[service-extensibility]] |
 | EXT-3 | role→action 매핑은 **코드 상수** (서비스 역할 추가 = 코드 배포, 스키마 무변경) | 새 서비스 역할 권한 추가 시 DB DDL = 0 | ✅ [[role-as-code]] `ROLE_PERMISSION[service]` |
 | EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 0008 |
-| EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 **부분 위반** — `checkGateB(orgPk, service="ACADEMY")` 기본값이 한 서비스로 기울어짐 |
+| EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 — `checkGateB(...="ACADEMY")` 기본값. 2번째 서비스 도입 시 중립화 ([[service-extensibility]]) |
 | EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §12.1 단편) |
 
-> **결정 필요 (애매하게 두지 말 것)**: EXT-1/EXT-2의 service·capability CHECK 결합은 두 길 중 하나로 **명시 결정**해야 한다 —  
-> (a) "서비스마다 platform 마이그레이션"을 *정책으로 수용*(현 규모 YAGNI 근거), 또는 (b) 지금 결합을 끊기(`service` 자유 VARCHAR + 앱/코드 검증, capability CHECK 제거). → [[role-as-code]]·[[design-asymmetry]]에서 후속 결정.
+> **결정 완료**: EXT-1/EXT-2/EXT-5의 service·capability 결합은 [[service-extensibility]]에서 종결 — **Option A(CHECK 유지) 채택**(온라인 저비용 + YAGNI, 코어가 어휘를 아는 건 의도적 수용). 2번째 서비스 churn 시 코드/데이터 기반(B/C)으로 전환(트리거 명시). 그래서 🔴(미관리 부채)가 아니라 **🟡(의도적·시한부 트레이드오프)**.
 
 ---
 
@@ -220,14 +219,14 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 | EXT | 충족 |
 |---|---|
-| EXT-1 마이그레이션 없는 서비스 추가 | 🔴 위반 (service CHECK) |
-| EXT-2 코어에 서비스 어휘 없음 | 🔴 위반 (capability CHECK) |
+| EXT-1 마이그레이션 없는 서비스 추가 | 🟡 의도적 트레이드오프 ([[service-extensibility]]) |
+| EXT-2 코어에 서비스 어휘 없음 | 🟡 의도적 트레이드오프 ([[service-extensibility]]) |
 | EXT-3 role→action 코드 상수 | ✅ |
 | EXT-4 role_code 자유 확장 | ✅ |
-| EXT-5 게이트 서비스 중립 | 🟡 (Gate B default) |
+| EXT-5 게이트 서비스 중립 | 🟡 (Gate B default, 2번째 서비스 시 중립화) |
 | EXT-6 onboarding 절차 문서화 | 🟡 |
 
-> **목적 부채 요약**: 두 번째 서비스를 붙일 때 *반드시* platform 마이그레이션이 필요한 지점 = **2곳(service CHECK, capability CHECK)**. 이것이 "service-agnostic 코어"라는 목적의 미달 핵심이다. → §1 결정 필요.
+> **목적 부채 요약**: service·capability CHECK 결합 = 서비스 추가 시 platform 마이그레이션 필요. [[service-extensibility]]에서 **Option A(저비용 온라인 CHECK 유지) 의도적 채택**으로 종결 + 전환 트리거 명시. 남은 1급 미해결은 **P6(머신 신원, api_key) 미착수**.
 
 ### 4.2 기능 요구사항 (pillar별, 현재 구현 기준)
 
@@ -245,7 +244,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 > 기존 104건은 구 A.13(R6/R7 보강)에 NFR-6·AUTHN-8·REBAC-8·BILL-12 등 **상위 항목과 중복 기재**가 있었음 → 목적 재구성 시 dedup하여 100건. (기능 합계 외 EXT 6건은 §4.1에서 별도 관리.)
 >
 > **2026-05-30**: 0008(RBAC-1/2·REBAC-2) 반영. 단 기능 ✅와 **목적(EXT) 충족은 별개** — REBAC-2는 기능 ✅이나 EXT-2 🔴.  
-> **읽는 법**: 기능 점수(53% ✅)가 아니라 **EXT 부채(🔴 2건)와 P6(머신 신원) 미착수**가 "플랫폼 목적" 관점의 진짜 미해결이다.
+> **읽는 법**: 기능 점수(53% ✅)가 아니라 **service 결합(의도적 채택 → [[service-extensibility]])과 P6(머신 신원) 미착수**가 "플랫폼 목적" 관점의 핵심이다.
 
 ---
 

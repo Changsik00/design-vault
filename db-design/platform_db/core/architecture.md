@@ -105,7 +105,7 @@ tags:
 
 **G2. 권한 어휘 서비스 네임스페이스** _(D2 · ✅ 0008 완료: `ACADEMY.<action>`)_
 
-> **0008로 구현 완료.** `delegation_grant.capability`가 `ACADEMY.PUBLISH_VIDEO` 등 `<service>.<action>` 네임스페이스로 전환. ⚠️ CHECK 목록은 여전히 하드코딩이라 멀티서비스(`MARKET.<action>`) 추가 시 마이그레이션이 필요 — 네임스페이스는 적용했으나 "마이그레이션 없는 개방"은 아직.
+> **0008로 구현 완료.** `delegation_grant.capability`가 `ACADEMY.PUBLISH_VIDEO` 등 `<service>.<action>` 네임스페이스로 전환. ⚠️ CHECK 목록은 여전히 하드코딩이라 멀티서비스(`MARKET.<action>`) 추가 시 마이그레이션이 필요 — 네임스페이스는 적용했으나 "마이그레이션 없는 개방"은 아직. → [[service-extensibility]]에서 **Option A(저비용 온라인 CHECK 유지) 의도적 채택** + 전환 트리거 명시.
 
 **G3. `organization.type` → service-agnostic `org_kind`** _(D5 · 🟡 0008 부분: ACADEMY 제거, ENUM 유지)_
 
@@ -120,7 +120,7 @@ tags:
 | ID | 결정 | 구현 상태 | 왜 | 기각/대안 |
 |---|---|---|---|---|
 | **D1** | role 2단: `platform_role` + `service_membership.role_code` | ✅ **0008 구현** — platform_role(OWNER/MEMBER/SERVICE, ADMIN 미채택) + service_membership 신규 | 서비스마다 role 어휘·hierarchy·matrix가 달라 단일 글로벌 ENUM은 폭증·충돌 | 단일 `membership.role` ENUM(academy 종속) |
-| **D2** | capability 네임스페이스 `<service>.<action>`(`delegation_grant.capability`) | ✅ **0008 구현** — `ACADEMY.*` CHECK. ⚠️ 멀티서비스 추가는 여전히 마이그레이션 | academy 어휘(PUBLISH_VIDEO)가 platform에 고착되는 것 방지 | academy-only ENUM |
+| **D2** | capability 네임스페이스 `<service>.<action>`(`delegation_grant.capability`) | ✅ **0008 구현** — `ACADEMY.*` CHECK. ⚠️ 멀티서비스 추가는 여전히 마이그레이션 ([[service-extensibility]] A 채택) | academy 어휘(PUBLISH_VIDEO)가 platform에 고착되는 것 방지 | academy-only ENUM |
 | **D3** | role→action 매핑은 **코드 상수**, DB 레지스트리는 P2 | ✅ 구현됨 | DB에 rule 넣으면 디버깅 지옥·traceability 붕괴(Stripe/Linear도 코드) | DB `role_capability` 레지스트리 보류(테넌트 커스텀롤 트리거 시만) |
 | **D4** | 서비스 계정 = `platform_role='SERVICE'` + `api_key` | 🟡 type='SERVICE' ✅, api_key 테이블 phase-17 | 사람·머신 동일 3-gate, 감사 통합 | 글로벌 `AGENT_*` role / 별도 agent 테이블 |
 | **D5** | `organization.org_kind`(generic) + 서비스는 entitlement | 🟡 **0008 부분** — ACADEMY 제거(`ENUM('COMPANY','TEAM','PERSONAL')`), `org_kind` VARCHAR+CHECK 전환은 미완 | org은 tenant, service는 capability — 분리 | `type ENUM(ACADEMY…)` 서비스 종속 |
@@ -142,7 +142,7 @@ tags:
 
 ```
 Layer 1 인증  : Firebase Auth (누구냐) — JWT, firebase_uid
-Layer 2 소속  : @aiagent/db-platform (어디 소속이냐) — membership tuple
+Layer 2 소속  : db-platform (어디 소속이냐) — membership tuple
 Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 ```
 
