@@ -270,7 +270,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 ## 6. BDD 시나리오
 
-→ [[bdd-scenarios]]. platform_db 10개 도메인 행위 시나리오 + 서비스 적합성 크로스체크(테스트 케이스).
+→ [[bdd-scenarios]] (화이트박스 통합 — Part A/B 19개 도메인 + 요구 추적 매트릭스) · [[e2e-journeys]] (블랙박스 E2E 사용자 여정 C-01~07 — API 경계에서만 관찰).
 
 ---
 
