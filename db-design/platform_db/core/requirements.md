@@ -3,43 +3,77 @@ type: core
 aliases:
   - 요구사항 추적표
   - requirements
-  - BDD 시나리오
+  - 플랫폼 목적 요구사항
 tags:
   - platform-db
   - core
   - requirements
-  - bdd
   - traceability
+  - platform-purpose
 ---
 
-# platform_db — 요구사항 & 검증
+# platform_db — 요구사항 & 검증 (플랫폼 목적 기준)
 
-> 작성일: 2026-05-28
-> 진입점: [[architecture]] · 설계: [[schema-reference]]
+> 진입점: [[architecture]] · 설계: [[schema-reference]] · 행위 검증: [[bdd-scenarios]]
 >
-> **이 문서**: "이 설계가 요구를 충족하는가"를 두 각도로 검증한다.  
-> **A. 요구사항 추적표** — 8라운드 자문 총망라 (우리 구현 상태 기준 현실 평가)  
-> **B. BDD 시나리오** — platform_db 6도메인 행위 시나리오 (아래로 내려갈수록 미구현)
+> **이 문서의 관점**: 요구사항을 *"academy를 충족하는가"*가 아니라 ***"platform_db의 목적을 달성하는가"***로 측정한다.  
+> academy/market/agent는 **적합성 테스트 케이스**([[bdd-scenarios]])이지 요구사항의 출처가 아니다.
 >
-> **상태 범례**  
-> ✅ 구현완료 · 🟡 부분구현/P1 · ⚠️ phase-17 대상 · ⛔ 보류(YAGNI/트리거 미충족) · ❓ 미결정
+> **상태 범례**: ✅ 충족 · 🟡 부분/P1 · ⚠️ phase-17 · ⛔ 보류(YAGNI/트리거 미충족) · ❓ 미결정 · 🔴 **목적 위반(부채)**
 
 ---
 
-# A. 요구사항 추적표
+## 0. 플랫폼 목적 — 무엇을 위한 DB인가
 
-## A.1 아키텍처 / 토폴로지
+platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 꽂히는 service-agnostic 공통 코어**다. 존재 이유는 둘:
 
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| ARCH-1 | 공통 코어(identity/billing/product)는 단일 `platform_db`, 도메인은 서비스별 DB | R0 | [[design-asymmetry]] | ✅ |
-| ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음 | R0 | §6 단일 InnoDB 트랜잭션 | ✅ |
-| ARCH-3 | cross-DB는 서비스→platform 읽기만 허용, peer 금지, least-privilege DB 계정 | R0 | 불변식 #6 | ✅ |
-| ARCH-4 | `@aiagent/db-platform` 패키지로만 platform 접근, Drizzle 직접 참조 금지 | R0 | [[identity-billing-access]] (A) | ✅ |
-| ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원 보장) | R0 | 마이그레이션 규약 | ✅ |
-| ARCH-6 | async 부수효과는 `outbox_event` | R0 | §6.2 | ✅ |
+1. **서비스 추가 한계비용 최소화** — 두 번째·세 번째 서비스를 붙일 때 *데이터/코드*만으로 되고 *플랫폼 스키마 마이그레이션*은 없어야 한다.
+2. **서비스 횡단 불변식 보장** — identity SSOT · 테넌트 격리 · 결제↔권한 원자성 · 감사 · 동의를 모든 서비스에 동일하게 강제한다.
 
-## A.2 Identity & User
+> 따라서 platform_db의 가치 = **"세 번째 서비스를 얼마나 싸게 붙이는가"** + **"횡단 불변식을 구조로 강제하는가"**.  
+> 이 두 가지가 1급 요구사항이고, 개별 기능 요구사항(§3)은 그 아래 수단이다.
+
+---
+
+## 1. 확장성 요구사항 (EXT) — *1급, 목적 직결*
+
+> **신설.** 플랫폼의 핵심 가치 명제(서비스 추가 한계비용)를 처음으로 측정 가능한 요구로 끌어올린다.  
+> 기존 추적표에서 "phase-17 nice-to-have"로 묻혀 있던 결합들이, 목적 렌즈에서는 **P0 부채(🔴)**다.
+
+| ID | 요구사항 | 측정 기준 | 상태 |
+|---|---|---|---|
+| EXT-1 | 새 서비스 추가가 **platform 스키마 마이그레이션 없이** 가능 | 서비스 N 추가 시 변경되는 platform DDL = 0 | 🔴 **위반** — `org_entitlement.service`·`product.service` CHECK 목록이 하드코딩 → 서비스 추가 = `ALTER` |
+| EXT-2 | 플랫폼 코어 인가에 **서비스 고유 어휘 하드코딩 금지** | `delegation_grant`·`membership` 등 코어 테이블에 academy 동사/역할 리터럴 0 | 🔴 **위반** — `chk_capability`가 `ACADEMY.*` 6종 하드코딩 (네임스페이스만 적용, CHECK는 여전히 서비스 결합) |
+| EXT-3 | role→action 매핑은 **코드 상수** (서비스 역할 추가 = 코드 배포, 스키마 무변경) | 새 서비스 역할 권한 추가 시 DB DDL = 0 | ✅ [[role-as-code]] `ROLE_PERMISSION[service]` |
+| EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 0008 |
+| EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 **부분 위반** — `checkGateB(orgPk, service="ACADEMY")` 기본값이 한 서비스로 기울어짐 |
+| EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §12.1 단편) |
+
+> **결정 필요 (애매하게 두지 말 것)**: EXT-1/EXT-2의 service·capability CHECK 결합은 두 길 중 하나로 **명시 결정**해야 한다 —  
+> (a) "서비스마다 platform 마이그레이션"을 *정책으로 수용*(현 규모 YAGNI 근거), 또는 (b) 지금 결합을 끊기(`service` 자유 VARCHAR + 앱/코드 검증, capability CHECK 제거). → [[role-as-code]]·[[design-asymmetry]]에서 후속 결정.
+
+---
+
+## 2. 목적 pillar 지도 — 기존 요구사항을 무엇으로 보는가
+
+기존 기능 요구사항(§3, 104건)은 아래 6개 **목적 pillar**를 떠받치는 수단이다. "출처(R라운드)"는 연혁일 뿐, *왜 필요한가*는 pillar로 읽는다.
+
+| Pillar | 목적 | 떠받치는 요구사항 군 | 핵심 불변식 |
+|---|---|---|---|
+| **P1 Identity SSOT** | 전 서비스 단일 사용자 | USR, AUTHN | #1 Firebase=인증, #2 PK/ULID |
+| **P2 Service-agnostic 인가** | 서비스 무관 권한 모델 | RBAC, ABAC, ReBAC | #5 service=VARCHAR+CHECK, role=코드 |
+| **P3 Billing↔Auth 원자성** | 결제=권한, 보편 게이트 | BILL | #4 canXXX=entitlement만, #7 단일 트랜잭션 |
+| **P4 테넌트 격리** | org 횡단 격리 | TEN | #3 org_pk NOT NULL |
+| **P5 감사·동의 컴플라이언스** | 법적 증거·불변 기록 | AUD, CON | append-only, WORM |
+| **P6 머신·B2B 신원** | 사람=머신 동일 3-gate | api_key·SERVICE 계정 (AUTHN-5, SEC-5/7, RBAC-4) | type=SERVICE |
+
+> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **phase-17/0%**다. academy 역할분리(0008)는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
+
+---
+
+## 3. 기능 요구사항 추적 (pillar 그룹)
+
+### P1 — Identity SSOT
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
@@ -51,39 +85,31 @@ tags:
 | USR-6 | 상태 ACTIVE/SUSPENDED/DELETED, soft→hard delete, anonymize | R0 | identity_user.status + deleted_at | ✅ |
 | USR-7 | 1 user = N org (멀티 워크스페이스) | R0 | membership 복합 PK | ✅ |
 | USR-8 | 소셜(Kakao/Naver) custom token + 다중 provider 계정연결 | R2 | custom token ✅ / 연결 모델 | 🟡 v1.0 |
-| USR-10 | `email_verified` — Firebase JWT 동기화. 이메일 인증 필수 기능(결제·초대) 차단 근거 | 신규 | identity_user.email_verified + email_verified_at | 🟡 P1 |
-| USR-11 | `phone_verified` — SMS OTP 또는 Firebase Phone Auth. 전화번호 수집 시 인증 여부 추적 | 신규 | identity_user.phone_verified + phone_verified_at | 🟡 P1 |
-| USR-12 | 데이터 이식성 — 강사 본인 데이터(identity·profile·멤버십) admin 처리로 이전 가능. `platform.content_ownership` 동의 시 본인 생성 콘텐츠도 이전 가능. 학생·수업기록·결제이력은 org 소유로 이전 불가 | 신규 | user_consent_event(platform.content_ownership·platform.data_transfer) | 🟡 P1 |
-
-## A.3 인증 (AuthN)
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
+| USR-10 | `email_verified` — Firebase JWT 동기화. 필수 기능(결제·초대) 차단 근거 | 신규 | identity_user.email_verified | 🟡 P1 |
+| USR-11 | `phone_verified` — SMS OTP/Firebase Phone. 전화 수집 시 인증 추적 | 신규 | identity_user.phone_verified | 🟡 P1 |
+| USR-12 | 데이터 이식성 — 본인 데이터 admin 이전(동의 기반), org 소유 데이터는 이전 불가 | 신규 | user_consent_event(content_ownership·data_transfer) | 🟡 P1 |
 | AUTHN-1 | Firebase Auth = 인증 SSOT, firebase_uid는 조회 키(PK/FK 아님) | R0 | 불변식 #1 | ✅ |
 | AUTHN-2 | 비밀번호 강도·이메일 인증·재설정·토큰 TTL 1h | R0 | Firebase 정책 | ✅ |
-| AUTHN-3 | 만료/위조 토큰 Guard 401 빠른 차단 | R2 | FirebaseAuthGuard | ✅ |
-| AUTHN-4 | MFA (OWNER/관리자, v0.5) | R0 | Firebase MFA + platform_role 판단 | 🟡 |
-| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ⚠️ phase-17 |
+| AUTHN-3 | 만료/위조 토큰 Guard 401 빠른 차단 | R2 | FirebaseJwtGuard | ✅ |
+| AUTHN-4 | MFA (OWNER/관리자, v0.5) | R0 | Firebase MFA + platform_role | 🟡 |
 | AUTHN-6 | 계정 정지/삭제 시 전 서비스 즉시 차단 | R0 | identity_user.status | ✅ |
 | AUTHN-7 | 다중 디바이스 허용, 이상 로그인 감지 | R0 | Firebase | ✅ |
-| AUTHN-8 | JWT claim 신뢰 경계 — 필수 claim 누락 fail-closed + DB fallback | R6 | FirebaseAuthGuard 규약 | 🟡 |
+| AUTHN-8 | JWT claim 신뢰 경계 — 필수 claim 누락 fail-closed + DB fallback | R6 | FirebaseJwtGuard 규약 | 🟡 |
 
-## A.4 인가 — RBAC
+### P2 — Service-agnostic 인가 (RBAC / ABAC / ReBAC)
+
+> ⚠️ **목적 정렬**: RBAC-2·REBAC-2는 *기능적으로 ✅*지만 **EXT-2(§1)** 관점에선 **service 결합 부채**다. "academy 어휘 격리"를 넘어 "코어에 어휘 없음"까지 가야 완성.
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| RBAC-1 | role 2단: `membership.platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1, 0008 | ✅ |
-| RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership, 0008 | ✅ |
+| RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1, 0008 | ✅ |
+| RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership, 0008 | ✅ (단 EXT-4 충족, EXT-2는 별개) |
 | RBAC-3 | role→action 매핑은 코드 상수(DB 저장 금지) | R0 | ROLE_PERMISSION | ✅ |
-| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key (글로벌 AGENT role 폐기) | R3 | D4, 0008 | 🟡 platform_role='SERVICE' ✅ / api_key phase-17 |
+| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4, 0008 | 🟡 SERVICE ✅ / api_key phase-17 |
 | RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
 | RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
 | RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
-
-## A.5 인가 — ABAC
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
+| RBAC-8 | ROLE_PERMISSION 변경 배포 SLA 명시 — hot-fix vs weekly | R6 | §15 열린 결정 | ❓ |
 | ABAC-1 | 소유권(`owner_pk == principal`) 기반 통제 | R0 | CASL ability | ✅ |
 | ABAC-2 | 테넌트 속성(`org_pk` 일치) 모든 도메인 강제 | R0 | 불변식 #3 | ✅ |
 | ABAC-3 | feature_limit 한도 평가(entitlement), 카운터는 서비스측 | R2 | org_entitlement.feature_limits | ✅ |
@@ -91,21 +117,16 @@ tags:
 | ABAC-5 | 리소스 visibility 속성 필터 | R0 | CASL | ✅ |
 | ABAC-6 | NIST 환경속성 — api_key `allowed_ip_cidr` + Gateway/WAF IP | R4 | D8 (P1) | 🟡 |
 | ABAC-7 | 최종 `can()` 결정 캐싱 금지, 입력 블록만 TTL 60s | R0 | Redis 전략 | ✅ |
-
-## A.6 인가 — ReBAC / 위임
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
 | REBAC-1 | capability 위임(grantor→grantee, scoped, expiry, revoke) | R0 | delegation_grant | ✅ |
-| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2, 0008 | ✅ |
+| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2, 0008 | ✅ (🔴 EXT-2: CHECK 하드코딩 잔존) |
 | REBAC-3 | 임퍼소네이션 금지, 위임 행사를 감사 기록 | R0 | audit_log | ✅ |
 | REBAC-4 | org 계층(HQ_BRANCH/HOLDING) | R0 | org_relation | ✅ |
 | REBAC-5 | 계층은 권한 근거 아님, 명시적 membership만 | R2 | 불변식 | ✅ |
 | REBAC-6 | 자기참조 차단(DB CHECK constraint) | R2 | chk_no_self_ref | ✅ |
 | REBAC-7 | Zanzibar full relation_tuple은 보류 | R0 | ⛔ 트리거 시 | ⛔ |
-| REBAC-8 | delegation_grant(platform capability) ↔ 서비스 trust_relationship 경계 규칙 | R6 | academy_db 정리 필요 | 🟡 |
+| REBAC-8 | `delegation_grant`(platform) ↔ 서비스 `trust_relationship`(도메인) 경계 규칙 | R6 | 아키텍처 규약 | ✅(규칙)/🟡(구현) |
 
-## A.7 Product / Billing / Entitlement
+### P3 — Billing↔Auth 원자성 & Entitlement 게이트
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
@@ -116,49 +137,24 @@ tags:
 | BILL-5 | 환불/chargeback append-only, 금액은 정수 minor(float 금지) | R0 | payment_ledger | ✅ |
 | BILL-6 | GRACE 유예기간, grace_until | R0 | org_entitlement.grace_until | ✅ |
 | BILL-7 | 업그레이드(즉시)/다운그레이드(예약) | R2 | 🟡 P1 | 🟡 |
-| BILL-8 | PG adapter 추상화(Toss/Stripe/PayPal/Manual) | R0 | pg_provider enum | ✅ |
-| BILL-9 | PG webhook 서명 검증(handler, INSERT 전) + replay tolerance | R6 | signature_ok 컬럼 | 🟡 |
+| BILL-8 | PG adapter 추상화(Toss/Stripe/PayPal/Manual) | R0 | pg_provider | ✅ |
+| BILL-9 | PG webhook 서명 검증(handler, INSERT 전) + replay tolerance(±5분) | R6 | signature_ok 컬럼 | 🟡 코드 규약 |
 | BILL-10 | source=FREE/MANUAL/PROMO로 결제 없이 access 부여 | R0 | org_entitlement.source | ✅ |
 
-## A.8 멀티테넌시 & 격리
+### P4 — 테넌트 격리 불변식
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
 | TEN-1 | 모든 도메인 테이블 `org_pk NOT NULL` | R0 | 불변식 #3 | ✅ |
-| TEN-2 | 모든 조회 `WHERE org_pk` 강제, 타 org는 404 | R1 | [[cross-tenant-separation]], BOLA 프레임워크 | ✅ |
+| TEN-2 | 모든 조회 `WHERE org_pk` 강제, 타 org는 404 | R1 | [[cross-tenant-separation]], BOLA | ✅ |
 | TEN-3 | cross-tenant 조회는 아키텍처 분리(`internal/`) | R1 | [[cross-tenant-separation]] | ✅ |
 | TEN-4 | MySQL RLS 부재 → CI 린트 보강 | R1 | 🟡 린트 미도입 | 🟡 |
-| TEN-5 | Qdrant payload 필터 + `org_id` 인덱스 | R1 | 🟡 | 🟡 |
-| TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | 🟡 | 🟡 |
-| TEN-7 | 분리 트리거 T1~T4 사전 정의 | R0 | §7 | ✅ |
+| TEN-5 | Qdrant payload 필터 + `org_id` 인덱스 | R1 | [[rag-multitenancy]] | 🟡 |
+| TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | — | 🟡 |
+| TEN-7 | 분리 트리거 T1~T4 사전 정의 | R0 | [[multitenancy-pool]] | ✅ |
+| TEN-9 | rate-limit 정책 위치 — org=`feature_limits` / 머신=`api_key.rate_limit_tier`, 강제는 Gateway | R6 | §4 결정 | 🟡 |
 
-## A.9 보안 표준
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| SEC-1 | BOLA 방어 — org_pk 질의 강제 프레임워크화 | R4 | Drizzle base repo | ✅ |
-| SEC-2 | NIST 환경속성 — api_key IP/컨텍스트 | R4 | D8 (P1) | 🟡 |
-| SEC-3 | 감사 불변성 — UPDATE/DELETE 권한 제거 + 해시 체이닝 + WORM | R4 | audit_log append-only ✅ / 해시 🟡 | 🟡 |
-| SEC-4 | secret 관리 — KMS, 평문 로그 금지 | R0 | 정책 | ✅ |
-| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 (phase-17) | ⚠️ |
-| SEC-6 | secret rotation cadence — api_key 90/365d, Firebase Admin SDK 180d | R7 | 운영 플레이북 | 🟡 |
-
-## A.10 정책 & 동의 (PIPA)
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ phase-17 |
-| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ⚠️ phase-17 |
-| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
-| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
-| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ⚠️ phase-17 |
-| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ⚠️ phase-17 |
-| CON-7 | 약관 버전 관리 + 재동의 인터셉터 | R5 | 🟡 P1 | 🟡 |
-| CON-8 | `platform.content_ownership` — TEACHER role 취득 시 콘텐츠 소유권 약관 체크박스 동의 (전자서명법 §3 효력). 미동의 시 이전 불가 안내 | 신규 | user_consent_event | ⚠️ phase-17 |
-| CON-9 | `platform.data_transfer` — 강사 이전 처리 전 강사 본인 동의 필수. admin이 동의 없이 임의 이전 금지 | 신규 | user_consent_event | ⚠️ phase-17 |
-| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 기록. 철회 불가 처리 전 명시적 동의 | 신규 | user_consent_event | ⚠️ phase-17 |
-
-## A.11 감사 / 관측
+### P5 — 감사 & 동의 컴플라이언스
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
@@ -166,63 +162,93 @@ tags:
 | AUD-2 | 모든 권한 결정(ALLOW/DENY/ERROR) 기록 | R0 | audit_log.result | ✅ |
 | AUD-3 | trace_id + audit_event_id(분산 추적) | R4 | 🟡 P1 | 🟡 |
 | AUD-4 | 사람·머신 활동 통계 분리(type 필터) | R2 | identity_user.type | ✅ |
+| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ phase-17 |
+| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ⚠️ phase-17 |
+| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
+| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ⚠️ phase-17 |
+| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ⚠️ phase-17 |
+| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ⚠️ phase-17 |
+| CON-7 | 약관 버전 관리 + 재동의 인터셉터 | R5 | 🟡 P1 | 🟡 |
+| CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ⚠️ phase-17 |
+| CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ⚠️ phase-17 |
+| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ⚠️ phase-17 |
+| CON-12 | fan-out anonymize — 탈퇴 시 outbox `user.deleted` → 각 서비스 anonymize | R6 | §12.6 | 🟡 P1 |
+| CON-13 | 동의 `meta_json` canonical(RFC 8785 JCS) + JSON Schema 검증 | R6 | user_consent_event | 🟡 P1 |
 
-## A.12 비기능
+### P6 — 머신·B2B 신원 (api_key)
+
+> agent·B2B 통합의 전제. 사람과 동일 3-gate를 통과하는 머신 신원. **전 항목 phase-17 — 두 번째 서비스가 agent라면 최우선 후보.**
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| NFR-1 | routine read 권한평가 DB hit 0(JWT claims), sensitive write만 DB 재검증 | R0 | VerifyOnDb 데코레이터 | ✅ |
-| NFR-2 | perm_version 무효화 폭 분리(user/org) | R2 | bumpPermVersion | ✅ |
-| NFR-3 | 확장 로드맵 — read replica → 테이블 분리 → DB-per-tenant | R0 | 분리 트리거 T1~T4 | ✅ |
-| NFR-4 | permission_snapshot 프론트 read-model | R3 | GET /me/permissions | 🟡 |
-| NFR-6 | perm_version 전파 — X-PV 헤더, 멀티인스턴스 sync | R6 | 🟡 P1 | 🟡 |
-
-## A.13 운영 / 키관리 / 데이터 보호 / 경계
-
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| OPS-1 | **platform_db 비대화 방어** — 논리 바운디드 컨텍스트(모듈·마이그레이션 오너·절단선 FK 최소화) | R7 | §12.1 | ✅(원칙)/🟡(모듈 분리 구현) |
-| OPS-2 | **Break-glass** 긴급 운영 접근 — 승인·사유·만료·전건 감사(임퍼소네이션과 별개) | R7 | §12.4 | 🟡 P1 |
-| OPS-3 | service-to-service trust — HTTP 분리 시 mTLS/internal JWT, `internal/*` 내부망 전용 | R7 | Option B 전환 트리거 시 | ⛔ |
-| OPS-4 | **secret rotation cadence** — api_key 90/365d, KMS DEK 연 1회, Firebase Admin SDK 키 180d 회전 (→ A.9 SEC-6 참조) | R6 | §12.3 | 🟡 정책 명시 P1 |
+| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ⚠️ phase-17 |
+| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 | ⚠️ phase-17 |
 | SEC-7 | api_key 보강 — `last_used_ip`·`created_by_user_pk`·`rate_limit_tier`·`environment` | R7 | api_key 설계 | 🟡 P1 |
-| SEC-8 | **데이터 분류**(PII/민감/미성년/결제) + **선별 app-level 암호화**(secret·guardian). phone/email 전면암호화 거부 | R7 | §9 | 🟡 분류 P0·암호화 P1 |
-| BILL-12 | PG webhook **서명 검증**(handler, INSERT 전) + replay skew tolerance(±5분) | R6 | pg_webhook_event + 앱 규약 | 🟡 코드 규약 |
-| TEN-9 | rate-limit 정책 위치 — org=`feature_limits` / 머신=`api_key.rate_limit_tier`, 강제는 Gateway | R6 | §4 결정 | 🟡 |
-| USR-9 | 휴면(DORMANT) — **유효기간제 2023 폐지로 법적 의무 아님**, 선택적 제품정책 | R6 | §11 YAGNI | ⛔→🟡 제품 결정 |
-| NFR-6 | perm_version **전파 프로토콜** — `/me/permissions {user_pv, org_pv}`, X-PV 헤더, 멀티인스턴스 sync | R6 | §5.4 설계 / 🟡 멀티인스턴스 P1 | ✅(설계)/🟡(P1) |
-| RBAC-8 | ROLE_PERMISSION 변경 **배포 SLA 명시** — hot-fix vs weekly 정책 | R6 | §15 열린 결정 | ❓ |
-| REBAC-8 | `delegation_grant`(platform capability) ↔ 서비스 `trust_relationship`(도메인) **경계 규칙** | R6 | 아키텍처 규약 | ✅(규칙)/🟡(구현) |
-| AUTHN-8 | JWT claim 신뢰 경계 — 필수 claim 누락 **fail-closed** + DB fallback | R6 | FirebaseAuthGuard 규약 | 🟡 |
-| CON-12 | **fan-out anonymize** — 탈퇴 시 outbox `user.deleted` → 각 서비스 dangling anonymize | R6 | §12.6 | 🟡 P1 |
-| CON-13 | 동의 `meta_json` **canonical(RFC 8785 JCS) + JSON Schema 검증** | R6 | user_consent_event 설계 | 🟡 P1 |
 
-## A.14 충족 스코어카드 (우리 현재 기준)
+### 횡단 — 아키텍처 · 보안 · 비기능 · 운영
 
-| 도메인 | 항목 수 | ✅ | 🟡 | ⚠️ | ⛔ | ❓ |
-|---|---|---|---|---|---|---|
-| 아키텍처 | 6 | 6 | — | — | — | — |
-| Identity & User | 11 | 6 | 5 | — | — | — |
-| 인증 | 8 | 6 | 2 | — | — | — |
-| RBAC | 7 | 4 | 2 | 0 | 1 | — |
-| ABAC | 7 | 6 | 1 | — | — | — |
-| ReBAC | 8 | 6 | 1 | 0 | 1 | — |
-| Billing | 10 | 8 | 2 | — | — | — |
-| 멀티테넌시 | 7 | 4 | 3 | — | — | — |
-| 보안 | 6 | 2 | 3 | 1 | — | — |
-| 동의(PIPA) | 10 | — | 1 | 9 | — | — |
-| 감사 | 4 | 3 | 1 | — | — | — |
-| 비기능 | 5 | 3 | 2 | — | — | — |
-| 운영/키관리/경계 | 15 | 2 | 10 | — | 2 | 1 |
-| **합계** | **104** | **56(54%)** | **33(32%)** | **10(10%)** | **4(4%)** | **1(1%)** |
-
-> **2026-05-30 갱신**: 0008 마이그레이션(RBAC-1/2, REBAC-2 구현) 반영 — ⚠️ 13→10.
-> **phase-17 완료 목표**: ✅ 80%+, ⚠️ 0%
+| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
+|---|---|---|---|---|
+| ARCH-1 | 공통 코어(identity/billing/product) 단일 `platform_db`, 도메인은 서비스별 DB | R0 | [[design-asymmetry]] | ✅ |
+| ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음 | R0 | [[payment-atomicity]] | ✅ |
+| ARCH-3 | cross-DB는 서비스→platform 읽기만, peer 금지, least-privilege 계정 | R0 | 불변식 #6 | ✅ |
+| ARCH-4 | `@aiagent/db-platform` 패키지로만 platform 접근 | R0 | [[identity-billing-access]] (A) | ✅ |
+| ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원) | R0 | [[fk-strategy]] | ✅ |
+| ARCH-6 | async 부수효과는 `outbox_event` | R0 | [[outbox-pattern]] | ✅ |
+| SEC-1 | BOLA 방어 — org_pk 질의 강제 프레임워크화 | R4 | Drizzle base repo | ✅ |
+| SEC-2 | NIST 환경속성 — api_key IP/컨텍스트 | R4 | D8 (P1) | 🟡 |
+| SEC-3 | 감사 불변성 — UPDATE/DELETE 권한 제거 + 해시 체이닝 + WORM | R4 | append-only ✅ / 해시 🟡 | 🟡 |
+| SEC-4 | secret 관리 — KMS, 평문 로그 금지 | R0 | 정책 | ✅ |
+| SEC-6 | secret rotation cadence — api_key 90/365d, Firebase Admin SDK 180d | R7 | 운영 플레이북 | 🟡 |
+| SEC-8 | 데이터 분류(PII/민감/미성년/결제) + 선별 app-level 암호화(secret·guardian) | R7 | §9 | 🟡 분류 P0·암호화 P1 |
+| NFR-1 | routine read 권한평가 DB hit 0(JWT claims), sensitive write만 DB 재검증 | R0 | @VerifyOnDb | ✅ |
+| NFR-2 | perm_version 무효화 폭 분리(user/org) | R2 | bumpPermVersion | ✅ |
+| NFR-3 | 확장 로드맵 — read replica → 테이블 분리 → DB-per-tenant | R0 | [[multitenancy-pool]] | ✅ |
+| NFR-4 | permission_snapshot 프론트 read-model | R3 | GET /me/permissions | 🟡 |
+| NFR-6 | perm_version 전파 — `/me/permissions {user_pv, org_pv}`, X-PV 헤더, 멀티인스턴스 sync | R6 | §5.4 | ✅(설계)/🟡(P1) |
+| OPS-1 | platform_db 비대화 방어 — 논리 바운디드 컨텍스트(모듈·오너·절단선) | R7 | §12.1 | ✅(원칙)/🟡(구현) |
+| OPS-2 | Break-glass 긴급 운영 접근 — 승인·사유·만료·전건 감사 | R7 | §12.4 / [[break-glass]] | 🟡 P1 |
+| OPS-3 | service-to-service trust — HTTP 분리 시 mTLS/internal JWT, `internal/*` 내부망 전용 | R7 | Option B 전환 시 | ⛔ |
+| OPS-4 | secret rotation cadence — KMS DEK 연 1회 등 (→ SEC-6) | R6 | §12.3 | 🟡 P1 |
+| USR-9 | 휴면(DORMANT) — 유효기간제 2023 폐지로 법 의무 아님, 선택적 제품정책 | R6 | §11 YAGNI | ⛔→🟡 제품 결정 |
 
 ---
 
-# B. BDD 시나리오
+## 4. 목적 달성 스코어카드
 
-→ [[bdd-scenarios]] 로 분리됨 (2026-05-30).
-platform_db 10개 도메인 행위 시나리오(Identity·Membership·Delegation·Billing·감사·Consent·멀티테넌시·perm_version/Break-glass·데이터 이전·인증) + academy 수용성 크로스체크를 담는다.
+### 4.1 확장성(EXT) — *플랫폼 가치 명제*
 
+| EXT | 충족 |
+|---|---|
+| EXT-1 마이그레이션 없는 서비스 추가 | 🔴 위반 (service CHECK) |
+| EXT-2 코어에 서비스 어휘 없음 | 🔴 위반 (capability CHECK) |
+| EXT-3 role→action 코드 상수 | ✅ |
+| EXT-4 role_code 자유 확장 | ✅ |
+| EXT-5 게이트 서비스 중립 | 🟡 (Gate B default) |
+| EXT-6 onboarding 절차 문서화 | 🟡 |
+
+> **목적 부채 요약**: 두 번째 서비스를 붙일 때 *반드시* platform 마이그레이션이 필요한 지점 = **2곳(service CHECK, capability CHECK)**. 이것이 "service-agnostic 코어"라는 목적의 미달 핵심이다. → §1 결정 필요.
+
+### 4.2 기능 요구사항 (pillar별, 현재 구현 기준)
+
+| Pillar / 군 | 항목 | ✅ | 🟡 | ⚠️ | ⛔ | ❓ |
+|---|---|---|---|---|---|---|
+| P1 Identity (USR+AUTHN) | 18 | 11 | 7 | — | — | — |
+| P2 인가 (RBAC+ABAC+ReBAC) | 23 | 16 | 4 | — | 2 | 1 |
+| P3 Billing | 10 | 8 | 2 | — | — | — |
+| P4 테넌트 격리 | 8 | 4 | 4 | — | — | — |
+| P5 감사·동의 | 16 | 3 | 4 | 9 | — | — |
+| P6 머신 신원 (api_key) | 3 | 0 | 1 | 2 | — | — |
+| 횡단 (ARCH/SEC/NFR/OPS) | 22 | 11 | 10 | — | 1 | — |
+| **합계** | **100** | **53(53%)** | **32(32%)** | **11(11%)** | **3(3%)** | **1(1%)** |
+
+> 기존 104건은 구 A.13(R6/R7 보강)에 NFR-6·AUTHN-8·REBAC-8·BILL-12 등 **상위 항목과 중복 기재**가 있었음 → 목적 재구성 시 dedup하여 100건. (기능 합계 외 EXT 6건은 §4.1에서 별도 관리.)
+>
+> **2026-05-30**: 0008(RBAC-1/2·REBAC-2) 반영. 단 기능 ✅와 **목적(EXT) 충족은 별개** — REBAC-2는 기능 ✅이나 EXT-2 🔴.  
+> **읽는 법**: 기능 점수(53% ✅)가 아니라 **EXT 부채(🔴 2건)와 P6(머신 신원) 미착수**가 "플랫폼 목적" 관점의 진짜 미해결이다.
+
+---
+
+## 5. BDD 시나리오
+
+→ [[bdd-scenarios]]. platform_db 10개 도메인 행위 시나리오 + 서비스 적합성 크로스체크(테스트 케이스).
