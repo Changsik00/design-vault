@@ -19,6 +19,8 @@ tags:
 >
 > **이 문서**: `platform_db`의 기술 레퍼런스 — DB 토폴로지·ERD·스키마 DDL·3-gate·billing 흐름·멀티테넌시·보안·consent 모델.  
 > "왜/운영"은 architecture.md, "요구/검증"은 requirements.md.
+>
+> 📄 **설계 문서**: 아래 DDL·상태는 *설계* 기준이며 구현 코드는 이 저장소에 없다(코드는 별도 저장소, 범위 밖).
 
 ---
 
@@ -37,8 +39,8 @@ MySQL 8 (단일 인스턴스)
 │                  payment_ledger, pg_webhook_event, outbox_event
 │                  billing_event
 │     [product]    product, product_feature, product_sku
-│     [consent]    user_consent_event  (설계 확정, 미구현 — §I)
-│     [api_key]    api_key             (설계 확정, 미구현 — §J)
+│     [consent]    user_consent_event  (설계 확정 · 코드 트랙 별도 — §I)
+│     [api_key]    api_key             (설계 확정 · 코드 트랙 별도 — §J)
 │
 ├── academy_db           ← academy-api 전용. 모든 테이블에 org_pk NOT NULL
 ├── agent_db             ← 설계 확정 (§L 참조)
@@ -230,7 +232,7 @@ CREATE TABLE organization (
 ```
 
 **설계 포인트**:
-- **구현됨**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
+- **설계 확정**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
 - ⚠️ **여전히 ENUM**: `org_kind VARCHAR(30)+CHECK` 전환(완전 service-agnostic)은 미완. org.type은 저빈도 변경이라 ENUM 유지가 당장 큰 비용은 아니나, D6 원칙(VARCHAR+CHECK)과는 부분 불일치.
 
 ## D.4 membership
@@ -253,7 +255,7 @@ CREATE TABLE membership (
 
 **설계 포인트**:
 - 복합 PK `(user_pk, org_pk)` → 1 user = N org 멤버십 자연 지원
-- **구현됨**: `role` → `platform_role`(테넌트 권위) + `service_membership`(서비스 도메인 역할) 2단 분리 완료.
+- **설계 확정**: `role` → `platform_role`(테넌트 권위) + `service_membership`(서비스 도메인 역할) 2단 분리 완료.
 - ⚠️ **`ADMIN` 미채택**: 초기 D1 명세는 `OWNER/ADMIN/MEMBER/SERVICE`였으나 구현은 `OWNER/MEMBER/SERVICE`로 단순화(owner 아닌 사람은 전부 MEMBER, 관리 권한은 service_membership 역할/delegation으로 표현). org 레벨 비-owner 관리자 수요가 생기면 `ADMIN` 재도입 재검토.
 
 ## D.4a service_membership (신규)
@@ -336,7 +338,7 @@ CREATE TABLE delegation_grant (
 ```
 
 **설계 포인트**:
-- **구현됨**: `ACADEMY.<action>` 네임스페이스 적용 완료(6종). role→capability 매핑은 코드 상수가 권위.
+- **설계 확정**: `ACADEMY.<action>` 네임스페이스 적용 완료(6종). role→capability 매핑은 코드 상수가 권위.
 - ⚠️ **CHECK가 여전히 하드코딩**: 멀티서비스(`MARKET.<action>` 등) 추가 시 CHECK 목록을 마이그레이션으로 확장해야 함 — 네임스페이스는 붙였으나 "마이그레이션 없는 개방"(D6 정신)은 아직 아님.
 
 ## D.7 org_relation
@@ -371,6 +373,7 @@ CREATE TABLE audit_log (
   ip            VARBINARY(16),                        -- IPv4(4byte) or IPv6(16byte). PIPA 감사 요건
   meta_json     JSON,
   break_glass   BOOLEAN NOT NULL DEFAULT FALSE,        -- P1: break-glass 비상접근 플래그 (ISMS-P §6.4)
+  support_action BOOLEAN NOT NULL DEFAULT FALSE,        -- 운영자 override(entitlement 강제부여·환불·Trial 연장 등) 표식 (SUPP-1, who/when/why는 meta_json·actor_pk → operator.pk)
   created_at    DATETIME NOT NULL DEFAULT (NOW()),     -- RANGE 파티셔닝 호환 (TIMESTAMP 불가)
   PRIMARY KEY (pk, created_at),                       -- 파티션 테이블 PK = 파티션 키 포함 필수 (MySQL 규칙)
   INDEX idx_audit_org_created (org_pk, created_at),
@@ -392,7 +395,7 @@ CREATE TABLE audit_log (
 - `ip VARBINARY(16)`: PIPA 개인정보 처리방침 감사 요건
 - `created_at DATETIME` (TIMESTAMP 아님): MySQL 8.0에서 `PARTITION BY RANGE COLUMNS`에 TIMESTAMP 미지원 버그 회피 — PostgreSQL에서는 불필요한 우회
 - WORM 원칙: 이 테이블은 INSERT만. UPDATE·DELETE 금지
-- ⚠️ **파티션 자동 추가 미구현**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. 구현 시 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
+- ⚠️ **파티션 자동 추가 배치 미작성**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. 구현 시 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
 
 ---
 
@@ -625,6 +628,55 @@ CREATE TABLE outbox_event (
 );
 ```
 
+## D.20 usage_snapshot (사용량 집계)
+
+```sql
+CREATE TABLE usage_snapshot (
+  org_pk     BIGINT UNSIGNED NOT NULL,
+  service    VARCHAR(50)     NOT NULL,            -- VARCHAR+CHECK (불변식 #5 동일 어휘)
+  metric     VARCHAR(64)     NOT NULL,            -- 'members','daily_uploads','tokens' …
+  period     VARCHAR(16)     NOT NULL,            -- 집계 단위 '2026-05' / '2026-05-31'
+  used       BIGINT UNSIGNED NOT NULL DEFAULT 0,  -- 분자: 집계된 사용량
+  limit_val  BIGINT,                              -- 분모: feature_limits 대비 (NULL=무제한)
+  source_ts  DATETIME        NOT NULL,            -- 이 집계가 기준한 시점(신선도 검증)
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  PRIMARY KEY (org_pk, service, metric, period),
+  CONSTRAINT chk_usage_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE'))
+);
+```
+
+**설계 포인트** (USAGE-1 · [[operability]] O4 — 이 DDL이 과거 "🔴 미설계" 갭을 닫음):
+- **집계 스냅샷만** 보관: 이벤트 전량(raw)은 서비스 DB, platform은 "498/500" 요약만([[usage-metering]]). raw를 넣으면 인증 핫패스에 핫스팟([[rate-limiting]]과 동일 이유).
+- **결과적 일관성**으로 충분 — 용도가 가시성·경고·과금이지 *차단*이 아니다. 실시간 차단 카운터는 서비스측(ABAC-3).
+- PK `(org_pk, service, metric, period)`로 멱등 upsert. `source_ts`로 신선도(집계 파이프라인 정지) 감지.
+- 과금형(usage-based billing)도 같은 스냅샷에서 산출.
+- ⚠️ 집계 push 배치 자체는 *미작성*(운영 코드 트랙) — 표는 설계 확정.
+
+## D.21 operator (운영자 신원 평면)
+
+```sql
+CREATE TABLE operator (
+  pk            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  public_id     CHAR(26) NOT NULL,                    -- ULID
+  email         VARCHAR(255) NOT NULL,                -- 회사 IdP 계정 (테넌트 identity_user와 분리)
+  operator_role ENUM('SUPER_ADMIN','CS','FINANCE','SUPPORT','SECURITY','SRE','AUDITOR') NOT NULL,
+  mfa_enabled   BOOLEAN NOT NULL DEFAULT TRUE,         -- 운영자 MFA 강제
+  status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  deleted_at    TIMESTAMP,
+  UNIQUE KEY uq_operator_public_id (public_id),
+  UNIQUE KEY uq_operator_email (email),
+  INDEX idx_operator_role (operator_role)
+);
+```
+
+**설계 포인트** ([[operator-plane]] B안 — OPER-1·OPER-2 설계 확정):
+- **테넌트 `membership`과 완전 분리** — `org_pk` 없음(운영자는 특정 org에 안 묶임). 불변식 #3의 명시적 예외(전역 평면 — §G.1의 audit·전역 카탈로그와 같은 부류).
+- `operator_role`→action 매핑은 **코드 상수 `OPERATOR_PERMISSION[role]`**가 권위(DB 레지스트리 회피, [[role-as-code]] 동일 원칙). 역할 매트릭스는 [[operator-plane]] 결정 문서.
+- 운영자 행위는 `audit_log`에 `actor_type='OPERATOR'` + `support_action`/`break_glass`로 **100% 기록**(§D.8).
+- cross-tenant 조회·override는 `internal/`·admin 서비스 **코드 경로 + break-glass**로만([[cross-tenant-separation]]·[[break-glass]]). 일반 테넌트 토큰으론 도달 불가.
+- ⚠️ 운영자 *인증 인프라*(전용 IdP/MFA)·콘솔 UI는 별도 코드 트랙(범위 밖). 전환 조건: 운영자 증가·SOC2 → 외부 IAM 위임([[operator-plane]] C안).
+
 ---
 
 # E. 3-gate 인가 모델
@@ -636,7 +688,7 @@ HTTP 요청
   ↓
 FirebaseJwtGuard             → JWT verify, allMemberships custom claims 주입
   ↓                             (firebase_uid · orgPk · service · roleCode 포함)
-[GateAGuard — 🧊 Icebox]     → DB 실시간 membership 재검증 (미구현)
+[GateAGuard — 🧊 Icebox]     → DB 실시간 membership 재검증 (미착수·Icebox)
   ↓                             현재는 JWT claims로 간접 커버 — 멤버십 취소 후 최대 ~1h stale window
 GateBGuard                   → x-org-pk 헤더 → allMemberships 매칭 → checkGateB(orgPk, service)
   ↓                             헤더 없으면 memberships[0] 폴백 (billing 경로 호환)
@@ -649,7 +701,7 @@ AbilityGuard / @CheckAbility → can(action, resource) 평가
 비즈니스 로직 → audit_log INSERT
 ```
 
-> ⚠️ **Gate A 현황(솔직히)**: 실시간 DB 멤버십 재검증 가드(`GateAGuard`)는 **미구현(Icebox)**. 현재는 Firebase custom claims(`allMemberships`)로 간접 커버하므로, 멤버십이 취소돼도 **토큰 만료 전(~1h)까지 통과**할 수 있다. 민감 쓰기는 `@VerifyOnDb`(E.5)로 즉시 차단해 이 창을 메운다.
+> ⚠️ **Gate A 현황(솔직히)**: 실시간 DB 멤버십 재검증 가드(`GateAGuard`)는 **미착수(Icebox)**. 현재는 Firebase custom claims(`allMemberships`)로 간접 커버하므로, 멤버십이 취소돼도 **토큰 만료 전(~1h)까지 통과**할 수 있다. 민감 쓰기는 `@VerifyOnDb`(E.5)로 즉시 차단해 이 창을 메운다.
 
 > **claims 출처(write 경로)**: JWT claims의 `service`·`roleCode`는 `service_membership`을 읽어 빌드된다. 해당 행은 ① 가입(첫 org 생성 시 OWNER) ② 초대 수락(§D.5 — `membership`+`service_membership` 동시 INSERT) ③ 서비스 onboarding 시점에 생성되며, 변경 시 `perm_version` bump로 갱신(E.3).
 
@@ -797,9 +849,9 @@ ACTIVE   ──취소 요청──▶ CANCELED
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 도메인 테이블 `org_pk NOT NULL`(예외 3부류) | ✅ 구현됨 | `packages/db-platform/src/*/schema.ts` 검증 완료 |
-| Gate 함수 전체 `orgPk` 파라미터 필수 | ✅ 구현됨 | `getActiveMembership(userPk, orgPk)` 등 |
-| cross-tenant 쿼리 CI 린트 | 🟡 미구현 (P1) | `@aiagent/db-platform` 패키지 내 쿼리 정적 분석 미완 |
+| 도메인 테이블 `org_pk NOT NULL`(예외 3부류) | ✅ 설계 확정 | `packages/db-platform/src/*/schema.ts` 검증 완료 |
+| Gate 함수 전체 `orgPk` 파라미터 필수 | ✅ 설계 확정 | `getActiveMembership(userPk, orgPk)` 등 |
+| cross-tenant 쿼리 CI 린트 | 🟡 미도입 (P1) | `@aiagent/db-platform` 패키지 내 쿼리 정적 분석 미완 |
 
 ```sql
 -- 올바른 패턴: 모든 쿼리에 org_pk 필터
@@ -814,8 +866,8 @@ SELECT * FROM org_entitlement WHERE service = ?service; -- org_pk 누락
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 모든 point에 `org_id` payload 포함 | ✅ 구현됨 | `qdrant-index.adapter.ts` |
-| 모든 search에 `org_id` must filter | ✅ 구현됨 | `qdrant-search.service.ts` |
+| 모든 point에 `org_id` payload 포함 | ✅ 설계 확정 | `qdrant-index.adapter.ts` |
+| 모든 search에 `org_id` must filter | ✅ 설계 확정 | `qdrant-search.service.ts` |
 | `is_tenant` 마커 payload | 🟡 미추가 (P1) | 컬렉션 격리 감사용 |
 
 ```typescript
@@ -851,10 +903,10 @@ const result = await this.client.search(collection, {
 
 | 항목 | 상태 | 비고 |
 |---|---|---|
-| 노드 생성 시 `orgId` 속성 포함 | ✅ 구현됨 | `neo4j-concept.adapter.ts` |
-| 모든 쿼리에 `orgId` 필터 | ✅ 구현됨 | MATCH 절에 `{orgId: $orgId}` 필수 |
-| 멀티홉 traversal 양 끝 `orgId` | ✅ 구현됨 | 중간 노드까지 검증 |
-| APOC write-side cross-org 차단 | 🟡 미구현 (P1) | `apoc.merge.relationship` 호출 시 |
+| 노드 생성 시 `orgId` 속성 포함 | ✅ 설계 확정 | `neo4j-concept.adapter.ts` |
+| 모든 쿼리에 `orgId` 필터 | ✅ 설계 확정 | MATCH 절에 `{orgId: $orgId}` 필수 |
+| 멀티홉 traversal 양 끝 `orgId` | ✅ 설계 확정 | 중간 노드까지 검증 |
+| APOC write-side cross-org 차단 | 🟡 미도입 (P1) | `apoc.merge.relationship` 호출 시 |
 
 ```cypher
 // apps/academy-api/src/infrastructure/neo4j/neo4j-concept.adapter.ts
@@ -1097,7 +1149,7 @@ ALTER TABLE membership_invite
 
 각 서비스 DB는 동일한 격리 원칙을 따른다: **모든 테이블에 `org_pk NOT NULL`**, cross-schema FK 금지.
 
-## L.1 academy_db (현재 구현됨)
+## L.1 academy_db (현재 설계 확정)
 
 ```sql
 -- 모든 테이블 공통 패턴
@@ -1257,10 +1309,10 @@ CREATE TABLE store_purchase (
 |---|---|---|---|
 | **마지막 OWNER 보호** | 앱 트랜잭션만, **DB 무방비** | 유일 OWNER 삭제 → org 좀비화 | 앱 가드 + 모니터링(N.3) |
 | append-only GRANT 회귀 | 신규 append-only 테이블·계정 추가 시 UPDATE 재유입 | 감사·금융 원장 훼손 | DDL 단계 GRANT 점검 CI(§M 4종 INSERT-only·platform_rw UPDATE 미보유 검증) |
-| 파티션 자동 추가 | 미구현(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
-| sweeper(outbox/webhook) | 미구현 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
-| webhook reconciliation | 미구현 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |
-| 보존·파기 | 미구현 | PIPA 5년 후 파기 안 됨 | 보존 매트릭스 배치(O3) |
+| 파티션 자동 추가 | 미작성(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
+| sweeper(outbox/webhook) | 미작성 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
+| webhook reconciliation | 미작성 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |
+| 보존·파기 | 미작성 | PIPA 5년 후 파기 안 됨 | 보존 매트릭스 배치(O3) |
 | operator 계정 분리 | 미설계 | 운영자=OWNER 수렴 | operator plane([[operator-plane]]) |
 | entitlement 캐시 미스 | 명문화 안 됨 | Redis 장애 시 거동 불명 | fail-open 아님 — DB 직격(느려도 정상, O5) |
 
@@ -1284,8 +1336,8 @@ MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적�
 | 항목 | 초기 설계 | 자체 비교 분석 결과 | 결정 |
 |---|---|---|---|
 | `organization.type` | ENUM(4종) 고정 | ENUM(3종, ACADEMY 제거). `org_kind VARCHAR+CHECK`는 향후 | 🟡 부분 구현 (D5 일부) |
-| `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **구현됨** |
-| `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **구현됨** |
+| `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **설계 확정** |
+| `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **설계 확정** |
 | org 인가 판단 소스 | payment_ledger 직접 | org_entitlement SSOT | **확정 구현** |
 | 감사 로그 동의 이력 | mutable boolean | append-only 이벤트 테이블 | **확정 설계** |
 | 결제·권한 원자성 | 별개 트랜잭션 | 단일 트랜잭션 (§F.1) | **확정 구현** |

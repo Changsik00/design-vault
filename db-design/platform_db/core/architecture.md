@@ -154,10 +154,10 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 2.3 마이그레이션 상태·목표 (G1~G3)
 
-> role 2단 분리가 구현됨(현행 스키마). G1/G2 완료, G3 부분.
+> role 2단 분리가 설계 확정(현행 스키마). G1/G2 완료, G3 부분.
 
-- **G1. role 2단 분리** (D1) — ✅ **구현됨**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
-- **G2. capability 네임스페이스** (D2) — ✅ **구현됨**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
+- **G1. role 2단 분리** (D1) — ✅ **설계 확정**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
+- **G2. capability 네임스페이스** (D2) — ✅ **설계 확정**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
 - **G3. `organization.org_kind`** (D5) — 🟡 **부분 구현**: `type ENUM('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거). `org_kind VARCHAR+CHECK` 전환은 미완(저빈도라 ENUM 유지).
 
 ### 2.4 비목표 (Non-Goals)
@@ -196,14 +196,14 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 | ID  | 결정                                              | 상태 · 문서                                      |
 | --- | ----------------------------------------------- | -------------------------------------------- |
-| D1  | role 2단(`platform_role` + `service_membership`) | ✅ 구현됨 · [[role-capability]]                 |
-| D2  | capability 네임스페이스 `<service>.<action>`          | ✅ 구현됨 · [[service-extensibility]]           |
+| D1  | role 2단(`platform_role` + `service_membership`) | ✅ 설계 확정 · [[role-capability]]                 |
+| D2  | capability 네임스페이스 `<service>.<action>`          | ✅ 설계 확정 · [[service-extensibility]]           |
 | D3  | role→action = **코드 상수**(DB 레지스트리 거부)            | ✅ · [[role-as-code]]                         |
-| D4  | 서비스 계정 = `platform_role='SERVICE'` + api_key    | 🟡 SERVICE ✅ / api_key 미구현              |
+| D4  | 서비스 계정 = `platform_role='SERVICE'` + api_key    | 🟡 SERVICE 확정 / api_key 코드 트랙 별도              |
 | D5  | `org_kind` generic + 서비스는 entitlement           | 🟡 부분 구현                                   |
 | D6  | service 식별자 `VARCHAR(50)+CHECK`(온라인 DDL)        | ✅ · [[service-extensibility]]                |
-| D7  | `user_consent_event` append-only                | ⚠️ 미구현 · [[pipa-consent]]               |
-| D8  | `api_key` 하드닝                                   | ⚠️ 미구현                                  |
+| D7  | `user_consent_event` append-only                | ✅ 설계 확정 · [[pipa-consent]]               |
+| D8  | `api_key` 하드닝                                   | ✅ 설계 확정                                  |
 | D9  | `permission_snapshot`은 프론트 read-model만          | 🟡 P1                                        |
 | D10 | 멀티테넌시: RLS 없음→CI 린트                             | 🟡 · [[multitenancy-pool]]                   |
 | D11 | 표준보안: BOLA / NIST / 해시→WORM                     | 🟡 BOLA ✅, 해시·WORM P1 · [[audit-hash-chain]] |
@@ -230,7 +230,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 - **권한 변경**: 역할 *배정* 변경 = DB UPDATE + `perm_version` bump(즉시). 역할 *룰*(`ROLE_PERMISSION`) 변경 = **코드 배포**.
 - **Break-glass는 silent 금지**: 전건 audit + 만료 자동회수 + 사후 리뷰([[break-glass]] · [[operator-plane]]).
 - **운영자는 tenant role이 아님**: 별도 신원 평면 + cross-tenant는 아키텍처 분리·break-glass 경유([[operator-plane]]).
-- **정기 배치 필수**: TRIALING→EXPIRED·파티션 추가·sweeper·해시검증 미구현 시 사고([[operability]] O3).
+- **정기 배치 필수**: TRIALING→EXPIRED·파티션 추가·sweeper·해시검증 미작성 시 사고([[operability]] O3).
 - **secret rotation cadence**: api_key 90/365d · KMS DEK 연1회 · Firebase Admin SDK 180d · DB 계정 180d.
 
 ---
@@ -249,8 +249,8 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 | 근거 | 설계 | 구현 |
 |---|---|---|
-| PIPA §15 보유 / §17~18 제3자 / §22 14세 / §35 열람 / §37 철회 | ✅ 설계(§22·§35 일부) | ⚠️ 미구현 (§22 **법적 필수**) |
-| 정보통신망법 §50 수신거부 / 국외이전 고지 | ✅ 설계 | ⚠️ 미구현 |
+| PIPA §15 보유 / §17~18 제3자 / §22 14세 / §35 열람 / §37 철회 | ✅ 설계(§22·§35 일부) | 코드 트랙 별도 (§22 **법적 필수**) |
+| 정보통신망법 §50 수신거부 / 국외이전 고지 | ✅ 설계 | 코드 트랙 별도 |
 | (구)유효기간제 휴면 | ⛔ | ⛔ 2023 폐지 — 법 의무 아님 |
 | NIST SP 800-162 ABAC | 🟡 | 🟡 Subject×Object ✅, Environment P1 |
 | OWASP API #1 BOLA | ✅ | ✅ org_pk 질의 강제 |

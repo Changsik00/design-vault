@@ -1,4 +1,5 @@
 ---
+difficulty: 기초
 tags:
   - platform-db
   - explainer

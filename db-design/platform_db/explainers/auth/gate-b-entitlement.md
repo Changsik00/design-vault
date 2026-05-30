@@ -1,4 +1,5 @@
 ---
+difficulty: 기초
 tags:
   - platform-db
   - explainer
@@ -287,7 +288,7 @@ try {
 }
 ```
 
-**GRACE 상태에서는 402가 안 나옵니다.** GRACE는 "결제 실패했지만 [[explainers/gate-b-billing-grace|유예 기간]] 중"이므로, 서비스는 정상적으로 이용 가능합니다. 다만 "XX일 안에 결제를 갱신하지 않으면 서비스가 중단됩니다"라는 배너를 보여주는 것이 UX 관행입니다.
+**GRACE 상태에서는 402가 안 나옵니다.** GRACE는 "결제 실패했지만 [[explainers/auth/gate-b-billing-grace|유예 기간]] 중"이므로, 서비스는 정상적으로 이용 가능합니다. 다만 "XX일 안에 결제를 갱신하지 않으면 서비스가 중단됩니다"라는 배너를 보여주는 것이 UX 관행입니다.
 
 ```typescript
 // GRACE 상태 안내 배너
@@ -312,7 +313,7 @@ if (entitlement.status === 'GRACE') {
 ## 연결된 개념
 
 - [[gate-abc-flow|Gate A/B/C 전체 흐름]] — 전체 3-gate 중 Gate B의 위치
-- [[explainers/gate-b-billing-grace|Gate B 유예 기간 설계]] — status + validUntil 복합 체크 결정 배경
+- [[explainers/auth/gate-b-billing-grace|Gate B 유예 기간 설계]] — status + validUntil 복합 체크 결정 배경
 - [[feature-limits|feature_limits 우선순위]] — entitlement.feature_limits가 런타임 SSOT인 이유
 - [[subscription-lifecycle|구독 상태 머신]] — 구독 상태가 entitlement status에 반영되는 흐름
 > 소스 문서

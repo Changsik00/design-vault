@@ -19,7 +19,8 @@ tags:
 > **이 문서의 관점**: 요구사항을 *"academy를 충족하는가"*가 아니라 ***"platform_db의 목적을 달성하는가"***로 측정한다.  
 > academy/market/agent는 **적합성 테스트 케이스**([[bdd-scenarios]])이지 요구사항의 출처가 아니다.
 >
-> **상태 범례**: ✅ 충족 · 🟡 부분/P1 · ⚠️ 미구현 · ⛔ 보류(YAGNI/트리거 미충족) · ❓ 미결정 · 🔴 **목적 위반(부채)**
+> 📄 **이 저장소는 설계 문서(Markdown)이며 구현 코드를 포함하지 않는다.** 따라서 아래 상태는 *구현 여부*가 아니라 **설계 성숙도**를 뜻한다 — 스키마(§)에 DDL·결정이 있으면 "설계 확정"이다.
+> **상태 범례**: ✅ 설계 확정 · 🟡 설계 부분(보강 필요) · ⛔ 보류(트리거 미충족) · ❓ 미결정 · 🔴 **미설계 / 목적 부채**
 
 ---
 
@@ -38,14 +39,14 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 ## 1. 확장성 요구사항 (EXT) — *1급, 목적 직결*
 
 > **신설.** 플랫폼의 핵심 가치 명제(서비스 추가 한계비용)를 처음으로 측정 가능한 요구로 끌어올린다.  
-> 기존 추적표에서 "미구현 nice-to-have"로 묻혀 있던 결합들이, 목적 렌즈에서는 **P0 부채(🔴)**다.
+> 기존 추적표에서 "미설계 nice-to-have"로 묻혀 있던 결합들이, 목적 렌즈에서는 **P0 부채(🔴)**다.
 
 | ID | 요구사항 | 측정 기준 | 상태 |
 |---|---|---|---|
 | EXT-1 | 새 서비스 추가가 **platform 스키마 마이그레이션 없이** 가능 | 서비스 N 추가 시 변경되는 platform DDL = 0 | 🟡 **의도적 트레이드오프** — service CHECK는 온라인 1줄 마이그레이션(D6). [[service-extensibility]] Option A 채택 |
 | EXT-2 | 플랫폼 코어 인가에 **서비스 고유 어휘 하드코딩 금지** | 코어 테이블에 academy 동사/역할 리터럴 0 | 🟡 **의도적 트레이드오프** — `chk_capability` `ACADEMY.*` 6종(코드 ROLE_PERMISSION과 중복 안전망). [[service-extensibility]] |
 | EXT-3 | role→action 매핑은 **코드 상수** (서비스 역할 추가 = 코드 배포, 스키마 무변경) | 새 서비스 역할 권한 추가 시 DB DDL = 0 | ✅ [[role-as-code]] `ROLE_PERMISSION[service]` |
-| EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 구현됨 |
+| EXT-4 | 멤버십은 **service 차원만 추가** — `service_membership.role_code` VARCHAR 자유 확장 | 새 서비스 역할 = 행 INSERT(스키마 무변경) | ✅ 설계 확정 |
 | EXT-5 | 게이트·기본값에 **특정 서비스 편향 금지** | 플랫폼 API/게이트가 서비스 중립 | 🟡 — `checkGateB(...="ACADEMY")` 기본값. 2번째 서비스 도입 시 중립화 ([[service-extensibility]]) |
 | EXT-6 | **신규 서비스 onboarding 절차** 문서화 — 연결 추가만으로 entitlement 동작 | onboarding 체크리스트 존재 + 검증 | 🟡 부분 ([[architecture]] §2.4 단편) |
 
@@ -66,7 +67,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | **P5 감사·동의 컴플라이언스** | 법적 증거·불변 기록 | AUD, CON | append-only, WORM |
 | **P6 머신·B2B 신원** | 사람=머신 동일 3-gate | api_key·SERVICE 계정 (AUTHN-5, SEC-5/7, RBAC-4) | type=SERVICE |
 
-> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**인데 전부 **미구현(0%)**다. academy 역할분리는 출시됐는데 P6는 미착수 — "손에 쥔 서비스 > 플랫폼 명제" 우선순위. 두 번째 서비스가 agent라면 P6가 academy 잔여 기능보다 앞서야 한다.
+> ⚠️ **우선순위 비판**: P6(머신 신원, `api_key`)은 **agent 서비스의 존재 전제**다. 스키마(§J)는 설계 확정이나 *우선순위*에서 계속 밀린다 — academy 역할 설계가 무르익는 동안 P6는 거의 다뤄지지 않았다("손에 쥔 서비스 > 플랫폼 명제"). 두 번째 서비스가 agent라면 P6가 academy 잔여보다 앞서야 한다.
 
 ---
 
@@ -104,7 +105,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1 | ✅ |
 | RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership | ✅ (단 EXT-4 충족, EXT-2는 별개) |
 | RBAC-3 | role→action 매핑은 코드 상수(DB 저장 금지) | R0 | ROLE_PERMISSION | ✅ |
-| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4 | 🟡 SERVICE ✅ / api_key 미구현 |
+| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4 | 🟡 SERVICE 확정 / api_key 코드 트랙 별도 |
 | RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
 | RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
 | RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
@@ -117,7 +118,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ABAC-6 | NIST 환경속성 — api_key `allowed_ip_cidr` + Gateway/WAF IP | R4 | D8 (P1) | 🟡 |
 | ABAC-7 | 최종 `can()` 결정 캐싱 금지, 입력 블록만 TTL 60s | R0 | Redis 전략 | ✅ |
 | REBAC-1 | capability 위임(grantor→grantee, scoped, expiry, revoke) | R0 | delegation_grant | ✅ |
-| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2 | ✅ (🔴 EXT-2: CHECK 하드코딩 잔존) |
+| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2 | ✅ (🟡 EXT-2: CHECK 하드코딩은 의도적 트레이드오프 → [[service-extensibility]]) |
 | REBAC-3 | 임퍼소네이션 금지, 위임 행사를 감사 기록 | R0 | audit_log | ✅ |
 | REBAC-4 | org 계층(HQ_BRANCH/HOLDING) | R0 | org_relation | ✅ |
 | REBAC-5 | 계층은 권한 근거 아님, 명시적 membership만 | R2 | 불변식 | ✅ |
@@ -158,30 +159,30 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
 | AUD-1 | `audit_log` append-only, 월 파티셔닝, actor 통합 | R0 | §D.8 | ✅ |
-| AUD-2 | **보안유의 이벤트** 기록(DENY·ERROR·민감 ALLOW·운영자) — 일상 read ALLOW는 텔레메트리(샘플링), audit 아님 | R0 | [[audit-two-lane]] | 🟡 범위 재정의(2-lane 미구현) |
+| AUD-2 | **보안유의 이벤트** 기록(DENY·ERROR·민감 ALLOW·운영자) — 일상 read ALLOW는 텔레메트리(샘플링), audit 아님 | R0 | [[audit-two-lane]] | 🟡 범위 재정의(2-lane 설계됨·스키마 부분) |
 | AUD-3 | trace_id + audit_event_id(분산 추적) | R4 | 🟡 P1 | 🟡 |
 | AUD-4 | 사람·머신 활동 통계 분리(type 필터) | R2 | identity_user.type | ✅ |
-| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ 미구현 |
-| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ⚠️ 미구현 |
-| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ⚠️ 미구현 |
-| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ⚠️ 미구현 |
-| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ⚠️ 미구현 |
-| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ⚠️ 미구현 |
+| CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ✅ 설계 확정 |
+| CON-2 | consent_type 네임스페이스(`platform.*`/`pg.*`) | R5 | user_consent_event 설계 | ✅ 설계 확정 |
+| CON-3 | 14세 미만 법정대리인 동의(PIPA §22) | R5 | 🟡 P0 법적 필수 | ✅ 설계 확정 |
+| CON-4 | 제3자 정보제공 4요건(PIPA §17) | R5 | 🟡 P0 법적 필수 | ✅ 설계 확정 |
+| CON-5 | 마케팅 수신/거부(정보통신망법 §50) | R5 | 🟡 | ✅ 설계 확정 |
+| CON-6 | 동의 철회권(PIPA §37) — REVOKED 이벤트 | R5 | 🟡 | ✅ 설계 확정 |
 | CON-7 | 약관 버전 관리 + 재동의 인터셉터 | R5 | 🟡 P1 | 🟡 |
-| CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ⚠️ 미구현 |
-| CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ⚠️ 미구현 |
-| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ⚠️ 미구현 |
+| CON-8 | `platform.content_ownership` — 콘텐츠 소유권 약관 동의(전자서명법 §3) | 신규 | user_consent_event | ✅ 설계 확정 |
+| CON-9 | `platform.data_transfer` — 이전 처리 전 본인 동의 필수 | 신규 | user_consent_event | ✅ 설계 확정 |
+| CON-10 | `platform.withdrawal` — 탈퇴 최종 확인 동의 | 신규 | user_consent_event | ✅ 설계 확정 |
 | CON-12 | fan-out anonymize — 탈퇴 시 outbox `user.deleted` → 각 서비스 anonymize | R6 | §4 | 🟡 P1 |
 | CON-13 | 동의 `meta_json` canonical(RFC 8785 JCS) + JSON Schema 검증 | R6 | user_consent_event | 🟡 P1 |
 
 ### P6 — 머신·B2B 신원 (api_key)
 
-> agent·B2B 통합의 전제. 사람과 동일 3-gate를 통과하는 머신 신원. **전 항목 미구현 — 두 번째 서비스가 agent라면 최우선 후보.**
+> agent·B2B 통합의 전제. 사람과 동일 3-gate를 통과하는 머신 신원. **스키마(§J)는 설계 확정, 코드 트랙은 별도(이 저장소 범위 밖) — 두 번째 서비스가 agent라면 구현 최우선 후보.**
 
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
-| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ⚠️ 미구현 |
-| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 | ⚠️ 미구현 |
+| AUTHN-5 | B2B = `api_key`(prefix+secret_hash, scopes, IP, rotation, 즉시 revoke) | R0 | api_key 테이블 설계 확정 | ✅ 설계 확정 |
+| SEC-5 | api_key 하드닝(allowed_ip_cidr·rotated_at·revoked_reason) | R4 | D8 | ✅ 설계 확정 |
 | SEC-7 | api_key 보강 — `last_used_ip`·`created_by_user_pk`·`rate_limit_tier`·`environment` | R7 | api_key 설계 | 🟡 P1 |
 
 ### 횡단 — 아키텍처 · 보안 · 비기능 · 운영
@@ -215,19 +216,19 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 ## 4. 운영 가능성 (Operability) — *신규 식별 갭*
 
-> 설계는 충실하나 **"3년 운영하면 무슨 사고가 나나"**에 대한 요구가 약하다. 아래는 platform_db가 **소유**해야 할 운영 요구(대부분 🔴 미설계). **상세 모델은 [[operability]]**(O1~O6), 여기는 추적표.  
+> 설계는 충실하나 **"3년 운영하면 무슨 사고가 나나"**에 대한 요구가 약하다. 아래는 platform_db가 **소유**해야 할 운영 요구 — decisions·explainers·스키마로 **설계는 대부분 확정/착수**, 구현(배치·콘솔)은 후속이다. **상세 모델은 [[operability]]**(O1~O6), 여기는 추적표.  
 > **범위 규율**: 콘솔 UI·알림 임계치·DR 런북은 platform_db가 *enable*만 하고 *소유*는 별도 ops 제품/문서. 단 **Permission Debugger는 UI가 아니라 *계약*으로서 platform_db 책임**(DBG-1).
 
 | ID | 요구사항 | 결정/계약 | 상태 |
 |---|---|---|---|
-| OPER-1 | 운영자 신원 평면 — 테넌트 role 아님, 별도 인증·MFA, 전건 감사 | [[operator-plane]] | 🔴 미설계 |
-| OPER-2 | 운영자 역할 매트릭스 — CS=R / FINANCE=환불 / AUDITOR=audit R-only … 최소권한 | [[operator-plane]] | 🔴 |
-| SUPP-1 | Support Action — 운영자 override(entitlement 강제부여·Trial 연장 등)에 who/when/why 감사 + 별도 권한 | [[operator-plane]] · [[audit-two-lane]] | 🔴 |
-| DBG-1 | **Permission Debugger 계약** — 거부 요청에 Gate A/B/C 결과+사유를 1초에 반환하는 trace (예: `A=PASS, B=FAIL(entitlement expired), C=SKIP`). **platform_db 책임**(4개 테이블 직접 뒤지는 건 설계 실패) | [[operability]] O2 | 🔴 (ROI 최상) |
-| RETN-1 | 데이터 보존·생명주기 정책 — 테이블별 보존기간(audit 5y·consent 5y·payment 7y·chat 1y…) + 파기 트리거 | [[operability]] O3 | 🔴 |
+| OPER-1 | 운영자 신원 평면 — 테넌트 role 아님, 별도 인증·MFA, 전건 감사 | [[operator-plane]] · §D.21 | 🟡 operator 테이블·OPERATOR_PERMISSION 설계 / 인증 인프라 코드 트랙 |
+| OPER-2 | 운영자 역할 매트릭스 — CS=R / FINANCE=환불 / AUDITOR=audit R-only … 최소권한 | [[operator-plane]] | 🟡 역할 매트릭스 코드 상수 설계 |
+| SUPP-1 | Support Action — 운영자 override(entitlement 강제부여·Trial 연장 등)에 who/when/why 감사 + 별도 권한 | [[operator-plane]] · [[audit-two-lane]] | 🟡 audit `support_action` §D.8 설계 / 매트릭스 코드 상수 |
+| DBG-1 | **Permission Debugger 계약** — 거부 요청에 Gate A/B/C 결과+사유를 1초에 반환하는 trace (예: `A=PASS, B=FAIL(entitlement expired), C=SKIP`). **platform_db 책임**(4개 테이블 직접 뒤지는 건 설계 실패) | [[operability]] O2 · [[permission-debugger]] | ✅ 설계 확정(계약) / 구현 미착수 · ROI 최상 |
+| RETN-1 | 데이터 보존·생명주기 정책 — 테이블별 보존기간(audit 5y·consent 5y·payment 7y·chat 1y…) + 파기 트리거 | [[operability]] O3 · [[data-lifecycle-retention]] | ✅ 설계 확정(정책·매트릭스) / 배치 미작성 |
 | AVAIL-1 | entitlement 가용성 계약 — billing/PG 장애 시 기존 entitlement read가 영향 없이 최소 N시간 유지 | [[operability]] O5 · [[auth-projection]] | 🟡 명문화 필요 |
 | OWN-1 | 마지막 OWNER 보호 — 앱 트랜잭션 가드 + **DB 레벨 방어** 검토 (현재 앱만, RBAC-6 강화) | [[operability]] O2 | 🟡 |
-| USAGE-1 | 사용량 가시성 — `usage_snapshot`(집계는 platform, 이벤트 전량은 서비스 DB). feature_limits 대비 *현재 얼마 썼나*(498/500인지 5/500인지). 과금형도 동일 경로 | [[operability]] O4 | 🔴 |
+| USAGE-1 | 사용량 가시성 — `usage_snapshot`(집계는 platform, 이벤트 전량은 서비스 DB). feature_limits 대비 *현재 얼마 썼나*(498/500인지 5/500인지). 과금형도 동일 경로 | [[operability]] O4 | 🟡 (스키마 §D.20 설계·집계 배치 미작성) |
 
 > **enable만 (별도 ops 제품 소관 — 여기선 트리거만)**: Admin Console UI · Alert 임계치 · DR 런북/RTO·RPO · Feature Flag rollout · 샤딩 실행. → 트리거: 2번째 서비스 / org 규모 T1~T4([[multitenancy-pool]]) / 컴플라이언스. (관측 지표·신뢰성 계약 자체는 O5·O6에서 platform_db 책임으로 정의.)
 
@@ -246,25 +247,25 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | EXT-5 게이트 서비스 중립 | 🟡 (Gate B default, 2번째 서비스 시 중립화) |
 | EXT-6 onboarding 절차 문서화 | 🟡 |
 
-> **목적 부채 요약**: service·capability CHECK 결합 = 서비스 추가 시 platform 마이그레이션 필요. [[service-extensibility]]에서 **Option A(저비용 온라인 CHECK 유지) 의도적 채택**으로 종결 + 전환 트리거 명시. 남은 1급 미해결은 **P6(머신 신원, api_key) 미착수**.
+> **목적 부채 요약**: service·capability CHECK 결합 = 서비스 추가 시 platform 마이그레이션 필요. [[service-extensibility]]에서 **Option A(저비용 온라인 CHECK 유지) 의도적 채택**으로 종결 + 전환 트리거 명시. 남은 1급 과제는 **P6(머신 신원) 구현 우선순위** — 설계(§J·[[machine-identity-apikey]])는 확정, 코드 트랙만 남음.
 
-### 5.2 기능 요구사항 (pillar별, 현재 구현 기준)
+### 5.2 기능 요구사항 (pillar별, **설계 성숙도** 기준)
 
-| Pillar / 군 | 항목 | ✅ | 🟡 | ⚠️ | ⛔ | ❓ |
-|---|---|---|---|---|---|---|
-| P1 Identity (USR+AUTHN) | 18 | 11 | 7 | — | — | — |
-| P2 인가 (RBAC+ABAC+ReBAC) | 23 | 16 | 4 | — | 2 | 1 |
-| P3 Billing | 10 | 8 | 2 | — | — | — |
-| P4 테넌트 격리 | 8 | 4 | 4 | — | — | — |
-| P5 감사·동의 | 16 | 3 | 4 | 9 | — | — |
-| P6 머신 신원 (api_key) | 3 | 0 | 1 | 2 | — | — |
-| 횡단 (ARCH/SEC/NFR/OPS) | 22 | 11 | 10 | — | 1 | — |
-| **합계** | **100** | **53(53%)** | **32(32%)** | **11(11%)** | **3(3%)** | **1(1%)** |
+| Pillar / 군 | 항목 | ✅ 설계확정 | 🟡 부분 | ⛔ 보류 | ❓ |
+|---|---|---|---|---|---|
+| P1 Identity (USR+AUTHN) | 18 | 11 | 7 | — | — |
+| P2 인가 (RBAC+ABAC+ReBAC) | 23 | 16 | 4 | 2 | 1 |
+| P3 Billing | 10 | 8 | 2 | — | — |
+| P4 테넌트 격리 | 8 | 4 | 4 | — | — |
+| P5 감사·동의 | 16 | 12 | 4 | — | — |
+| P6 머신 신원 (api_key) | 3 | 2 | 1 | — | — |
+| 횡단 (ARCH/SEC/NFR/OPS) | 22 | 11 | 10 | 1 | — |
+| **합계** | **100** | **64(64%)** | **32(32%)** | **3(3%)** | **1(1%)** |
 
 > 기존 104건은 구 A.13(R6/R7 보강)에 NFR-6·AUTHN-8·REBAC-8·BILL-12 등 **상위 항목과 중복 기재**가 있었음 → 목적 재구성 시 dedup하여 100건. (기능 합계 외 EXT 6건은 §4.1에서 별도 관리.)
 >
-> **2026-05-30**: 구현됨(RBAC-1/2·REBAC-2) 반영. 단 기능 ✅와 **목적(EXT) 충족은 별개** — REBAC-2는 기능 ✅이나 EXT-2 🔴.  
-> **읽는 법**: 기능 점수(53% ✅)가 아니라 **service 결합(의도적 채택 → [[service-extensibility]])과 P6(머신 신원) 미착수**가 "플랫폼 목적" 관점의 핵심이다.
+> **2026-05-31 — 상태 축 정정**: 이 저장소는 *설계 문서*이므로 점수는 "구현률"이 아니라 **설계 성숙도**다. 스키마 DDL이 있는 consent(§I)·api_key(§J)는 "미구현"이 아니라 **설계 확정(✅)**으로 재분류(과거 ⚠️ 11건 폐기, §4 운영도 operator 평면(§D.21)·usage_snapshot(§D.20) 설계로 🔴를 닫아 *미설계* 0 — 남은 건 구현(배치·콘솔)뿐). 실행 코드는 이 저장소 범위 밖.  
+> **읽는 법**: 설계는 64% 확정·32% 보강이지만, "플랫폼 목적" 관점의 핵심은 **service 결합(의도적 채택 → [[service-extensibility]])**과 **P6(머신 신원) 구현 우선순위**다(설계는 §J로 됨).
 
 ---
 
@@ -293,9 +294,9 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ID | 갭 | 출처 | 상태 |
 |---|---|---|---|
 | SETTLE-1 | **프랜차이즈/다지점 정산**(본사↔지점 매출 분배) | 원본 §4·§5 | ⛔ franchise 미타겟 — franchise 테넌트 도입 시 |
-| WEBHOOK-OUT-1 | **아웃바운드 고객 webhook**(우리→고객 시스템) | 원본 §13 | 🔴 미설계 — 현재 인바운드 PG webhook만. B2B 고객 생기면 |
+| WEBHOOK-OUT-1 | **아웃바운드 고객 webhook**(우리→고객 시스템) | 원본 §13 | ⛔ 범위 밖 — 인바운드 PG webhook만 설계. B2B 고객 트리거 시 |
 | ORGGRAPH-1 | **다단계 조직 그래프**(프랜차이즈 계층·병원 다지점) | 원본 §12 | 🟡 `org_relation`은 HQ_BRANCH/HOLDING 2단 — 깊은 계층 수요 시 |
 | B2BAPI-1 | B2B API 심화: OAuth Client Credentials · API versioning · scope-per-product | 원본 §13 | ⛔ — api_key 기본(P6) 후 B2B 정식화 시 |
 | AUDIT-REG-1 | 조직 타입별 감사 요건 상이(병원 HIPAA·금융) | 원본 §13 | ⛔ 범위 밖 — 규제 산업 테넌트 없음 |
 
-> 대부분의 ⛔는 franchise/hospital/B2B-정식화 등 **아직 안 겨냥한 시나리오**다(현재 플랫폼이 깨진 게 아님). 단 **WEBHOOK-OUT-1·SETTLE-1**은 academy/market만 커져도 닿을 수 있어 🔴/⛔ 경계에 둔다.
+> 대부분의 ⛔는 franchise/hospital/B2B-정식화 등 **아직 안 겨냥한 시나리오**다(현재 플랫폼이 깨진 게 아님). 단 **WEBHOOK-OUT-1·SETTLE-1**은 academy/market만 커져도 닿을 수 있어 ⛔(트리거 시) 경계에 둔다.

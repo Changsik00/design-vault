@@ -1,4 +1,5 @@
 ---
+difficulty: 중급
 tags:
   - platform-db
   - explainer
@@ -56,7 +57,7 @@ MySQL InnoDB는 인덱스를 **B-Tree(균형 이진 트리)** 구조로 저장�
 
 **둘째, 풀스캔은 다른 쿼리도 느리게 만듭니다.** DB는 디스크 I/O와 CPU를 공유합니다. 한 쿼리가 풀스캔으로 디스크를 독점하면 다른 쿼리들이 줄을 서야 합니다.
 
-**셋째, 핫패스(hot path)에서는 치명적입니다.** `[[explainers/gate-b-billing-grace|Gate B]]`(서비스 이용 가능 여부 확인)는 **모든 API 요청마다 실행**됩니다. 사용자가 버튼 하나 누를 때마다 쿼리가 실행되는데, 여기서 풀스캔이 일어나면:
+**셋째, 핫패스(hot path)에서는 치명적입니다.** `[[explainers/auth/gate-b-billing-grace|Gate B]]`(서비스 이용 가능 여부 확인)는 **모든 API 요청마다 실행**됩니다. 사용자가 버튼 하나 누를 때마다 쿼리가 실행되는데, 여기서 풀스캔이 일어나면:
 
 ```
 사용자 100명이 동시에 요청
@@ -265,7 +266,7 @@ INDEX idx_entitlement_expiry (valid_until, status)
 
 ## 연결된 개념
 
-- [[explainers/gate-b-billing-grace|Gate B 유예 기간 설계]] — idx_org_service_status에 valid_until이 포함된 설계 결정
+- [[explainers/auth/gate-b-billing-grace|Gate B 유예 기간 설계]] — idx_org_service_status에 valid_until이 포함된 설계 결정
 - [[multitenancy-rls|Pool 모델 + RLS]] — org_pk가 모든 복합 인덱스 선두인 이유
 - [[partitioning|DB 파티셔닝]] — 파티션과 인덱스를 함께 설계하는 방법
 - [[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK]] — CHECK constraint가 인덱스 설계에 미치는 영향

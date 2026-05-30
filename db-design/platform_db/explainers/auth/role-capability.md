@@ -1,4 +1,5 @@
 ---
+difficulty: 중급
 tags:
   - platform-db
   - explainer
