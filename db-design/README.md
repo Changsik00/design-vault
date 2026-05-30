@@ -6,7 +6,6 @@
 
 | 디렉토리 | 내용 |
 |---|---|
-| [academy-platform/](./academy-platform/) | Academy AI SaaS — 멀티테넌트 DB 설계 (identity/billing/academy 멀티스키마) |
 | [platform_db/](./platform_db/) | NextPay AI Agent 플랫폼 DB — 문서 허브(core·decisions·explainers). 진입점: [platform_db/README.md](./platform_db/README.md) |
 
 ## 아카이브
