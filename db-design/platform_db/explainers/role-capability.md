@@ -71,7 +71,7 @@ OWNER는 조직의 최고 관리자라는 platform-level 개념입니다. TEACHE
 
 ## Q2. platform_role과 service_role로 나누면 어떻게 달라지나요?
 
-**구현됨로 구현된 구조** — role을 두 계층으로 분리했습니다.
+**현행 구조** — role을 두 계층으로 분리했습니다.
 
 ```
 이전 (단일 ENUM, academy 종속):
@@ -114,7 +114,7 @@ WHERE user_pk = ? AND org_pk = ?;
 -- 결과: 'OWNER'
 ```
 
-> 💡 **한 줄 요약**: platform_role은 "조직에서의 지위"(OWNER/MEMBER/SERVICE), service_role(role_code)은 "서비스 내 도메인 역할"(DIRECTOR/TEACHER/STUDENT)로 관심사를 분리합니다. 구현됨로 구현 완료.
+> 💡 **한 줄 요약**: platform_role은 "조직에서의 지위"(OWNER/MEMBER/SERVICE), service_role(role_code)은 "서비스 내 도메인 역할"(DIRECTOR/TEACHER/STUDENT)로 관심사를 분리합니다. 구현 완료.
 
 ---
 

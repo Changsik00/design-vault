@@ -154,30 +154,37 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 2.3 마이그레이션 상태·목표 (G1~G3)
 
-> 구현됨로 role 2단 분리가 구현됨. G1/G2 완료, G3 부분.
+> role 2단 분리가 구현됨(현행 스키마). G1/G2 완료, G3 부분.
 
 - **G1. role 2단 분리** (D1) — ✅ **구현됨**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
 - **G2. capability 네임스페이스** (D2) — ✅ **구현됨**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
 - **G3. `organization.org_kind`** (D5) — 🟡 **부분 구현**: `type ENUM('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거). `org_kind VARCHAR+CHECK` 전환은 미완(저빈도라 ENUM 유지).
 
-### 2.4 의도적으로 안 하는 것 (YAGNI) + 도입 트리거
+### 2.4 비목표 (Non-Goals)
 
-| 미도입 / 거부 | 이유 | 도입 트리거 |
+**거부 — 더 나은 방법이 있어 *영구히* 안 한다** (모호 아님, 결정)
+
+| 거부 | 대신 (결정 위치) |
+|---|---|
+| 완전 MSA(auth/billing/role DB 분리) | 비대칭 분리([[design-asymmetry]]) — 분산 트랜잭션 회피 |
+| audit `BEFORE UPDATE` 트리거 | 해시 체이닝→WORM([[audit-hash-chain]]) — 트리거는 root가 DROP 가능 |
+| BOLA 복합 UNIQUE `(org_pk, public_id)` | ULID 전역 UNIQUE + 질의 필터(§2.2) |
+| api_key `allowed_environments` JSON 블롭 | 구조화 scopes — 불변식 #6 |
+| phone/email 전면 암호화 | 선별 암호화(secret·guardian) + KMS(§2.2) |
+
+**유보 — 지금은 과스펙, *명시 트리거*에서만 도입** (차후 진행 방향 확정)
+
+| 유보 | 도입 트리거 | 그전까지 |
 |---|---|---|
-| 완전 MSA(auth/billing/role DB 분리) | 분산 트랜잭션 지옥, 현 규모 과도 | (안 함 — 비대칭 분리 유지) |
-| DB role/capability 레지스트리 | rule을 DB에 = 디버깅 지옥([[role-as-code]]) | 테넌트 커스텀 롤 실수요 |
-| audit `BEFORE UPDATE` 트리거 | root가 DROP 가능 → 위협 못 막음 | (안 함 — 해시/WORM으로 대체) |
-| BOLA 복합 UNIQUE `(org_pk, public_id)` | public_id(ULID) 이미 전역 UNIQUE | (불요 — 질의 필터가 실체) |
-| api_key `allowed_environments` JSON 블롭 | 불변식 #6(임의 JSON 권한 금지) 충돌 | (거부 — 구조화 scopes로) |
-| phone/email 전면 app-level 암호화 | 인덱스·유니크·검색 파괴 | (거부 — secret/guardian만, 나머지 KMS) |
-| 휴면(1년) 법적 대응 | 유효기간제 2023 폐지 — 법 의무 아님 | (정정 — 선택적 제품정책) |
-| OpenFGA / 정책 엔진 | MVP overkill | 학원 1000+ / 정책 복잡도 폭증 |
-| Zanzibar full relation_tuple | delegation_grant로 충분 | delegation 패턴 부족 확인 시 |
-| Kafka/Debezium CDC | MQ는 outbox 위에 나중에([[payment-atomicity]]) | ISMS-P/SOC2(T4) |
-| platform 공통 usage 카운터 | 카운터는 서비스측(집계만 platform, [[operability]] O4) | cross-service 합산 과금 실수요 |
-| schema-per-tenant / 즉시 DB-per-tenant | MySQL db=schema pool 복잡 / 현 규모 운영비만↑ | T1/T2/T4 트리거 |
+| 외부 정책 엔진(OpenFGA) | org 1,000+ | CASL + 코드 상수([[role-as-code]]) |
+| DB role/capability 레지스트리 | 테넌트 커스텀 롤 실수요 | 코드 상수가 권위 |
+| Zanzibar relation_tuple | delegation_grant로 표현 못 하는 관계 발생 | delegation_grant |
+| Kafka/Debezium CDC | T4(ISMS-P/SOC2) | outbox([[payment-atomicity]]) |
+| 샤딩 / DB-per-tenant | §1.4 T1~T4 | Pool 모델([[multitenancy-pool]]) |
 
-> **범위 경계 (enterprise 원본 대비)**: platform_db가 일부러 다루지 않는 영역(정산·아웃바운드 webhook·다단계 조직그래프·B2B 심화·규제 산업 감사)은 [[requirements]] §7 추적표. 각 구조의 edge는 §1.2~§1.4 ⚙️ 주석 참조.
+> **usage**: 실시간 한도 카운터는 **서비스측**(ABAC-3) → platform 비목표. 단 **집계 `usage_snapshot`은 비목표 아님** — 운영상 필요([[operability]] O4).  
+> **휴면(DORMANT)**: 법 의무 아님(유효기간제 2023 폐지) → 선택적 제품 결정(§5.3).  
+> **범위 경계(enterprise 원본 대비)**: 정산·아웃바운드 webhook·다단계 조직그래프·B2B 심화 → [[requirements]] §7. 구조 edge는 §1.2~§1.4 ⚙️.
 
 ---
 
