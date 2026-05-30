@@ -1,7 +1,7 @@
 # platform_db — 스키마 레퍼런스
 
 > 작성일: 2026-05-28 · 유지: dennis  
-> 진입점: [`architecture.md`](architecture.md) (개요·결정·운영) · 검증: [`requirements.md`](requirements.md) (요구사항·BDD)
+> 진입점: [[architecture]] (개요·결정·운영) · 검증: [[requirements]] (요구사항·BDD)
 >
 > **이 문서**: `platform_db`의 기술 레퍼런스 — DB 토폴로지·ERD·스키마 DDL·3-gate·billing 흐름·멀티테넌시·보안·consent 모델.  
 > "왜/운영"은 architecture.md, "요구/검증"은 requirements.md.
@@ -220,7 +220,7 @@ CREATE TABLE membership (
   -- 현재: academy 도메인 역할 포함. 향후: platform_role('OWNER','ADMIN','MEMBER','SERVICE') 분리
   status   ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY pk_membership (user_pk, org_pk),          -- 복합 PK
+  PRIMARY KEY (user_pk, org_pk),
   INDEX idx_membership_org_role (org_pk, role),
   INDEX idx_membership_user (user_pk),
   CONSTRAINT fk_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk),
@@ -406,7 +406,7 @@ CREATE TABLE org_entitlement (
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   CONSTRAINT chk_entitlement_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
   UNIQUE KEY uq_org_product (org_pk, product_code),
-  INDEX idx_org_service_status (org_pk, service, status),
+  INDEX idx_org_service_status (org_pk, service, status, valid_until),  -- Gate B 핫패스 (R8 자문 반영)
   INDEX idx_entitlement_expiry (valid_until, status),  -- 만료 배치: WHERE valid_until < NOW() AND status='ACTIVE'
   CONSTRAINT fk_ent_org FOREIGN KEY (org_pk) REFERENCES organization(pk)
 );
@@ -438,7 +438,8 @@ CREATE TABLE org_subscription (
   cancelled_at         TIMESTAMP,
   created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  INDEX idx_org_subscription_org_status (org_pk, status)
+  INDEX idx_org_subscription_org_status (org_pk, status),
+  INDEX idx_org_subscription_external_sub_id (external_sub_id)  -- PG webhook이 external_sub_id로 구독 조회
 );
 ```
 
@@ -494,6 +495,8 @@ CREATE TABLE billing_event (
 ```
 
 **설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only.
+- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, phase-17+ 마이그레이션.
+- **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.17 payment_ledger
 
@@ -517,6 +520,8 @@ CREATE TABLE payment_ledger (
 ```
 
 **설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지.
+- `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
+- **FK 없음(의도적)**: billing 고write·append-only 패턴상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.18 pg_webhook_event
 
@@ -530,9 +535,15 @@ CREATE TABLE pg_webhook_event (
   status       ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED') NOT NULL DEFAULT 'RECEIVED',
   processed_at TIMESTAMP,
   created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_provider_event (pg_provider, event_id)  -- 멱등 보장
+  UNIQUE KEY uq_provider_event (pg_provider, event_id),  -- 멱등 보장
+  INDEX idx_pg_webhook_status (status, created_at)       -- 재처리 워커: WHERE status='FAILED' (R8 자문)
 );
 ```
+
+**설계 포인트**:
+- `pg_provider ENUM`: `MANUAL` 제외 — 수동 결제는 webhook이 없으므로 의도적 제외 (org_subscription·payment_ledger와 달리 MANUAL 항목 없음)
+- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 자문). phase-17+ 마이그레이션.
+- **FK 없음(의도적)**: billing 고write 패턴상 FK 잠금 회피 — review-checklist P4-8.
 
 ## D.19 outbox_event
 
@@ -598,7 +609,7 @@ if (!pass) throw PaymentRequiredException();
 
 **구현**: `checkGateB(orgPk, service: EntitlementService = "ACADEMY")` — service 파라미터로 다중 서비스(ACADEMY/MARKET/AGENT/YOUTUBE/STORE) 지원. 미전달 시 ACADEMY 기본값. 신규 서비스는 service 파라미터를 명시적으로 전달해야 함.
 
-**인덱스 요건**: `(org_pk, service, status, valid_until)` — 복합 인덱스 필요. 현재 `idx_org_service_status(org_pk, service, status)`에 valid_until 추가 필요(불변식 #9).
+**인덱스**: `idx_org_service_status (org_pk, service, status, valid_until)` — R8 자문 반영, valid_until 포함 확정(불변식 #9). DDL §D.12 수정 완료.
 
 ### Gate C — 정책 (CASL)
 
@@ -876,6 +887,8 @@ CREATE TABLE user_consent_event (
 ```
 
 > **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 phase-17 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
+
+> **파티셔닝 검토(P2, R8 자문)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
 
 **현재 상태 쿼리** (최신 동의 상태):
 ```sql

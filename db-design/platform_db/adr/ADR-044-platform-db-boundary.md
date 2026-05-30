@@ -104,5 +104,5 @@ store-api:    platform_db → "org가 store 구독 중?"   → store DB 접근 �
 
 ## 관련 ADR
 
-- [ADR-041](ADR-041-multitenancy-db-strategy.md) — 멀티테넌시 DB 전략 (Pool 모델 채택)
-- [ADR-043](ADR-043-lecture-ownership-storage-ledger.md) — lecture_file 원장 + S3 경로 규약
+- [[ADR-041-multitenancy-db-strategy|ADR-041]] — 멀티테넌시 DB 전략 (Pool 모델 채택)
+- ADR-043 (lecture_file 원장 + S3 경로 규약) — academy 서비스 도메인 ADR로, 본 platform_db 볼트 범위 밖

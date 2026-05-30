@@ -1,7 +1,7 @@
 # platform_db — 요구사항 & 검증
 
 > 작성일: 2026-05-28 · 유지: dennis  
-> 진입점: [`architecture.md`](architecture.md) · 설계: [`schema-reference.md`](schema-reference.md)
+> 진입점: [[architecture]] · 설계: [[schema-reference]]
 >
 > **이 문서**: "이 설계가 요구를 충족하는가"를 두 각도로 검증한다.  
 > **A. 요구사항 추적표** — 8라운드 자문 총망라 (우리 구현 상태 기준 현실 평가)  

@@ -8,8 +8,8 @@
 >
 > **문서 지도 (총 3개, 이 문서가 진입점)**:
 > - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R7)·결정(D1~D12)·자문처리·운영 플레이북·부록 ADR
-> - [`schema-reference.md`](schema-reference.md) — ERD·스키마·3-gate·billing 흐름·consent 모델
-> - [`requirements.md`](requirements.md) — 요구사항 추적표·BDD 시나리오
+> - [[schema-reference]] — ERD·스키마·3-gate·billing 흐름·consent 모델
+> - [[requirements]] — 요구사항 추적표·BDD 시나리오
 
 ---
 
@@ -58,6 +58,7 @@
 | **R5** 정책·동의 | PIPA/정보통신망법은? | `user_consent_event` append-only, 14세 미만, 제3자 제공 4요건, 철회권 |
 | **R6** 자체 비교 분석 A | 누락은? | 15건 보완(rate-limit·webhook·fan-out·meta schema·perm 전파·SLA·delegation 경계·JWT·키 cadence). **휴면 법폐지 정정** |
 | **R7** 자체 비교 분석 B | 장기 리스크는? | **platform_db 비대화** 경고 → 논리 소유권. break-glass·데이터분류·암호화·Admin SDK 키 |
+| **R8** 자문 | awesome-database-design 분류 기준 전체 항목 점검 | membership PK 선언 정정 · Gate B valid_until 인덱스 확정 · pg_provider ENUM 불일치 식별 · external_sub_id·pg_webhook status 인덱스 추가 · billing FK 비대칭 의도 명시 · user_consent_event 파티셔닝 검토 |
 
 > **핵심 전환점은 R2→R3**: "데이터 구조는 멀티서비스 준비됐는데 권한 *언어*가 academy MVP에 고정돼 있다"를 발견하고 role을 2단으로 끌어올린 것이 이 설계의 가장 큰 통찰이다.
 
@@ -118,6 +119,8 @@
 | **D10** | 멀티테넌시: RLS 없음→CI 린트, Neo4j 멀티홉 강제, Qdrant `is_tenant` | 🟡 RLS/CI린트 미완, 나머지 ✅ | MySQL은 RLS 없음(정직한 자인) | per-tenant VIEW(수백 테넌트 비현실) |
 | **D11** | 표준보안: BOLA 프레임워크화 / NIST 환경속성 / 감사 해시체이닝→WORM | 🟡 BOLA ✅, 해시체이닝·WORM P1 | 위협모델 기반(OWASP API Top10, ISMS-P) | audit 트리거(root가 DROP 가능→무력), JSON 권한블롭, 복합 UNIQUE 불요 |
 | **D12** | 운영보강: 논리 소유권·secret cadence·break-glass·데이터분류·perm 전파 | 🟡 정책 명시 ✅, break-glass·암호화 P1 | platform_db 비대화·운영자 통제·키 cadence | phone/email 전면암호화, 휴면 법의무(2023 폐지) |
+
+> **D6 미적용 사례(R8 자문)**: `service` VARCHAR+CHECK 원칙을 `pg_provider`(org_subscription·payment_ledger·billing_event·pg_webhook_event 4곳)와 `billing_event.event_type`에 미일관 적용. 특히 `pg_provider`는 대형 테이블에 중복 — PG 추가 시 `ALTER MODIFY COLUMN` 잠금이 D6가 피하려던 바로 그것. → phase-17+ ENUM→VARCHAR(50)+CHECK 마이그레이션 대상 추가. (스키마 상세: [[schema-reference]])
 
 ---
 

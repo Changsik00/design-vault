@@ -372,6 +372,8 @@ async function processEvent(event: OutboxEvent) {
 }
 ```
 
+**at-least-once의 의미**: 워커가 `deliver()`(이메일 발송 등)에 성공한 직후 `markSent()` 전에 죽으면, 다음 워커가 같은 PENDING 이벤트를 다시 집어 **두 번 발송**할 수 있습니다. 즉 "최소 한 번"은 보장하지만 "정확히 한 번"은 아닙니다. 그래서 소비 측이 중복을 흡수하도록 멱등 처리(수신자 측 dedup 또는 [[idempotency-key|`idempotency_key`]])를 함께 둡니다. 여러 워커가 동시에 돌 때는 `SELECT ... FOR UPDATE SKIP LOCKED`로 가져가, 한 row를 두 워커가 동시에 처리하는 일을 막습니다.
+
 > 💡 **한 줄 요약**: 워커는 주기적으로 PENDING 이벤트를 가져와서 처리하고 SENT로 마킹합니다. 실패하면 FAILED로 남고 재처리할 수 있습니다. DB에 기록되어 있으니 어떤 이벤트가 미처리 상태인지 항상 알 수 있습니다. at-least-once 발행과 [[idempotency-key|멱등성]] 소비의 조합으로 중복 처리를 방지합니다.
 
 ---
@@ -538,6 +540,7 @@ outbox가 없으면 MQ에도 at-least-once 보장이 깨집니다.
 - 컨슈머(이메일/알림/인덱스)가 5개 이상 독립 확장 필요
 - 배포 중 이벤트 유실이 실제 장애로 이어진 경험
 - 팀이 Kafka 같은 별도 인프라를 운영할 여력이 생긴 시점
+- ISMS-P 감사 요건(분리 트리거 T4) 등 컴플라이언스 요구가 생긴 시점 — 전환 시 `outbox_event → Debezium CDC → Kafka` 경로로 소비 앱 코드 변경 없이 얹을 수 있음
 
 현재 규모에서는 outbox 단독으로 충분하고, MQ는 나중에 outbox 위에 CDC로 얹는 방식으로 자연스럽게 확장할 수 있습니다.
 
@@ -553,3 +556,4 @@ outbox가 없으면 MQ에도 at-least-once 보장이 깨집니다.
 > 소스 문서
 - [[architecture]] — §3.1 불변식 #7 (strong consistency = 단일 트랜잭션, async = outbox), §6.2 결제 단일 트랜잭션
 - [[schema-reference]] — D.19 outbox_event DDL, F.1 결제-권한 단일 트랜잭션 SQL
+- [[payment-atomicity]] — Kafka 대신 단일 트랜잭션 + outbox로 결제 원자성을 보장한 결정

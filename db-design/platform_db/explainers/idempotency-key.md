@@ -348,6 +348,15 @@ try {
 
 결제는 "한 번만 정확하게"가 핵심입니다. `idempotency_key`와 webhook UNIQUE 제약이 그 보장을 DB 레벨에서 합니다.
 
+**왜 Redis가 아니라 DB UNIQUE인가** — 멱등 저장소로 Redis `SETNX`도 흔히 쓰지만, 결제처럼 정확성·내구성이 중요한 경로에서는 DB UNIQUE 제약을 택했습니다.
+
+| 항목 | DB UNIQUE (우리) | Redis SETNX |
+|---|---|---|
+| 구현 단순성 | 높음 (컬럼 추가만) | 중간 (Redis 연결 관리) |
+| 내구성 | DB에 영구 저장 | Redis 재시작 시 소실 |
+| 정확성 | 완벽 | TTL 만료 후 재처리 가능 |
+| 의존성 | DB만 | DB + Redis |
+
 ---
 
 ## 연결된 개념
