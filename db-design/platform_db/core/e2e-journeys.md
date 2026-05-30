@@ -20,7 +20,7 @@ tags:
 > **이 문서**: 사용자/머신 입장의 **black-box e2e 여정**. API 경계에서만 관찰하고, platform 행위(3-gate·billing projection·perm_version·consent 게이트·BOLA·audit)를 *결과로* 검증한다.
 
 >
-> 📄 **설계 시나리오 — 구현 코드는 없습니다.** ⚠️ 표시 시나리오는 *기능 코드가 생기면* 테스트로 활성화하며, 설계 자체는 본 문서·[[schema-reference]] 기준으로 완결입니다.
+> 📄 **설계 시나리오 — 구현 코드는 없습니다.** ⚠️ 표시 시나리오는 *기능 코드가 생기면* 테스트로 활성화하며, 설계 자체는 본 문서·[[schema-reference]] 기준으로 완결입니다. 실행 전략(실제 DB·ORM)은 [[testing-strategy]]·[[orm-testing-drizzle]].
 
 ## 왜 별도인가 — 테스트 피라미드
 

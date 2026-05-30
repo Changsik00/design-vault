@@ -303,6 +303,8 @@ DENY/ERROR 발생 시:
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 관측·신뢰성은 "장애를 일부러 일으켜서 신호가 제대로 뜨는가"를 검증합니다. 핵심은 **장애 주입(fault injection)**과 **임계치 모킹**입니다.
 

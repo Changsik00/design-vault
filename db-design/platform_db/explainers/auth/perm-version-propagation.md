@@ -240,6 +240,8 @@ user_pv (개인 단위) bump → 그 사용자 한 명의 토큰만 stale 처리
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 검증해야 할 핵심은 두 가지입니다. ① **권한 회수 후 stale 토큰으로 민감 작업을 하면 403으로 막힌다**(@VerifyOnDb), ② **perm_version bump 후 X-Perm-Version이 증가한다**(전파). [[e2e-journeys]] **C-04**(정상 위임 lifecycle)와 **D3-07**(오부여 정정)을 코드로 옮긴 형태입니다.
 

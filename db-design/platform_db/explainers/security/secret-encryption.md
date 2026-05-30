@@ -277,6 +277,8 @@ PII(일반 개인정보): email·phone 등 — at-rest 기본 + 접근통제·�
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 비밀 관리의 테스트 핵심은 **"평문이 응답·로그·DB 어디에도 새지 않는가"**를 negative test로 확인하는 것입니다 — "되면 안 되는 게 안 되는가".
 

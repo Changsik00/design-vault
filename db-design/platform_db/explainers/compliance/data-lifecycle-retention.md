@@ -288,6 +288,8 @@ VALUES (10, 'ALL', 'REVOKED', '2026-05-01', NOW());
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 보존·파기는 "안 일어나야 할 일이 안 일어남"을 검증하는 음성(negative) 테스트가 많아서 특히 꼼꼼해야 합니다. 시간이 지나야 발동하는 배치라 **시간을 조작**(`deleted_at`을 과거로 INSERT)하는 게 핵심 기법입니다.
 

@@ -201,6 +201,8 @@ Permission Debugger는 **CS·운영자가 사용자와 통화하며 실시간으
 ---
 
 ## 테스트 방법
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
 
 Permission Debugger의 핵심 검증은 **(1) 설명이 실제 판정과 일치하는가**(재현 불일치 0), **(2) 어느 게이트에서 막혔는지·SKIP이 정확한가**, **(3) 1초 안에 답하는가**입니다.
 
