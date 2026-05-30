@@ -158,7 +158,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ID | 요구사항 | 출처 | 적용 설계 | 상태 |
 |---|---|---|---|---|
 | AUD-1 | `audit_log` append-only, 월 파티셔닝, actor 통합 | R0 | §D.8 | ✅ |
-| AUD-2 | 모든 권한 결정(ALLOW/DENY/ERROR) 기록 | R0 | audit_log.result | ✅ |
+| AUD-2 | **보안유의 이벤트** 기록(DENY·ERROR·민감 ALLOW·운영자) — 일상 read ALLOW는 텔레메트리(샘플링), audit 아님 | R0 | [[audit-two-lane]] | 🟡 범위 재정의(2-lane 미구현) |
 | AUD-3 | trace_id + audit_event_id(분산 추적) | R4 | 🟡 P1 | 🟡 |
 | AUD-4 | 사람·머신 활동 통계 분리(type 필터) | R2 | identity_user.type | ✅ |
 | CON-1 | `user_consent_event` append-only 이벤트 | R5 | D7 | ⚠️ phase-17 |
@@ -213,9 +213,29 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 ---
 
-## 4. 목적 달성 스코어카드
+## 4. 운영 가능성 (Operability) — *신규 식별 갭*
 
-### 4.1 확장성(EXT) — *플랫폼 가치 명제*
+> 설계는 충실하나 **"3년 운영하면 무슨 사고가 나나"**에 대한 요구가 약하다. 아래는 platform_db가 **소유**해야 할 운영 요구(대부분 🔴 미설계). **상세 모델은 [[operability]]**(O1~O6), 여기는 추적표.  
+> **범위 규율**: 콘솔 UI·알림 임계치·DR 런북은 platform_db가 *enable*만 하고 *소유*는 별도 ops 제품/문서. 단 **Permission Debugger는 UI가 아니라 *계약*으로서 platform_db 책임**(DBG-1).
+
+| ID | 요구사항 | 결정/계약 | 상태 |
+|---|---|---|---|
+| OPER-1 | 운영자 신원 평면 — 테넌트 role 아님, 별도 인증·MFA, 전건 감사 | [[operator-plane]] | 🔴 미설계 |
+| OPER-2 | 운영자 역할 매트릭스 — CS=R / FINANCE=환불 / AUDITOR=audit R-only … 최소권한 | [[operator-plane]] | 🔴 |
+| SUPP-1 | Support Action — 운영자 override(entitlement 강제부여·Trial 연장 등)에 who/when/why 감사 + 별도 권한 | [[operator-plane]] · [[audit-two-lane]] | 🔴 |
+| DBG-1 | **Permission Debugger 계약** — 거부 요청에 Gate A/B/C 결과+사유를 1초에 반환하는 trace (예: `A=PASS, B=FAIL(entitlement expired), C=SKIP`). **platform_db 책임**(4개 테이블 직접 뒤지는 건 설계 실패) | [[operability]] O2 | 🔴 (ROI 최상) |
+| RETN-1 | 데이터 보존·생명주기 정책 — 테이블별 보존기간(audit 5y·consent 5y·payment 7y·chat 1y…) + 파기 트리거 | [[operability]] O3 | 🔴 |
+| AVAIL-1 | entitlement 가용성 계약 — billing/PG 장애 시 기존 entitlement read가 영향 없이 최소 N시간 유지 | [[operability]] O5 · [[auth-projection]] | 🟡 명문화 필요 |
+| OWN-1 | 마지막 OWNER 보호 — 앱 트랜잭션 가드 + **DB 레벨 방어** 검토 (현재 앱만, RBAC-6 강화) | [[operability]] O2 | 🟡 |
+| USAGE-1 | 사용량 가시성 — `usage_snapshot`(집계는 platform, 이벤트 전량은 서비스 DB). feature_limits 대비 *현재 얼마 썼나*(498/500인지 5/500인지). 과금형도 동일 경로 | [[operability]] O4 | 🔴 |
+
+> **enable만 (별도 ops 제품 소관 — 여기선 트리거만)**: Admin Console UI · Alert 임계치 · DR 런북/RTO·RPO · Feature Flag rollout · 샤딩 실행. → 트리거: 2번째 서비스 / org 규모 T1~T4([[multitenancy-pool]]) / 컴플라이언스. (관측 지표·신뢰성 계약 자체는 O5·O6에서 platform_db 책임으로 정의.)
+
+---
+
+## 5. 목적 달성 스코어카드
+
+### 5.1 확장성(EXT) — *플랫폼 가치 명제*
 
 | EXT | 충족 |
 |---|---|
@@ -228,7 +248,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 > **목적 부채 요약**: service·capability CHECK 결합 = 서비스 추가 시 platform 마이그레이션 필요. [[service-extensibility]]에서 **Option A(저비용 온라인 CHECK 유지) 의도적 채택**으로 종결 + 전환 트리거 명시. 남은 1급 미해결은 **P6(머신 신원, api_key) 미착수**.
 
-### 4.2 기능 요구사항 (pillar별, 현재 구현 기준)
+### 5.2 기능 요구사항 (pillar별, 현재 구현 기준)
 
 | Pillar / 군 | 항목 | ✅ | 🟡 | ⚠️ | ⛔ | ❓ |
 |---|---|---|---|---|---|---|
@@ -248,6 +268,6 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 ---
 
-## 5. BDD 시나리오
+## 6. BDD 시나리오
 
 → [[bdd-scenarios]]. platform_db 10개 도메인 행위 시나리오 + 서비스 적합성 크로스체크(테스트 케이스).

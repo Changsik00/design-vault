@@ -22,6 +22,7 @@ platform_db/
 | 전체 그림이 보고 싶다 | [[architecture]] |
 | 스키마·DDL이 궁금하다 | [[schema-reference]] |
 | "무엇을 비교해 이렇게 정했나?" | `decisions/` (아래 표) |
+| **운영은 어떻게 할 건데?** | [[operability]] (O1~O6) |
 | 처음 합류해 Q&A로 배우고 싶다 | `explainers/` (아래 목록 — P0부터) |
 
 ---
@@ -32,7 +33,8 @@ platform_db/
 |---|---|
 | [[architecture]] | 아키텍처 핸드북 (진입점) — 8라운드 설계 여정, D1~D12 결정, 운영 플레이북 |
 | [[schema-reference]] | ERD · DDL · 3-gate · billing 흐름 · 멀티테넌시 · 보안 · consent 모델 |
-| [[requirements]] | 요구사항 추적표 104건 + BDD 시나리오 Domain 1~10 |
+| [[requirements]] | 플랫폼 목적 요구 — 확장성(EXT) · pillar별 기능 100건 · 운영 가능성 추적 |
+| [[operability]] | **운영 모델** (4번째 축) — O1 운영자 평면 · O2 Supportability(Permission Debugger) · O3 생명주기 · O4 usage · O5 신뢰성 · O6 관측성 |
 | [[bdd-scenarios]] | BDD 시나리오 — 10개 도메인 행위 시나리오 (통합 테스트 기반) |
 
 ---
@@ -67,6 +69,13 @@ platform_db/
 | [[decisions/gate-b-billing-grace\|gate-b-billing-grace]] | status-only vs **status + validUntil 복합 체크** |
 | [[firebase-boundary]] | Firebase Custom Claims로 인가 vs **인가는 우리 DB** |
 | [[role-as-code]] | DB role 레지스트리 vs **코드 상수**(ROLE_PERMISSION) |
+
+### 운영 가능성
+
+| 파일 | 비교 → 결정 |
+|---|---|
+| [[operator-plane]] | 운영자를 tenant role vs **별도 신원 평면** (Admin-role 안티패턴 회피) |
+| [[audit-two-lane]] | 전량 vs ALLOW 샘플링 vs **2-lane**(컴플라이언스 100% + 텔레메트리 샘플링) |
 
 ---
 
