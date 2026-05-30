@@ -147,6 +147,10 @@ platform_db 이벤트 버스:
 | `delegation_grant.grantor_pk` | `identity_user.pk` | `fk_grant_grantor` |
 | `delegation_grant.grantee_pk` | `identity_user.pk` | `fk_grant_grantee` |
 | `org_entitlement.org_pk` | `organization.pk` | `fk_ent_org` |
+| `org_subscription.org_pk` | `organization.pk` | `fk_sub_org` |
+| `org_subscription.payer_user_pk` | `identity_user.pk` | `fk_sub_payer` |
+| `subscription_item.subscription_pk` | `org_subscription.pk` | `fk_sub_item_sub` |
+| `subscription_item.sku_pk` | `product_sku.pk` | `fk_sub_item_sku` |
 | `product_feature.product_pk` | `product.pk` | `fk_pf_product` |
 
 ---
@@ -322,6 +326,7 @@ CREATE TABLE delegation_grant (
     'ACADEMY.PUBLISH_VIDEO','ACADEMY.APPROVE_VIDEO','ACADEMY.VIEW_ALL_LECTURES',
     'ACADEMY.MANAGE_SCHEDULE','ACADEMY.MANAGE_MEMBERS','ACADEMY.VIEW_BILLING'
   )),
+  CONSTRAINT chk_no_self_delegation CHECK (grantor_pk <> grantee_pk),  -- 자기위임 차단(org_relation chk_no_self_ref와 대칭)
   INDEX idx_delegation_grantee_org (org_pk, grantee_pk, status),
   INDEX idx_delegation_grantor (grantor_pk),
   CONSTRAINT fk_grant_org      FOREIGN KEY (org_pk)     REFERENCES organization(pk),
@@ -355,7 +360,8 @@ CREATE TABLE org_relation (
 CREATE TABLE audit_log (
   pk            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- AUTO_INCREMENT 필수
   org_pk        BIGINT UNSIGNED,                       -- nullable: actor_type='SYSTEM'(org 무관) 이벤트 허용 — 불변식 #3의 명시적 예외(§G.1)
-  actor_type    ENUM('HUMAN','API_KEY','SYSTEM') NOT NULL,
+  actor_type    ENUM('HUMAN','API_KEY','SYSTEM','OPERATOR') NOT NULL,  -- OPERATOR: 운영자 평면([[operator-plane]]) 이벤트. SERVICE 사용자(identity_user.type='SERVICE')의 행위는 'API_KEY'로 기록(어휘 매핑)
+
   actor_pk      BIGINT UNSIGNED,
   api_key_pk    BIGINT UNSIGNED,                      -- api_key 구현 후 FK 추가 예정
   action        VARCHAR(100) NOT NULL,
@@ -472,6 +478,7 @@ CREATE TABLE org_entitlement (
 - **Gate B 체크**: `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > NOW())`. status만 보면 배치 실패 시 영구 무료 위험(불변식 #9).
 - **grace_until**: Gate B 판정 기준. `org_subscription.grace_until`은 빌링 추적용, Gate B는 이 컬럼만 읽음.
 - UNIQUE(org_pk, product_code): 한 org가 같은 product를 두 번 entitlement 받을 수 없음
+- **product_code↔service 정합은 앱 불변식**: UNIQUE에 service 미포함(`product_code`가 전역 UNIQUE라 service 유도). §F.1 UPSERT가 `product.service`와 일치하는 service만 기록하도록 보장 — 어긋난 행이 들어가면 Gate B 핫패스 인덱스(`idx_org_service_status`) 오통과 위험.
 - `GRACE`: 결제 실패 후 유예 기간 (grace_until까지 서비스 유지)
 
 ## D.13 org_subscription
@@ -493,7 +500,9 @@ CREATE TABLE org_subscription (
   created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   INDEX idx_org_subscription_org_status (org_pk, status),
-  INDEX idx_org_subscription_external_sub_id (external_sub_id)  -- PG webhook이 external_sub_id로 구독 조회
+  INDEX idx_org_subscription_external_sub_id (external_sub_id),  -- PG webhook이 external_sub_id로 구독 조회
+  CONSTRAINT fk_sub_org   FOREIGN KEY (org_pk)        REFERENCES organization(pk),
+  CONSTRAINT fk_sub_payer FOREIGN KEY (payer_user_pk) REFERENCES identity_user(pk)
 );
 ```
 
@@ -513,6 +522,7 @@ CREATE TABLE subscription_item (
 ```
 
 **설계 포인트**: `org_subscription`과 `product_sku`의 N:M 연결. 하나의 구독에 여러 SKU 포함 가능(번들). org_subscription의 단일 sku_pk FK는 제거됨 — 이 테이블이 구독 상품의 진실 원천(불변식 #11).
+- **org 격리는 부모 스코프**: 자체 `org_pk` 없음(불변식 #3 예외). BOLA 질의는 `org_subscription` JOIN(`fk_sub_item_sub`)으로 org 경계를 강제 — 직접 필터 불가하므로 단독 조회 금지.
 
 ## D.15 plan_definition
 
@@ -640,6 +650,8 @@ AbilityGuard / @CheckAbility → can(action, resource) 평가
 ```
 
 > ⚠️ **Gate A 현황(솔직히)**: 실시간 DB 멤버십 재검증 가드(`GateAGuard`)는 **미구현(Icebox)**. 현재는 Firebase custom claims(`allMemberships`)로 간접 커버하므로, 멤버십이 취소돼도 **토큰 만료 전(~1h)까지 통과**할 수 있다. 민감 쓰기는 `@VerifyOnDb`(E.5)로 즉시 차단해 이 창을 메운다.
+
+> **claims 출처(write 경로)**: JWT claims의 `service`·`roleCode`는 `service_membership`을 읽어 빌드된다. 해당 행은 ① 가입(첫 org 생성 시 OWNER) ② 초대 수락(§D.5 — `membership`+`service_membership` 동시 INSERT) ③ 서비스 onboarding 시점에 생성되며, 변경 시 `perm_version` bump로 갱신(E.3).
 
 ## E.2 Gate별 상세
 
@@ -943,6 +955,7 @@ mutable boolean flag로는 반복 on/off 이력 소실 → PIPA 분쟁 시 입�
 | `pg.toss_third_party` | Toss 결제 제3자 제공 | 첫 Toss 결제 시 | 결제 시 필수 |
 | `pg.stripe_third_party` | Stripe 결제 제3자 제공 | 첫 Stripe 결제 시 | 결제 시 필수 |
 | `[service].*` | 서비스별 약관 (academy_db 등 서비스 DB에서 관리) | 서비스 최초 이용 | 서비스별 |
+| `ALL` (예약 sentinel) | 탈퇴 fan-out 시 전체 동의 일괄 철회 마커 | 탈퇴 처리 | 시스템 |
 
 > **전자서명법 근거**: 약관에 체크박스로 동의 = 전자서명법 §3의 전자서명으로서 서면 서명과 동일한 법적 효력. `user_consent_event`가 그 기록.
 
@@ -964,7 +977,7 @@ CREATE TABLE user_consent_event (
 );
 ```
 
-> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
+> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치([[audit-hash-chain]])는 컬럼 활성화 이후 운영. **baseline 규칙**: 활성화 이전(NULL) 구간은 검증 대상에서 제외하고, 활성화 첫 row를 genesis(`prev_hash`=고정 seed)로 삼는다 — NULL row에 대해 `computeSHA256(row) != NULL` 거짓 위변조 알림이 나는 것을 방지. `audit_log`·`user_consent_event`의 해시 활성화 트리거 일정을 일치시킨다.
 
 > **파티셔닝 검토(P2, R8 자문)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
 
@@ -975,6 +988,8 @@ WHERE user_pk=? AND consent_type=?
 ORDER BY created_at DESC LIMIT 1;
 -- 결과 'GRANTED' = 동의 상태, 'REVOKED' = 철회 상태, 없음 = 미동의
 ```
+
+> **`ALL` sentinel 해석**: 탈퇴 fan-out의 `(consent_type='ALL', action='REVOKED')`은 **게이팅 신호가 아니라 감사 마커**다. 위 per-type 정확매칭 쿼리에 의도적으로 잡히지 않는다 — 탈퇴 시 `identity_user.status='DELETED'` + 개인식별 컬럼 익명화가 권위이므로 런타임 동의 게이팅 자체가 무의미해진다. 개별 type 철회가 필요하면 type별 `REVOKED` row를 별도로 INSERT한다.
 
 ## I.3 BDD 시나리오
 
@@ -1182,13 +1197,13 @@ CREATE TABLE store_product (
 
 CREATE TABLE store_purchase (
   pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  buyer_org_pk BIGINT UNSIGNED NOT NULL,          -- 구매 org
+  org_pk      BIGINT UNSIGNED NOT NULL,           -- 구매 org (격리 키 — market_order와 명명 통일)
   product_pk  BIGINT UNSIGNED NOT NULL,
   buyer_user_pk BIGINT UNSIGNED NOT NULL,
   ledger_pk   BIGINT UNSIGNED,
   purchased_at TIMESTAMP NOT NULL DEFAULT NOW(),
   expires_at  TIMESTAMP,
-  INDEX idx_store_purchase_buyer_org (buyer_org_pk, purchased_at)
+  INDEX idx_store_purchase_org (org_pk, purchased_at)
 );
 ```
 
@@ -1255,7 +1270,7 @@ MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적�
 
 → **다층 방어**:
 - **1차 (앱 트랜잭션)**: `SELECT COUNT(*) ... WHERE platform_role='OWNER' AND status='ACTIVE' FOR UPDATE` → 1이면 마지막 OWNER 강등/삭제 거부.
-- **2차 (모니터링)**: `platform_role='OWNER'` ACTIVE count = 0 인 org 탐지 → 알림([[operability]] O6).
+- **2차 (모니터링)**: `organization.status='ACTIVE'`인 org 중 `platform_role='OWNER'` ACTIVE count = 0 탐지 → 알림. CLOSED/SUSPENDED org는 제외(정상 종료·정지 org에 대한 거짓 알림 방지)([[operability]] O6).
 - 트리거·DB 제약은 미채택(MySQL 한계 + root 우회).
 
 ---
