@@ -114,7 +114,7 @@ ORDER BY created_at DESC;
 
 ```sql
 INSERT INTO audit_log (
-  actor_type,   -- 'HUMAN' (운영자)
+  actor_type,   -- 'OPERATOR' (운영자 평면 — schema-reference §D.8)
   actor_pk,     -- 운영자 identity_user.pk
   action,       -- 수행한 작업 (예: 'MANUAL_ENTITLEMENT_UPDATE')
   resource_type,-- 수정한 테이블 (예: 'org_entitlement')

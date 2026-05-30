@@ -463,7 +463,7 @@ Scenario: 운영자 긴급 접근 (Break-glass)
 
   When 운영자가 긴급 접근으로 platform_db 조회를 수행한다
 
-  Then 모든 행위가 audit_log에 (actor_type='HUMAN', action='break_glass_access',
+  Then 모든 행위가 audit_log에 (actor_type='OPERATOR', action='break_glass_access',
        meta_json={reason:'서비스장애', approver_pk:...}) INSERT된다
   And audit_log row에 break_glass=true 표시 필수
   And delegation_grant.expires_at 도달 시 자동 회수된다
