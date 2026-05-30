@@ -1,0 +1,101 @@
+---
+type: decision
+status: 채택
+aliases:
+  - 운영자 신원 평면
+  - operator plane
+  - 백오피스 권한 모델
+  - operator role
+tags:
+  - platform-db
+  - decision
+  - operations
+  - identity
+  - security
+---
+
+# 운영자 신원 평면 — 백오피스 권한을 어디에 둘 것인가
+
+> 상태: 채택 · 영역: 운영 가능성(Operability) · 형식: 비교 → 결정
+
+## 결정
+
+운영자(CS·FINANCE·SUPPORT·SECURITY·SRE·AUDITOR)는 **테넌트 `membership.platform_role`이 아니라 별도 신원 평면**(operator plane)으로 모델링한다. cross-tenant 도달은 [[cross-tenant-separation]]의 아키텍처 분리(`internal/`·admin 서비스) + [[break-glass]]로만 한다. **role flag로 권한을 우회하지 않는다.**
+
+---
+
+## 맥락 — 가장 큰 운영 구멍, 그리고 함정
+
+지금 권한 모델엔 고객(OWNER/MEMBER/SERVICE)만 있다. 운영자가 없으니 현업에선 *"운영자 = OWNER"* 또는 *"직접 SQL"*로 수렴한다 — 가장 큰 운영 구멍. 그런데 운영자를 **어디에** 두느냐가 함정이다.
+
+---
+
+## 비교한 선택지
+
+### A — `membership.platform_role`에 SUPER_ADMIN/CS/FINANCE 추가
+
+- **장점**: 기존 3-gate 재사용, 구현 빠름
+- **단점**: [[cross-tenant-separation]]이 **명시적으로 거부한 Admin-role 안티패턴 재도입** — 단일 장애점(탈취 시 전 테넌트 노출) · 비즈니스 로직에 보안 우회 혼재 · role 남용 확산 · 격리 불변식이 런타임 조건에 의존
+- **기각** — 우리 자신의 결정을 깨뜨린다.
+
+### B — 별도 운영자 신원 평면 (채택)
+
+- 운영자 신원은 테넌트 `membership`과 **분리**(org에 안 묶임). **별도 인증**(전용 IdP / MFA 강제).
+- `operator_role`(SUPER_ADMIN/CS/FINANCE/SUPPORT/SECURITY/SRE/AUDITOR) — 읽기/쓰기 범위 매트릭스. role→action은 코드 상수([[role-as-code]] 동일 원칙).
+- cross-tenant 조회·override는 `internal/`·admin 서비스 **코드 경로에서만**(아키텍처 분리). 일반 API 토큰으론 도달 불가.
+- 모든 운영자 행위 = `audit_log`에 `actor_type='OPERATOR'` + `support_action`/`break_glass` 플래그 **100%** 기록.
+- **장점**: 고객 인증과 운영자 인증 분리(공격 표면 분리) · 격리는 코드 위치로 강제 · 최소권한 매트릭스
+- **단점**: 신원 평면 1개 추가(`operator_account`/`operator_role`) · 별도 인증 인프라
+
+### C — 외부 IAM/SSO 위임 + operator_role
+
+- 운영자 *인증*은 회사 IdP(Okta 등), *인가*는 우리 `operator_role`. B의 전환형(컴플라이언스·운영자 증가 시).
+
+| 기준 | A: tenant role | B: operator plane (우리) | C: IAM 위임 |
+|---|---|---|---|
+| cross-tenant-separation 준수 | ❌ 위반 | ✅ | ✅ |
+| 공격 표면 | 단일 장애점 | 분리 | 분리 |
+| 구현 비용 | 낮음 | 중간 | 높음 |
+| 최소권한 | 어려움 | 매트릭스 | 매트릭스 |
+
+---
+
+## 왜 B인가
+
+운영자 권한은 본질적으로 **cross-tenant**(전 고객 조회)다. 그걸 tenant role에 넣는 순간 격리 불변식이 무너진다. operator plane은 ① 인증 분리 ② 코드 경로 분리 ③ 전건 감사 ④ 최소권한 매트릭스로, 우리가 이미 선택한 [[cross-tenant-separation]]·[[break-glass]] 원칙과 정합한다.
+
+### 운영자 역할 매트릭스 (계약)
+
+| operator_role | 읽기 | 쓰기 | 비고 |
+|---|---|---|---|
+| SUPER_ADMIN | 전체 | 제한적(break-glass) | 2인 승인 |
+| CS | org/user 조회 | ❌ | 상담 |
+| FINANCE | billing 조회 | 환불 · entitlement 부여 | membership 수정 ❌ |
+| SUPPORT | org/user 조회 | Support Action(제한) | |
+| SECURITY | audit · api_key 조회 | 키 revoke | |
+| SRE | 운영지표 · 헬스 | 일부 운영 | PII 최소 노출 |
+| AUDITOR | audit 조회만 | ❌ | 불변 |
+
+> 매트릭스 값은 코드 상수(`OPERATOR_PERMISSION[role]`)가 권위 — 테넌트 role과 동일하게 DB 레지스트리 회피([[role-as-code]]).
+
+---
+
+## 트레이드오프
+
+- 신원 평면이 둘(tenant + operator) → 약간의 복잡도. 대신 격리·감사·최소권한을 얻는다.
+- 운영자 인증 인프라(MFA/IdP)가 필요하다.
+
+## 전환 조건
+
+- 운영자 수↑ / SOC2 등 컴플라이언스 → C(외부 IAM SSO로 인증 위임).
+
+---
+
+## 관련 문서
+
+- [[cross-tenant-separation]] — 운영자 cross-tenant 도달이 따르는 아키텍처 분리
+- [[break-glass]] — 운영자 긴급 쓰기(override) 경로
+- [[role-as-code]] — operator_role→action 매핑도 코드 상수
+- [[requirements]] — §6 운영 가능성 OPER-1·OPER-2·SUPP-1
+> 소스 문서
+- [[schema-reference]] — §H 보안, §M DB 계정 최소권한 (operator 계정 분리)

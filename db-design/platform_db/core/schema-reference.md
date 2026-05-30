@@ -1,7 +1,21 @@
+---
+type: core
+aliases:
+  - 스키마 레퍼런스
+  - schema reference
+  - DDL
+tags:
+  - platform-db
+  - core
+  - schema
+  - ddl
+  - erd
+---
+
 # platform_db — 스키마 레퍼런스
 
-> 작성일: 2026-05-28 · 유지: dennis  
-> 진입점: [`architecture.md`](architecture.md) (개요·결정·운영) · 검증: [`requirements.md`](requirements.md) (요구사항·BDD)
+> 작성일: 2026-05-28 
+> 진입점: [[architecture]] (개요·결정·운영) · 검증: [[requirements]] (요구사항·BDD)
 >
 > **이 문서**: `platform_db`의 기술 레퍼런스 — DB 토폴로지·ERD·스키마 DDL·3-gate·billing 흐름·멀티테넌시·보안·consent 모델.  
 > "왜/운영"은 architecture.md, "요구/검증"은 requirements.md.
@@ -149,7 +163,7 @@ CREATE TABLE identity_user (
   phone_verified_at TIMESTAMP,
   type              ENUM('HUMAN','SERVICE','SYSTEM') NOT NULL DEFAULT 'HUMAN',
   status            ENUM('ACTIVE','SUSPENDED','DELETED') NOT NULL DEFAULT 'ACTIVE',
-  -- DORMANT: 열린결정(architecture.md §15.5) — 법 의무 아님, 제품 정책 결정 후 ENUM 추가
+  -- DORMANT: 열린결정(architecture.md §5.3) — 법 의무 아님, 제품 정책 결정 후 ENUM 추가
   perm_version      BIGINT UNSIGNED NOT NULL DEFAULT 1,
   created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
@@ -192,8 +206,8 @@ CREATE TABLE user_profile (
 CREATE TABLE organization (
   pk           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   public_id    CHAR(26)       NOT NULL,              -- ULID
-  type         ENUM('ACADEMY','COMPANY','TEAM','PERSONAL') NOT NULL,
-  -- 현재: ENUM 4종. 향후: org_kind VARCHAR(30)+CHECK로 전환 (service-agnostic tenant)
+  type         ENUM('COMPANY','TEAM','PERSONAL') NOT NULL,
+  -- ACADEMY 제거(서비스 종류는 org_entitlement.service가 결정). 향후: org_kind VARCHAR(30)+CHECK로 전환
   slug         VARCHAR(50)    NOT NULL DEFAULT '',
   name         VARCHAR(100)   NOT NULL,
   status       ENUM('ACTIVE','SUSPENDED','CLOSED') NOT NULL DEFAULT 'ACTIVE',
@@ -207,21 +221,21 @@ CREATE TABLE organization (
 ```
 
 **설계 포인트**:
-- `type` 컬럼: 현재 ENUM. 향후 `org_kind VARCHAR(30)+CHECK`로 전환 — service-agnostic tenant로 만들기 위함
-- 서비스 접근 권한은 `org_entitlement.service`에서 결정. org 타입과 분리
+- **구현됨**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
+- ⚠️ **여전히 ENUM**: `org_kind VARCHAR(30)+CHECK` 전환(완전 service-agnostic)은 미완. org.type은 저빈도 변경이라 ENUM 유지가 당장 큰 비용은 아니나, D6 원칙(VARCHAR+CHECK)과는 부분 불일치.
 
 ## D.4 membership
 
 ```sql
 CREATE TABLE membership (
-  user_pk  BIGINT UNSIGNED NOT NULL,
-  org_pk   BIGINT UNSIGNED NOT NULL,
-  role     ENUM('OWNER','DIRECTOR','TEACHER','MEMBER','STUDENT','PARENT') NOT NULL,
-  -- 현재: academy 도메인 역할 포함. 향후: platform_role('OWNER','ADMIN','MEMBER','SERVICE') 분리
-  status   ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY pk_membership (user_pk, org_pk),          -- 복합 PK
-  INDEX idx_membership_org_role (org_pk, role),
+  user_pk       BIGINT UNSIGNED NOT NULL,
+  org_pk        BIGINT UNSIGNED NOT NULL,
+  platform_role ENUM('OWNER','MEMBER','SERVICE') NOT NULL DEFAULT 'MEMBER',
+  -- 서비스 무관 테넌트 권위만 표현. 도메인 역할은 service_membership.role_code(D.4a)
+  status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_pk, org_pk),
+  INDEX idx_membership_org_platform_role (org_pk, platform_role),
   INDEX idx_membership_user (user_pk),
   CONSTRAINT fk_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk),
   CONSTRAINT fk_mbr_org  FOREIGN KEY (org_pk)  REFERENCES organization(pk)
@@ -230,7 +244,30 @@ CREATE TABLE membership (
 
 **설계 포인트**:
 - 복합 PK `(user_pk, org_pk)` → 1 user = N org 멤버십 자연 지원
-- 향후: `role` → `platform_role ENUM('OWNER','ADMIN','MEMBER','SERVICE')` + `service_membership` 별도 테이블
+- **구현됨**: `role` → `platform_role`(테넌트 권위) + `service_membership`(서비스 도메인 역할) 2단 분리 완료.
+- ⚠️ **`ADMIN` 미채택**: 초기 D1 명세는 `OWNER/ADMIN/MEMBER/SERVICE`였으나 구현은 `OWNER/MEMBER/SERVICE`로 단순화(owner 아닌 사람은 전부 MEMBER, 관리 권한은 service_membership 역할/delegation으로 표현). org 레벨 비-owner 관리자 수요가 생기면 `ADMIN` 재도입 재검토.
+
+## D.4a service_membership (신규)
+
+```sql
+CREATE TABLE service_membership (
+  user_pk    BIGINT UNSIGNED NOT NULL,
+  org_pk     BIGINT UNSIGNED NOT NULL,
+  service    VARCHAR(50) NOT NULL,              -- 'ACADEMY', 'MARKET', …
+  role_code  VARCHAR(50) NOT NULL,              -- 'DIRECTOR', 'TEACHER', 'STUDENT'
+  status     ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (user_pk, org_pk, service),
+  INDEX idx_service_membership_org_service (org_pk, service),
+  INDEX idx_service_membership_user_service (user_pk, service)
+);
+```
+
+**설계 포인트**:
+- 서비스별 도메인 역할 격리(D1) — academy/market/agent 역할 어휘 충돌 방지.
+- `role_code VARCHAR` → 새 서비스 추가 시 마이그레이션 없이 확장(role 어휘는 코드 상수 `ROLE_PERMISSION[service]`가 권위).
+- 조회: `WHERE user_pk=? AND org_pk=? AND service='ACADEMY'` → `role_code` 반환.
+- `membership`과 1:1 대응(같은 user_pk/org_pk) + `service` 차원만 추가.
 
 ## D.5 membership_invite
 
@@ -239,7 +276,7 @@ CREATE TABLE membership_invite (
   pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   org_pk     BIGINT UNSIGNED NOT NULL,
   email      VARCHAR(255) NOT NULL,
-  role       ENUM('OWNER','DIRECTOR','TEACHER','MEMBER','STUDENT','PARENT') NOT NULL,
+  role_code  VARCHAR(50)  NOT NULL,                   -- ENUM → VARCHAR. 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
   token      CHAR(43)     NOT NULL,                   -- URL-safe base64(32bytes)
   status     ENUM('PENDING','ACCEPTED','EXPIRED','REVOKED') NOT NULL DEFAULT 'PENDING',
   invited_by BIGINT UNSIGNED NOT NULL,
@@ -259,15 +296,15 @@ CREATE TABLE delegation_grant (
   grantor_pk  BIGINT UNSIGNED NOT NULL,
   grantee_pk  BIGINT UNSIGNED NOT NULL,
   org_pk      BIGINT UNSIGNED NOT NULL,
-  capability  VARCHAR(50) NOT NULL,
-  -- 현재: academy 6종 고정값. 향후: capability_code VARCHAR(100) + <service>.<action> 네임스페이스
+  capability  VARCHAR(100) NOT NULL,
+  -- <service>.<action> 네임스페이스 적용. 향후: capability_code로 컬럼명 변경 검토
   scope_json  JSON,
   status      ENUM('ACTIVE','REVOKED') NOT NULL DEFAULT 'ACTIVE',
   expires_at  TIMESTAMP,
   created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
   CONSTRAINT chk_capability CHECK (capability IN (
-    'PUBLISH_VIDEO','APPROVE_VIDEO','VIEW_ALL_LECTURES',
-    'MANAGE_SCHEDULE','MANAGE_MEMBERS','VIEW_BILLING'
+    'ACADEMY.PUBLISH_VIDEO','ACADEMY.APPROVE_VIDEO','ACADEMY.VIEW_ALL_LECTURES',
+    'ACADEMY.MANAGE_SCHEDULE','ACADEMY.MANAGE_MEMBERS','ACADEMY.VIEW_BILLING'
   )),
   INDEX idx_delegation_grantee_org (org_pk, grantee_pk, status),
   INDEX idx_delegation_grantor (grantor_pk),
@@ -278,8 +315,8 @@ CREATE TABLE delegation_grant (
 ```
 
 **설계 포인트**:
-- `capability` 현재 6개 고정값 + CHECK constraint
-- 향후: `capability_code VARCHAR(100)` + 네임스페이스 `<service>.<action>` 패턴으로 전환
+- **구현됨**: `ACADEMY.<action>` 네임스페이스 적용 완료(6종). role→capability 매핑은 코드 상수가 권위.
+- ⚠️ **CHECK가 여전히 하드코딩**: 멀티서비스(`MARKET.<action>` 등) 추가 시 CHECK 목록을 마이그레이션으로 확장해야 함 — 네임스페이스는 붙였으나 "마이그레이션 없는 개방"(D6 정신)은 아직 아님.
 
 ## D.7 org_relation
 
@@ -333,6 +370,7 @@ CREATE TABLE audit_log (
 - `ip VARBINARY(16)`: PIPA 개인정보 처리방침 감사 요건
 - `created_at DATETIME` (TIMESTAMP 아님): MySQL 8.0에서 `PARTITION BY RANGE COLUMNS`에 TIMESTAMP 미지원 버그 회피 — PostgreSQL에서는 불필요한 우회
 - WORM 원칙: 이 테이블은 INSERT만. UPDATE·DELETE 금지
+- ⚠️ **파티션 자동 추가 미구현**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. 구현 시 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
 
 ---
 
@@ -406,7 +444,7 @@ CREATE TABLE org_entitlement (
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   CONSTRAINT chk_entitlement_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
   UNIQUE KEY uq_org_product (org_pk, product_code),
-  INDEX idx_org_service_status (org_pk, service, status),
+  INDEX idx_org_service_status (org_pk, service, status, valid_until),  -- Gate B 핫패스 (R8 자문 반영)
   INDEX idx_entitlement_expiry (valid_until, status),  -- 만료 배치: WHERE valid_until < NOW() AND status='ACTIVE'
   CONSTRAINT fk_ent_org FOREIGN KEY (org_pk) REFERENCES organization(pk)
 );
@@ -438,7 +476,8 @@ CREATE TABLE org_subscription (
   cancelled_at         TIMESTAMP,
   created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  INDEX idx_org_subscription_org_status (org_pk, status)
+  INDEX idx_org_subscription_org_status (org_pk, status),
+  INDEX idx_org_subscription_external_sub_id (external_sub_id)  -- PG webhook이 external_sub_id로 구독 조회
 );
 ```
 
@@ -494,6 +533,8 @@ CREATE TABLE billing_event (
 ```
 
 **설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only.
+- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, 후속 마이그레이션.
+- **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.17 payment_ledger
 
@@ -517,6 +558,8 @@ CREATE TABLE payment_ledger (
 ```
 
 **설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지.
+- `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
+- **FK 없음(의도적)**: billing 고write·append-only 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.18 pg_webhook_event
 
@@ -530,9 +573,15 @@ CREATE TABLE pg_webhook_event (
   status       ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED') NOT NULL DEFAULT 'RECEIVED',
   processed_at TIMESTAMP,
   created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_provider_event (pg_provider, event_id)  -- 멱등 보장
+  UNIQUE KEY uq_provider_event (pg_provider, event_id),  -- 멱등 보장
+  INDEX idx_pg_webhook_status (status, created_at)       -- 재처리 워커: WHERE status='FAILED' (R8 자문)
 );
 ```
+
+**설계 포인트**:
+- `pg_provider ENUM`: `MANUAL` 제외 — 수동 결제는 webhook이 없으므로 의도적 제외 (org_subscription·payment_ledger와 달리 MANUAL 항목 없음)
+- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 자문). 후속 마이그레이션.
+- **FK 없음(의도적)**: billing 고write 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.19 outbox_event
 
@@ -559,28 +608,32 @@ CREATE TABLE outbox_event (
 ```
 HTTP 요청
   ↓
-FirebaseAuthGuard           → JWT verify, firebase_uid 추출
+FirebaseJwtGuard             → JWT verify, allMemberships custom claims 주입
+  ↓                             (firebase_uid · orgPk · service · roleCode 포함)
+[GateAGuard — 🧊 Icebox]     → DB 실시간 membership 재검증 (미구현)
+  ↓                             현재는 JWT claims로 간접 커버 — 멤버십 취소 후 최대 ~1h stale window
+GateBGuard                   → x-org-pk 헤더 → allMemberships 매칭 → checkGateB(orgPk, service)
+  ↓                             헤더 없으면 memberships[0] 폴백 (billing 경로 호환)
+AcademyPolicyGuard           → Gate C: CASL ability 빌드 (RBAC/ReBAC/ABAC 통합)
   ↓
-AcademyScopeInterceptor     → X-Org-Pk 헤더 → org_pk 바인딩, Gate A (membership 확인)
-  ↓
-AcademyPolicyGuard          → Gate B (entitlement 확인) + Gate C (CASL ability 빌드)
-  ↓
-@CheckAbility 데코레이터    → can(action, resource) 평가
+AbilityGuard / @CheckAbility → can(action, resource) 평가
   ↓ (Sensitive write)
-@VerifyOnDb 데코레이터      → DB 재검증 (stale JWT claims 방어)
+@VerifyOnDb                  → DB 재검증 (stale JWT claims 방어)
   ↓
-비즈니스 로직
-  ↓
-audit_log INSERT
+비즈니스 로직 → audit_log INSERT
 ```
+
+> ⚠️ **Gate A 현황(솔직히)**: 실시간 DB 멤버십 재검증 가드(`GateAGuard`)는 **미구현(Icebox)**. 현재는 Firebase custom claims(`allMemberships`)로 간접 커버하므로, 멤버십이 취소돼도 **토큰 만료 전(~1h)까지 통과**할 수 있다. 민감 쓰기는 `@VerifyOnDb`(E.5)로 즉시 차단해 이 창을 메운다.
 
 ## E.2 Gate별 상세
 
 ### Gate A — 소속
 
 ```typescript
-membership = await getActiveMembership(userPk, orgPk);
+// platform_role(테넌트 권위) 확인. 서비스 도메인 역할은 service_membership.role_code
+membership = await getActiveMembership(userPk, orgPk);   // platform_role, status
 // membership.status !== 'ACTIVE' → 403
+// ⚠️ 실시간 재검증(GateAGuard)은 Icebox — 현재 JWT claims로 커버, 취소 시 ~1h stale (E.1 주석)
 ```
 
 ### Gate B — 결제
@@ -598,27 +651,46 @@ if (!pass) throw PaymentRequiredException();
 
 **구현**: `checkGateB(orgPk, service: EntitlementService = "ACADEMY")` — service 파라미터로 다중 서비스(ACADEMY/MARKET/AGENT/YOUTUBE/STORE) 지원. 미전달 시 ACADEMY 기본값. 신규 서비스는 service 파라미터를 명시적으로 전달해야 함.
 
-**인덱스 요건**: `(org_pk, service, status, valid_until)` — 복합 인덱스 필요. 현재 `idx_org_service_status(org_pk, service, status)`에 valid_until 추가 필요(불변식 #9).
+**인덱스**: `idx_org_service_status (org_pk, service, status, valid_until)` — R8 자문 반영, valid_until 포함 확정(불변식 #9). DDL §D.12 수정 완료.
 
 ### Gate C — 정책 (CASL)
 
 ```typescript
-// RBAC: role → action 매핑 (코드 상수 ROLE_PERMISSION)
-// ReBAC: delegation_grant 확인
+// RBAC: service_membership.role_code → ROLE_PERMISSION[service][roleCode] (코드 상수)
+// ReBAC: delegation_grant.capability (현행: 'ACADEMY.<action>' 네임스페이스)
 // ABAC: resource 소유권 (lecture.teacher_pk === userPk)
-ability = buildAbility(membership, delegationGrants, entitlement);
+ability = buildAbility(serviceRole, delegationGrants, entitlement);
 if (!ability.can(action, resource)) throw ForbiddenException;
 ```
 
-## E.3 Sensitive Write (DB 재검증)
+## E.3 perm_version 동기화
+
+역할 변경 시 `organization.perm_version`을 bump한다. Firebase custom claims 기반이라 stale window(~1h)가 존재하며, 즉시 반영이 필요하면 클라이언트가 `forceRefresh(true)`를 호출한다.
+
+```
+학원장: PATCH /members/:id/role
+  → bumpPermVersion(orgPk) → UPDATE organization SET perm_version = perm_version + 1 → 200
+다음 토큰 갱신(~1h) 시 custom claims 반영 / 즉각 적용은 forceRefresh(true)
+```
+
+## E.4 위임 권한 (delegation_grant)
+
+```
+학원장: POST /delegation-grants { grantee: teacherPk, capability: 'ACADEMY.MANAGE_MEMBERS' }
+  → INSERT delegation_grant → bumpPermVersion(orgPk) → 201
+강사가 회원 관리 API 호출
+  → Gate C: ability.can('ACADEMY.MANAGE_MEMBERS', ...) → delegation에 있으면 허용
+```
+
+## E.5 Sensitive Write (DB 재검증)
 
 ```
 JWT claims는 TTL 1h 동안 stale 가능 (revoke 후에도 유효)
 → publish/delete/결제 등 sensitive write는 @VerifyOnDb로 DB 최신 상태 재확인
-→ perm_version 불일치 → 강제 refresh
+→ perm_version 불일치 → 강제 refresh. Gate A Icebox의 stale window를 메우는 핵심 방어선.
 ```
 
-## E.4 fail-closed 원칙
+## E.6 fail-closed 원칙
 
 ```typescript
 // JWT claims 파싱 실패 또는 permission_version 불일치 → 무조건 401
@@ -875,7 +947,9 @@ CREATE TABLE user_consent_event (
 );
 ```
 
-> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 phase-17 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
+> **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치(§12.5)는 컬럼 활성화 이후 운영.
+
+> **파티셔닝 검토(P2, R8 자문)**: append-only + 5년 보존 후 파기 패턴은 `audit_log`와 동일. 파티션 DROP이 5년 후 파기의 가장 깔끔한 구현 → `audit_log` 월별 RANGE 파티셔닝 동일 패턴 적용 고려.
 
 **현재 상태 쿼리** (최신 동의 상태):
 ```sql
@@ -1112,24 +1186,63 @@ CREATE TABLE store_purchase (
 
 ---
 
-# N. 자체 비교 분석 — 무엇이 바뀌었나
+# N. 운영 안전장치 (Operational Safeguards)
+
+> 스키마는 만들어졌으나 **운영 안전장치**가 부족하다. *"DB가 구조적으로 강제하는 것"* vs *"앱/배치가 강제해야 하는 것(+ 현재 갭)"*을 분리해 드러낸다. 운영 모델 전체는 [[operability]].
+
+## N.1 DB가 강제하는 것 (구조적 보장)
+
+| 보장 | 메커니즘 | 상태 |
+|---|---|---|
+| 테넌트 격리 | `org_pk NOT NULL` + 질의 필터 강제 | ✅ |
+| 결제 멱등 | `UNIQUE(idempotency_key)` · `UNIQUE(pg_provider, event_id)` | ✅ |
+| append-only | `audit_append` 계정 INSERT-only + 전 계정 DELETE 권한 0(§M) | 🟡 GRANT 점검 CI 필요 |
+| 참조 정합 | 스키마 내 FK(cross-schema는 앱 검증, [[fk-strategy]]) | ✅ |
+| 자기참조 차단 | `chk_no_self_ref`(org_relation) | ✅ |
+| 결제↔권한 원자성 | 단일 InnoDB 트랜잭션(§F.1) | ✅ |
+
+## N.2 앱/배치가 강제해야 하는 것 (DB로는 부족 — 갭)
+
+| 안전장치 | 현재 | 위험 | 보강 |
+|---|---|---|---|
+| **마지막 OWNER 보호** | 앱 트랜잭션만, **DB 무방비** | 유일 OWNER 삭제 → org 좀비화 | 앱 가드 + 모니터링(N.3) |
+| append-only 위반 | GRANT 누락 시 UPDATE 가능 | 감사 증거 훼손 | DDL 단계 GRANT 점검 CI |
+| 파티션 자동 추가 | 미구현(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
+| sweeper(outbox/webhook) | 미구현 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
+| webhook reconciliation | 미구현 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |
+| 보존·파기 | 미구현 | PIPA 5년 후 파기 안 됨 | 보존 매트릭스 배치(O3) |
+| operator 계정 분리 | 미설계 | 운영자=OWNER 수렴 | operator plane([[operator-plane]]) |
+| entitlement 캐시 미스 | 명문화 안 됨 | Redis 장애 시 거동 불명 | fail-open 아님 — DB 직격(느려도 정상, O5) |
+
+## N.3 마지막 OWNER 보호 — DB 레벨이 약한 이유
+
+MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적으로 못 건다**. 트리거는 가능하나 root가 DROP 가능·우회되어 채택하지 않는다(감사 트리거와 동일 이유, §H.2).
+
+→ **다층 방어**:
+- **1차 (앱 트랜잭션)**: `SELECT COUNT(*) ... WHERE platform_role='OWNER' AND status='ACTIVE' FOR UPDATE` → 1이면 마지막 OWNER 강등/삭제 거부.
+- **2차 (모니터링)**: `platform_role='OWNER'` ACTIVE count = 0 인 org 탐지 → 알림([[operability]] O6).
+- 트리거·DB 제약은 미채택(MySQL 한계 + root 우회).
+
+---
+
+# O. 자체 비교 분석 — 무엇이 바뀌었나
 
 자체 비교 분석 (R0–R7, 8라운드) 결과로 확정된 주요 설계 변경 사항.
 
-## N.1 핵심 변경 비교표
+## O.1 핵심 변경 비교표
 
 | 항목 | 초기 설계 | 자체 비교 분석 결과 | 결정 |
 |---|---|---|---|
-| `organization.type` | ENUM(4종) 고정 | VARCHAR+CHECK — service-agnostic tenant | 향후 마이그레이션 |
-| `membership.role` | 도메인 역할 혼재 | platform_role 분리 + service_membership | 향후 마이그레이션 |
-| `delegation_grant.capability` | 6종 고정 CHECK | `<service>.<action>` 네임스페이스 | 향후 마이그레이션 |
+| `organization.type` | ENUM(4종) 고정 | ENUM(3종, ACADEMY 제거). `org_kind VARCHAR+CHECK`는 향후 | 🟡 부분 구현 (D5 일부) |
+| `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **구현됨** |
+| `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **구현됨** |
 | org 인가 판단 소스 | payment_ledger 직접 | org_entitlement SSOT | **확정 구현** |
 | 감사 로그 동의 이력 | mutable boolean | append-only 이벤트 테이블 | **확정 설계** |
 | 결제·권한 원자성 | 별개 트랜잭션 | 단일 트랜잭션 (§F.1) | **확정 구현** |
 | 멀티테넌시 격리 | 앱 레이어 관례 | org_pk NOT NULL + CI 린트 P1 | 진행 중 |
 | PG webhook 멱등 | 앱 레이어 처리 | UNIQUE(provider, event_id) + append | **확정 구현** |
 
-## N.2 MySQL vs PostgreSQL 구조적 차이
+## O.2 MySQL vs PostgreSQL 구조적 차이
 
 자체 분석에서 도출된 MySQL 선택의 구조적 제약:
 

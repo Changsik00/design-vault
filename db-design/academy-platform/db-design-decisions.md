@@ -1,484 +1,597 @@
-# DB 설계 결정 문서 — 장기 운영 관점 재검토
+# platform_db — 아키텍처 & 의사결정 핸드북
 
-> 작성일: 2026-05-25
-> 목적: MVP만 보고 결정하면 나중에 스키마 변경이 리스키한 항목을 선별해 장기 운영 기준으로 결정한다.
-> BDD F1~F27, 페르소나(학원장/강사/학생/학부모), 플랫폼 로드맵(v0.1~v3.0)을 교차 검토.
+> 작성일: 2026-05-28 · 유지: dennis
+>
+> **이 문서가 무엇인가**: `platform_db` 설계의 "무엇을·왜·무엇을 일부러 안 했나·운영 중 무슨 일이 생기면 어떻게 하나"를 한 곳에 담은 핸드북. ADR + 설계 결정 + 운영 플레이북을 통합한다.
+>
+> **누구를 위한 것인가**: 이 코드베이스를 새로 맡는 엔지니어 / 보안·컴플라이언스 검토자 / 다음 서비스(agent·market·store·fitness)를 붙일 개발자
+>
+> **문서 지도 (총 3개, 이 문서가 진입점)**:
+> - **이 문서 `architecture.md`** — 개요·설계 여정(R0~R7)·결정(D1~D12)·자문처리·운영 플레이북·부록 ADR
+> - [`schema-reference.md`](schema-reference.md) — ERD·스키마·3-gate·billing 흐름·consent 모델
+> - [`requirements.md`](requirements.md) — 요구사항 추적표·BDD 시나리오
 
 ---
 
-## 0. 검토 기준
+## 1. 한눈에 — 이 시스템은 무엇인가
 
-스키마 변경 리스크는 두 가지로 나뉜다.
+회사의 여러 SaaS(academy / agent / market / store / fitness)를 받치는 **공통 플랫폼 코어 DB**다.
 
-| 리스크 | 예시 | 장기 비용 |
+```
+                  ┌──────────────── platform_db (공통 코어, 단일 InnoDB) ──────────────┐
+                  │  identity · authZ(membership/role/capability) · entitlement        │
+   academy-api ──▶│  product · billing · consent · audit · api_key                    │◀── @aiagent/db-platform 패키지로만 접근
+   agent-api   ──▶│  = "누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의"의 SSOT │
+   market-api  ──▶└────────────────────────────────────────────────────────────────────┘
+   store-api   ──▶   academy_db / agent_db / market_db / store_db  (서비스 도메인, org_pk 격리)
+   fitness-api ──▶   + Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)
+```
+
+**한 줄 철학**: *공통은 묶고(strong consistency), 도메인은 뗀다(독립 확장)* — **비대칭 분리**.
+
+> **🛢️ MySQL 사용 배경**: MySQL 8은 회사 표준 인프라 규약에 따른 선택으로 기술적 선호의 결과가 아니다. DB를 자유롭게 선택할 수 있다면 **PostgreSQL을 권장**한다.
+>
+> | 이유 | 상세 |
+> |---|---|
+> | **RLS 네이티브 지원** | `CREATE POLICY org_isolation ON table USING (org_pk = ...)` — D10 "MySQL RLS 없음 → CI 린트 보강" 우회로가 처음부터 불필요 |
+> | **JSONB GIN 인덱스** | `feature_limits`, `meta_json`, `payload_json`에 `@>` 연산자 인덱스 → MySQL JSON 대비 대폭 빠른 쿼리 |
+> | **파티셔닝 완전 지원** | `audit_log.created_at`에 TIMESTAMP 그대로 사용 가능. MySQL 8.0의 `PARTITION BY RANGE COLUMNS` + TIMESTAMP 미지원 버그로 인해 DATETIME 우회가 필요 없어짐 |
+> | **`pgcrypto` 내장** | 감사 해시 체이닝(D11 `prev_hash`/`row_hash`)을 DB 네이티브 SHA-256으로 처리. 앱 레이어 불필요 |
+> | **`FOR UPDATE SKIP LOCKED`** | outbox_event 워커 lock 경합 없는 네이티브 지원 |
+> | **Drizzle PG 방언 풍부** | GENERATED ALWAYS 컬럼, CTE with writes, 더 많은 타입 지원 |
+>
+> 현재는 MySQL + Drizzle 스택이 확립되어 있어 전환보다 최적화를 선택한다. **D10 "MySQL은 RLS 없음"은 PostgreSQL을 사용했다면 발생하지 않았을 구조적 제약임을 명시한다.**
+
+---
+
+## 2. 설계 여정 — 왜 이렇게 됐나
+
+이 설계는 8라운드의 검토·자문을 거쳐 수렴했다.
+
+| 라운드 | 무엇을 물었나 | 무엇이 바뀌었나 |
 |---|---|---|
-| **구조 변경** | PK 타입 교체, 컬럼 삭제, FK 재배선 | ALTER TABLE + 전체 앱 수정 + 데이터 마이그레이션 |
-| **의미 변경** | 컬럼 용도 재해석, NULL 의미 추가 | 버그 숨김, 감사 추적 혼란 |
+| **R0** 기존 설계 | identity/billing/권한 골격 (ADR-044/041/042/032) | platform_db(공통)+서비스 DB, entitlement=런타임 권위, 3-gate, 결제 단일 트랜잭션 |
+| **R1** 멀티테넌시 | RDB/Qdrant/Neo4j 격리 충분? | org_pk 행 격리 + 분리 트리거 T1~T4. RLS 부재→CI 린트, Qdrant `is_tenant`, Neo4j 멀티홉 강제 |
+| **R2** BDD/사용성 | 요구사항을 다 수용하나? | 골격 수용. **최대 갭 발견: 권한 어휘가 academy에 묶임** |
+| **R3** cross-service 권한 | role/capability를 어떻게 일반화? | **role 2단 분리** + capability 네임스페이스 + role→action 코드 상수 |
+| **R4** 보안 표준 | NIST/OWASP/ISMS-P 충족? | BOLA 프레임워크화, NIST 환경속성, 감사 불변성(해시→WORM). **트리거·JSON블롭 거부** |
+| **R5** 정책·동의 | PIPA/정보통신망법은? | `user_consent_event` append-only, 14세 미만, 제3자 제공 4요건, 철회권 |
+| **R6** 자체 비교 분석 A | 누락은? | 15건 보완(rate-limit·webhook·fan-out·meta schema·perm 전파·SLA·delegation 경계·JWT·키 cadence). **휴면 법폐지 정정** |
+| **R7** 자체 비교 분석 B | 장기 리스크는? | **platform_db 비대화** 경고 → 논리 소유권. break-glass·데이터분류·암호화·Admin SDK 키 |
 
-MVP만 생각하고 결정했다가 나중에 바꿔야 하는 항목 = **지금 결정해야 하는 항목**.
+> **핵심 전환점은 R2→R3**: "데이터 구조는 멀티서비스 준비됐는데 권한 *언어*가 academy MVP에 고정돼 있다"를 발견하고 role을 2단으로 끌어올린 것이 이 설계의 가장 큰 통찰이다.
 
 ---
 
-## 1. `display_name` — `identity_db.user_profile` (신규 테이블)
+## 3. 흔들리지 않는 원칙 (설계 불변식)
 
-### 배경
+### 3.1 현재 불변식 — 코드 검증됨, 위반 PR 반려
 
-- BDD 전 시나리오(F1-01, F3-01, F6-01, F20-03, F26-02 등)에서 사용자 이름 사용
-- Option A 이후 `identity_user`에서 `display_name` 제거됨
-- "어디에 저장할지" 결정이 없는 상태
+1. **Firebase = 인증, 인가 = 우리 DB.** `firebase_uid`는 조회 키일 뿐 PK/FK 아님.
+2. **내부 PK는 BIGINT, 외부 노출은 ULID(`public_id`).** 시퀀셜 PK를 URL·API에 노출 금지.
+3. **모든 도메인 테이블은 `org_pk NOT NULL`.** 예외 없음 — 테넌트 경계는 불변식.
+4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. `org_entitlement`는 billing의 authorization projection이며 Gate B의 유일한 진실 원천.
+5. **`service`는 `VARCHAR(50)` + `CHECK`.** ENUM 아님. 새 서비스 추가 = CHECK 목록 1줄 추가. 현재 허용: `ACADEMY`, `MARKET`, `AGENT`, `YOUTUBE`, `STORE`.
+6. **cross-DB는 아래로만.** `service_db → platform_db` 읽기 OK. 옆으로(`academy_db → store_db`) 금지.
+7. **strong consistency = 단일 서버 트랜잭션. async = outbox.**
+8. **`checkGateB(orgPk, service)`는 서비스를 명시한다.** 기본값 `"ACADEMY"`. 신규 서비스는 `service` 파라미터를 명시적으로 전달.
+9. **Gate B는 `status + valid_until` 복합 체크.** `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > NOW())`. status만 보면 배치 실패 시 영구 무료 위험.
+10. **`org_entitlement.feature_limits`가 런타임 한도의 최종 권위.** `product_feature`·`plan_definition.default_limits`는 entitlement 생성 시 초기값 복사용. 런타임 한도 판단 시 이 두 테이블 직접 조회 금지.
+11. **구독은 N:M.** `subscription_item(subscription_pk, sku_pk)`이 진실 원천. `org_subscription`은 구독 헤더(billing canonical truth)만 담고 sku_pk 단일 FK 보유 금지.
 
-### 장기 시나리오 검토
+파생 표준: `public_id`는 외부 노출 테이블만 · soft-delete 3종(status / deleted_at / append-only) · 금액은 정수 minor unit(float 금지).
 
-| Phase | 상황 |
+### 3.2 설계 목표 — 단계적 마이그레이션 진행 중
+
+> 이 항목들은 R3 자체 분석 결과 채택된 장기 설계 방향이다.
+> **현재 코드와 다르므로** 코드 리뷰 체크리스트가 아닌 *로드맵 체크리스트*로 사용한다.
+
+**G1. role 2단 분리** _(D1 · 현재: 단일 `membership.role` ENUM, 목표: `membership.platform_role` + `service_membership.role_code` 분리)_
+
+> 현재 `membership.role = OWNER | DIRECTOR | TEACHER | MEMBER | STUDENT | PARENT`는 academy 서비스에 특화된 역할 체계다. 멀티서비스 확장 시 새 서비스마다 role이 폭증·충돌한다. 목표 구조: `platform_role`(OWNER/ADMIN/MEMBER — 테넌트 소속 권위)과 `service_membership.role_code`(academy.TEACHER / market.SELLER 등 서비스 도메인 역할)로 분리.
+
+**G2. 권한 어휘 서비스 네임스페이스** _(D2 · 현재: `capability = PUBLISH_VIDEO` 등 평문, 목표: `<service>.<action>`)_
+
+> 현재 `delegation_grant.capability` 값은 academy-only 평문(`PUBLISH_VIDEO`, `APPROVE_VIDEO` 등). 멀티서비스에서 어느 서비스의 권한인지 파싱 불가. 목표: `academy.publish_video`, `market.approve_listing` 등 `<service>.<action>` 네임스페이스. role→action 매핑은 코드 상수(`ROLE_PERMISSION[service][role]`) — DB 레지스트리 저장 금지.
+
+**G3. `organization.type` → service-agnostic `org_kind`** _(D5 · 현재: `type ENUM(ACADEMY, COMPANY, TEAM, PERSONAL)`, 목표: generic kind + `org_entitlement.service` 조합)_
+
+> 현재 `organization.type`에 `ACADEMY`가 포함되어 org 자체가 서비스에 종속됨. 목표: org는 순수 tenant(kind = INDIVIDUAL / TEAM / ENTERPRISE 등), 서비스 접근은 `org_entitlement.service`만으로 판단.
+
+---
+
+## 4. 핵심 결정 12건 (D1~D12)
+
+자문 8라운드(R0~R7)를 통해 수렴한 결정들. 각 결정은 *왜 했고, 무엇을 기각했나*를 함께 적는다.
+
+| ID | 결정 | 구현 상태 | 왜 | 기각/대안 |
+|---|---|---|---|---|
+| **D1** | role 2단: `platform_role` + `service_membership.role_code` | 🟡 **목표** — 현재: `membership.role` ENUM 단일. phase-17 대상 | 서비스마다 role 어휘·hierarchy·matrix가 달라 단일 글로벌 ENUM은 폭증·충돌 | 단일 `membership.role` ENUM(academy 종속) |
+| **D2** | capability 네임스페이스 `<service>.<action>`(`delegation_grant.capability_code`) | 🟡 **목표** — 현재: `capability` 6종 CHECK 고정. phase-17 대상 | academy 어휘(PUBLISH_VIDEO)가 platform에 고착되는 것 방지 | academy-only ENUM |
+| **D3** | role→action 매핑은 **코드 상수**, DB 레지스트리는 P2 | ✅ 구현됨 | DB에 rule 넣으면 디버깅 지옥·traceability 붕괴(Stripe/Linear도 코드) | DB `role_capability` 레지스트리 보류(테넌트 커스텀롤 트리거 시만) |
+| **D4** | 서비스 계정 = `platform_role='SERVICE'` + `api_key` | 🟡 type='SERVICE' ✅, api_key 테이블 phase-17 | 사람·머신 동일 3-gate, 감사 통합 | 글로벌 `AGENT_*` role / 별도 agent 테이블 |
+| **D5** | `organization.org_kind`(generic) + 서비스는 entitlement | 🟡 **목표** — 현재: `type ENUM('ACADEMY','COMPANY','TEAM','PERSONAL')`. phase-17 대상 | org은 tenant, service는 capability — 분리 | `type ENUM(ACADEMY…)` 서비스 종속 |
+| **D6** | service 식별자 `VARCHAR(50)+CHECK` | ✅ 구현됨 | 서비스 추가가 온라인 DDL(CHECK 1줄 추가, 테이블 락 없음) | ENUM(변경 시 테이블 락) |
+| **D7** | `user_consent_event` **append-only 이벤트** | ⚠️ 설계 확정, phase-17 구현 | mutable boolean이면 반복 on/off 이력 소실→PIPA 분쟁 입증 불가 | `granted boolean + revoked_at` |
+| **D8** | `api_key` 하드닝(`allowed_ip_cidr`·`rotated_at`·`revoked_reason`) | ⚠️ 설계 확정, phase-17 구현 | B2B 키 유출 대비(Confused Deputy 방지) | — |
+| **D9** | `permission_snapshot`은 프론트 read-model만 | 🟡 설계 확정, 미구현 P1 | 백엔드 can() 캐싱은 ABAC 조건 오답 캐싱 함정 | 백엔드 권한 오라클 캐싱 |
+| **D10** | 멀티테넌시: RLS 없음→CI 린트, Neo4j 멀티홉 강제, Qdrant `is_tenant` | 🟡 RLS/CI린트 미완, 나머지 ✅ | MySQL은 RLS 없음(정직한 자인) | per-tenant VIEW(수백 테넌트 비현실) |
+| **D11** | 표준보안: BOLA 프레임워크화 / NIST 환경속성 / 감사 해시체이닝→WORM | 🟡 BOLA ✅, 해시체이닝·WORM P1 | 위협모델 기반(OWASP API Top10, ISMS-P) | audit 트리거(root가 DROP 가능→무력), JSON 권한블롭, 복합 UNIQUE 불요 |
+| **D12** | 운영보강: 논리 소유권·secret cadence·break-glass·데이터분류·perm 전파 | 🟡 정책 명시 ✅, break-glass·암호화 P1 | platform_db 비대화·운영자 통제·키 cadence | phone/email 전면암호화, 휴면 법의무(2023 폐지) |
+
+---
+
+## 5. 권한 모델 (3-gate)
+
+### 5.1 3-Layer 구조
+
+```
+Layer 1 인증  : Firebase Auth (누구냐) — JWT, firebase_uid
+Layer 2 소속  : @aiagent/db-platform (어디 소속이냐) — membership tuple
+Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
+```
+
+배포는 Option A(공유 패키지) → 트리거 도달 시 Option B(`platform-api` HTTP 서비스). 인터페이스를 미리 깨끗이 둬서 전환은 *구현 교체*.
+
+### 5.2 3-gate `canXXX` (사람·머신 공통)
+
+```
+0) principal resolve   HUMAN: Firebase→user.pk / MACHINE: api_key→principal_pk
+1) Gate A 소속   membership(principal, org).status = ACTIVE  (+ platform_role)
+2) Gate B 이용권 org_entitlement(org, service).status ∈ {ACTIVE, GRACE} + feature_limit
+3) Gate C 정책   RBAC : service_membership.role_code → ROLE_PERMISSION[service][role] (코드)
+                 ReBAC: delegation_grant(grantee, capability_code, ACTIVE, !expired)
+                 ABAC : resource.owner_pk == principal.pk  +  환경(client_ip 등)
+→ A ∧ B ∧ C → ALLOW, audit_log 기록
+```
+
+- 평가기 단일(CASL). 캐싱은 *입력 블록*(membership/grants/entitlement)만 TTL 60s, **최종 can() 캐싱 금지**.
+- `perm_version` self-healing: 권한 변경→bump→`X-Perm-Version` 불일치→snapshot 재요청. **개인=user_pv / org 전체=org_pv 분리**(thundering herd 회피).
+
+### 5.3 RBAC / ABAC / ReBAC 정의
+
+| 모델 | 의미 | 저장 |
+|---|---|---|
+| RBAC | 직책/소속 | `service_membership.role_code` + 코드 `ROLE_PERMISSION` |
+| ABAC | 속성(소유·테넌트·한도·환경) | 리소스 컬럼 + `org_entitlement.feature_limits` + client_ip |
+| ReBAC | 관계/위임 | `delegation_grant.capability_code`(임퍼소네이션 금지) |
+| 계층 | 조직 위계 | `org_relation`(HQ_BRANCH/HOLDING) — **권한 근거 아님, 명시적 membership만** |
+
+### 5.4 구현 현황
+
+| 함수 | 영역 | 상태 |
+|---|---|---|
+| `getOrganization`, `getUserProfile`, `getUserByFirebaseUid` | identity | ✅ |
+| `getActiveMembership`, `getMembership` | identity | ✅ |
+| `getMembershipInviteByToken`, `acceptMembershipInvite` | identity | ✅ |
+| `getDelegationGrants`, `bumpPermVersion` | identity | ✅ |
+| `getEntitlement`, `getEntitlementByService` | billing | ✅ |
+| `getFeatureLimit`, `getFeatureLimitByProduct` | billing | ✅ |
+| `getPermissionContext`, `checkGateA` | gates | ✅ |
+| `checkGateB(orgPk, service)` | gates | ✅ service 파라미터 지원. 기본값 `"ACADEMY"`. 신규 서비스는 service 명시 필요 |
+
+---
+
+## 6. 데이터 일관성 — 결제·권한이 어긋나지 않는다
+
+### 6.1 Billing Truth → Projection → Authorization
+
+이 설계의 핵심 구조적 결정:
+
+```
+PG Webhook (Stripe/Toss 이벤트 스트림)
+    ↓
+org_subscription  ← Billing Canonical Truth
+  (provider, invoice, retry_count, grace_until,
+   refund, chargeback, trial, cancel_at_period_end, ...)
+    ↓ [이벤트 투영 — 단일 트랜잭션]
+org_entitlement   ← Authorization Projection
+  (status, valid_until, grace_until, feature_limits)
+    ↓
+Gate B            ← can_access? 만 판단. subscription 직접 조회 금지
+```
+
+**왜 분리하나**:
+- `org_subscription`은 billing semantics(provider, invoice, retry 등)가 복잡. Gate B는 "이 org가 지금 서비스를 쓸 수 있나?"만 궁금.
+- 권한 체크마다 billing을 직접 읽으면: auth 느려짐 + billing 장애 전파 + 캐싱 복잡.
+- `org_entitlement`를 projection으로 분리하면: auth는 단일 테이블 조회, billing 장애 격리, JWT/Redis 캐시 단순화.
+
+**eventual consistency 수용**: PG webhook → entitlement 투영 사이 수 초 지연 허용. 취소 직후 짧은 창에 권한이 살아있을 수 있음 — SaaS 표준 베스트 프랙티스.
+
+**영수증 검증 역할**: 최초 구매 직후 point-in-time 검증, webhook 누락 시 fallback, 사용자 수동 복구("구매 복원") 용도. 구독 lifecycle의 continuous synchronization 역할은 webhook.
+
+### 6.2 결제 단일 트랜잭션
+
+```sql
+-- 결제 성공 시 platform_db 단일 트랜잭션:
+BEGIN;
+  INSERT payment_ledger (CHARGE, idempotency_key);
+  UPDATE org_subscription SET status = ...;
+  INSERT org_entitlement ... ON DUPLICATE KEY UPDATE status, feature_limits, valid_until;
+  UPDATE organization SET perm_version = perm_version + 1;
+  INSERT outbox_event (event_type='subscription.activated', ...);
+COMMIT;
+```
+
+- 단일 InnoDB라 **"결제됐는데 권한 미반영" 창이 0** (2PC·Kafka 불필요). SaaS 최악 UX를 구조적으로 차단.
+- 멱등 2중: webhook `event_id` UNIQUE + payment `idempotency_key` UNIQUE.
+- 환불은 append-only(REFUND row, 기존 UPDATE 금지). PG는 adapter 추상화(Toss/Stripe/PayPal/Manual).
+- async 부수효과(영수증·알림·검색 인덱싱)만 outbox → eventual consistency.
+
+---
+
+## 7. 정책 & 동의
+
+- **`user_consent_event` append-only**: `user × consent_type × terms_version × action(GRANTED/REVOKED) × meta_json × prev_hash/row_hash`. 반복 on/off 이력 전부 보존.
+- **consent_type 네임스페이스**: `platform.*`(계정) / `pg.*`(결제 제3자) / 서비스 `*`(도메인 DB).
+- **전자서명법 §3**: 약관 체크박스 동의 = 전자서명으로서 서면 서명과 동일한 법적 효력. `user_consent_event` row가 그 기록이며 법적 증거로 사용 가능.
+- **`platform.content_ownership`**: TEACHER role 취득 시 표시. "내가 플랫폼에서 만든 콘텐츠의 소유권은 나에게 있으며 이전할 수 있다"에 동의. 미동의 시 admin 데이터 이전 처리 불가.
+- **`platform.data_transfer`**: 강사 학원 이전 시 admin 처리 전 강사 본인 동의. 동의 없는 이전 = 법적 근거 없는 데이터 변경.
+- **데이터 이전 범위**: 본인 정보(identity·profile·멤버십)는 항상 이전 가능. 학생·수업기록·결제이력은 org 소유로 이전 불가. `org_pk NOT NULL` 격리 구조가 이 경계를 강제함.
+- **만 14세 미만(PIPA §22)**: 가입 차단 + 법정대리인 동의(`platform.under14_guardian` + guardian/서명 meta). **법적 필수.**
+- **제3자 제공(PIPA §17)**: 4요건(recipient/purpose/items/retention) `meta_json` 정형화 + JSON Schema 검증 + canonical(RFC 8785).
+- **철회권(§37)**: REVOKED 이벤트 + 즉시 perm_version 동기화.
+- **마케팅(정보통신망법 §50)**: 채널 세분화 옵트인/아웃.
+- **보존 5년 + 해시 사슬**(tamper-evident). 약관 본문은 S3/CMS, DB엔 `terms_version`만.
+- 4분류 위치 규칙: 계정→platform / 도메인→서비스 DB / 제3자→컨텍스트 분할 / 약관본문→S3.
+
+---
+
+## 8. 멀티테넌시 & 격리
+
+**전략: Pool 모델 (공유 DB + `org_pk` 행 격리)**
+
+| 저장소 | 격리 방법 | 구현 상태 |
+|---|---|---|
+| MySQL | `org_pk NOT NULL` + 모든 조회 `WHERE org_pk` 필수 | ✅ 스키마 레벨 강제. 모든 gate 함수가 orgPk 필수 파라미터. 🟡 CI 린트 미완 |
+| Qdrant | `org_id` payload 필터 강제 | ✅ 색인/검색 모두 `org_id` must 필터. 🟡 `is_tenant` 최적화 마커 미추가 |
+| Neo4j | `orgId` 노드 속성 + Cypher 강제 | ✅ 노드 생성·조회·멀티홉 모두 `orgId` 강제. 🟡 APOC 쓰기측 교차 차단 P1 예정 |
+| Redis | key prefix `org:{org_pk}:...` | ✅ |
+
+**격리 자가진단 DoD**:
+- ① 개발자가 org_pk 빼먹으면 다른 테넌트 데이터 유출되나? → **차단**(Not NULL + gate 함수 필수)
+- ② 클라가 tenant_id 위조하면 뚫리나? → **차단**(JWT 검증 후 server-side orgPk 조회)
+
+**분리 트리거** — 하나라도 충족되면 분리 착수:
+
+| 트리거 | 조건 | 행동 |
+|---|---|---|
+| T1 | 단일 org가 고속 테이블 행의 20% 이상 | 해당 테넌트 전용 DB |
+| T2 | 대화/로그 P99 > 500ms | 해당 테이블 별 인스턴스 |
+| T3 | usage_log 월 500만+/50GB+ | ClickHouse/BigQuery 이관 |
+| T4 | ISMS-P/GDPR 계약 | 물리 격리 DB·리전 + 감사 외부 WORM |
+
+분리 단계: Read replica → 고속 테이블 분리 → DB-per-large-tenant. `org_pk` 단위라 org 무중단 마이그레이션 가능.
+
+cross-tenant 집계는 **아키텍처 분리**(`internal/` 모듈 / `*-admin` 서비스) — **Admin role 금지**(ADR-042, 공격 표면 0).
+
+---
+
+## 9. 보안
+
+- **OWASP BOLA**: org_pk 질의 강제를 Drizzle base repo로 **프레임워크화**(복합 UNIQUE 불요 — 실체는 질의 필터).
+- **NIST SP 800-162 환경속성**: api_key `allowed_ip_cidr` 컨텍스트 + Gateway/WAF IP 강제.
+- **감사 불변성(ISMS-P/SOC2)**: app 계정 UPDATE/DELETE 권한 제거 + **해시 체이닝** → **외부 WORM**(S3 Object Lock). *트리거는 root가 DROP 가능해 채택 안 함.*
+- **Secret/Key**: KMS(refresh_token·서명PDF), 평문/`.env` git 금지. rotation cadence(§12.3). **Firebase: Web API Key=공개(App Check+도메인제한), Admin SDK 키=회전 대상.**
+- **데이터 분류**: PII / 민감(fitness health) / 미성년(guardian) / 결제연계 → 차등 보호. 선별 app-level 암호화(secret·guardian만, phone/email은 KMS+접근통제).
+- **Break-glass**: §12.4 참조.
+
+---
+
+## 10. 설계 비교 분석 기록 — 채택 / 수정 / 거부
+
+> 자체 비교 분석 결과를 *그대로 받아들이지 않고* 어떻게 판단했는지. 거부·정정이 독립적 판단의 증거다.
+
+### 10.1 채택
+
+| 분석 결과 | 출처 | 채택 형태 |
+|---|---|---|
+| role 2단 분리 / capability 네임스페이스 | R3 | D1·D2 |
+| Qdrant `is_tenant` 인덱스 / Neo4j 멀티홉 강제 | R1 | D10 |
+| api_key 하드닝 / 감사 외부 WORM | R4·R7 | D8·D11 |
+| platform_db 비대화 → 논리 소유권 | R7 | D12, §12.1 |
+| break-glass / 데이터 분류 / Admin SDK 키 회전 | R7 | D12, §9, §12 |
+| append-only 동의 / 14세·제3자 메타 | R5 | D7 |
+
+### 10.2 거부 / 정정
+
+| 검토 제안 | 우리 판단 | 이유 |
+|---|---|---|
+| 권한 `role_capability` DB 레지스트리(P1) | **보류(P2)** | "rule을 DB에 저장 금지" 원칙 충돌. 트리거=테넌트 커스텀롤 |
+| audit `BEFORE UPDATE` 트리거로 불변성 | **거부** | root가 트리거 DROP 가능 → 명시한 위협을 못 막음. 해시체이닝/WORM이 정답 |
+| BOLA 복합 UNIQUE `(org_pk, public_id)` | **불요** | public_id(ULID)가 이미 전역 UNIQUE. 실체는 질의 시 org_pk 필터 강제 |
+| api_key `allowed_environments JSON` 블롭 | **거부** | 불변식 #6(임의 JSON 권한 금지) 충돌. 구조화 scopes로 |
+| phone/email **전면** app-level 암호화 | **거부(선별로)** | 인덱스·유니크·검색 파괴. secret/guardian만 암호화, phone/email은 KMS+접근통제 |
+| 휴면계정(1년) 법적 의무 대응 | **정정** | 정보통신망법 유효기간제 **2023 폐지** → 법 의무 아님. DORMANT는 선택적 제품정책 |
+| Debezium/Kafka CDC 지금 도입 | **연기(P2)** | "MQ는 outbox 위에 나중에" 방침. 컴플라이언스 트리거(T4) 시 |
+
+> 이 표가 보여주는 것: 표준·비교 분석을 *맹종*하지 않고 **우리 원칙·위협모델·규모**에 비춰 걸렀다.
+
+---
+
+## 11. 의도적으로 안 한 것 (YAGNI) + 도입 트리거
+
+| 미도입 | 이유 | 도입 트리거 |
+|---|---|---|
+| 완전 MSA(auth/billing/role DB 분리) | 분산 트랜잭션 지옥, 현 규모 과도 | (안 함 — 비대칭 분리 유지) |
+| OpenFGA / 정책 엔진 | MVP overkill | 학원 1000+ / 정책 복잡도 폭증 |
+| DB role/capability 레지스트리 | rule을 DB에 = 디버깅 지옥 | 테넌트 커스텀 롤 실수요 |
+| 일반 relation_tuple(Zanzibar full) | delegation_grant로 충분 | delegation 패턴 부족 확인 시 |
+| audit `BEFORE UPDATE` 트리거 | root가 DROP 가능 | (안 함 — 해시/WORM으로 대체) |
+| Kafka/Debezium CDC | MQ는 outbox 위에 나중에 | ISMS-P/SOC2 감사 요건(T4) |
+| websocket 권한 push | 403+폴링 충분 | 동시편집 충돌 실발생 시 |
+| platform 공통 usage 카운터 | 사용량은 서비스 DB | cross-service 합산 과금 실수요 시 |
+| schema-per-tenant | MySQL은 db=schema, pool 복잡 | (안 함 — T4 도달 시 DB-per-tenant) |
+| 즉시 DB-per-tenant | 현 규모 운영비만 상승 | T1/T2 트리거 도달 시 |
+
+---
+
+## 12. 운영 플레이북
+
+> "운영 중 X가 생기면 어떻게 하나" — 인수자가 가장 필요로 할 부분.
+
+### 12.1 platform_db 비대화 대응 (가장 큰 장기 리스크)
+
+**증상**: 단일 DB가 identity+billing+entitlement+product+consent+audit를 다 안아 "second monolith"화.
+
+**예방 (지금부터)**:
+- `@aiagent/db-platform`을 **컨텍스트 모듈**로 분리: `identity/`·`access/`·`billing/`·`product/`·`consent/`·`audit/`. 각 모듈만 자기 테이블 쓰기.
+- **마이그레이션 소유권**: 컨텍스트별 디렉토리 + 리뷰 오너. 한 PR이 여러 컨텍스트 스키마 동시 변경 → 리뷰 reject.
+- 컨텍스트 간 직접 FK 최소화 → 모듈 인터페이스 경유 (= 나중 물리 분리 **절단선**).
+
+**확장 단계**: 논리 분리(지금) → 트래픽/팀 분리 시 컨텍스트 단위 schema/DB 분리(ADR-041 패턴 재사용) → Option B(`platform-api` HTTP 서비스).
+
+### 12.2 멀티테넌시 분리 트리거 운영
+
+단계: Read replica → 고속 테이블 분리(`chat_db`/`analytics_db`) → DB-per-large-tenant.
+
+```
+분리 대상 기준:
+  T1: 단일 org가 특정 테이블 행수의 20% 이상 → 해당 테넌트 전용 DB
+  T2: 고속 테이블 P99 > 500ms → 해당 테이블 별 인스턴스
+  T3: usage_log 월 500만 건 또는 50GB+ → OLAP(ClickHouse/BigQuery) 이관
+  T4: ISMS-P/GDPR 계약 체결 → 물리 격리 + 감사 외부 WORM
+```
+
+`org_pk` 단위 분리라 org 무중단 마이그레이션 가능.
+
+### 12.3 Secret / Key Rotation
+
+| 대상 | Cadence | 누출 시 |
+|---|---|---|
+| `api_key`(머신) | 권고 90일 / 강제 365일, `rotated_at` 추적, 다중키 무중단 | `status='REVOKED'` 즉시 + 신규 발급 |
+| OAuth refresh_token | provider 정책, 만료 시 재인증 | KMS 무효화 + 재연결 |
+| KMS DEK | AWS/GCP 자동 연 1회 | 키 폐기 → 재암호화 |
+| Firebase Admin SDK 키 | 권고 180일(CI/secret store) | 즉시 회전 + GCP IAM 점검 |
+| Firebase Web API Key | 회전 불요(공개) | App Check + authorized domains로 방어 |
+| DB 계정 비밀번호 | 180일 rotation. least-privilege per service | 즉시 변경 + 접속 이력 감사 |
+
+### 12.4 Break-glass (긴급 운영 접근)
+
+임퍼소네이션(위임)과 **다름** — 승인된 예외 경로:
+1. 운영자가 사유(reason) + 대상 + 짧은 만료로 요청 → **승인자(approver)** 결재.
+2. `delegation_grant(capability='platform.break_glass')` 또는 `break_glass_session` 발급.
+3. 모든 행위 `audit_log(break_glass=true)` 기록. **절대 silent 금지.**
+4. 만료 시 자동 회수 + **사후 리뷰**(SOC2/ISMS-P 단골 점검).
+
+### 12.5 감사 무결성 운영
+
+- 월 1회 배치: `audit_log`·`user_consent_event` 해시 사슬 처음부터 재계산 → 불일치 시 보안 알림.
+  > ⚠️ **P1 미구현**: `prev_hash`/`row_hash` 컬럼이 아직 DDL에 없음. 해시 체이닝은 phase-17에서 컬럼 추가 후 활성화. 현재는 append-only + DB 계정 권한으로만 무결성 보장.
+- 앱 DB 계정에서 UPDATE/DELETE 권한 제거(DDL 단계 GRANT 점검).
+- T4 도달 시 외부 WORM(S3 Object Lock) 적재로 root 위협까지 차단.
+
+### 12.6 정보주체 권리 / 동의 운영
+
+- **열람청구**: platform `user_consent_event` + 각 서비스 consent_event **fan-out 조회**(`internal/`).
+- **철회**: REVOKED 이벤트 → perm_version bump → 발송 큐 즉시 차단.
+- **탈퇴/삭제**: `identity_user.status='DELETED'` → 30일 후 hard delete. platform이 outbox `user.deleted` 발행 → 각 서비스가 dangling fan-out anonymize. consent는 5년 보존 후 파기, user_pk anonymize.
+
+### 12.7 장애 대응 — 권한이 갑자기 안 먹힐 때
+
+```
+1. identity_user.status, membership.status 확인
+2. org_entitlement.status / valid_until 확인 → GRACE/EXPIRED 전환 여부
+3. org.perm_version vs 클라이언트 X-Perm-Version 비교
+4. Redis 캐시 flush: DEL "perm:{user_pk}:{org_pk}"
+5. audit_log.result='DENY' 로 최근 30분 조회
+```
+
+#### 결제는 됐는데 권한이 안 풀릴 때
+
+```
+1. payment_ledger에서 idempotency_key로 SUCCEEDED 확인
+2. outbox_event.status='PENDING'인 subscription.activated 이벤트 조회
+3. outbox 워커 재시도 또는 수동 org_entitlement UPDATE + perm_version 갱신
+```
+
+#### PG webhook 중복 처리 방지
+
+```
+pg_webhook_event UNIQUE(pg_provider, event_id) → 중복 webhook은 SKIPPED
+status='RECEIVED' → 처리 성공 후 'PROCESSED'
+실패 시 'FAILED' + 재큐 (단, idempotency_key로 결제 중복 방지)
+```
+
+### 12.8 권한 변경 운영
+
+- 역할 *배정* 변경 = DB UPDATE(즉시, perm_version bump).
+- 역할 *룰*(ROLE_PERMISSION) 변경 = **코드 배포**.
+- ⚠️ **열린 결정**: ROLE_PERMISSION 변경 배포 SLA(hot-fix vs weekly) — 명문화 필요.
+
+### 12.9 인시던트 대응
+
+- 계정 침해: `identity_user.status='SUSPENDED'` 1회 → **전 서비스 즉시 차단**.
+- entitlement 정지: `org_entitlement.status='SUSPENDED'` + org_pv bump → 소속 전원 차단.
+- PG/알림 vendor 장애: fallback chain(알림톡→SMS→이메일), 배너 표시.
+- YouTube OAuth 만료: `youtube_channel.last_error` + 재연결 배너(서비스 도메인 영역).
+
+### 12.10 마이그레이션 운영
+
+- Drizzle, 컨텍스트별 마이그레이션 디렉토리 + 오너.
+- ENUM→VARCHAR+CHECK 같은 안전한 온라인 DDL 우선; 비싼 변경(`org_relation`, `service_membership` 신규)은 스키마 먼저.
+- migration SQL에 `IF NOT EXISTS` / `COLUMN EXISTS` 방어 코드 포함.
+- Option A(`@aiagent/db-platform`)→Option B(`platform-api` HTTP) 전환 트리거: 소비 앱 3개 동시 / platform 전담 팀 / SOC2·PCI. 인터페이스(`getPermissionContext()` 등) 동일 유지 → 구현만 HTTP로 교체.
+
+### 12.11 정기 운영
+
+| 작업 | 주기 | 방법 |
+|---|---|---|
+| TRIALING→EXPIRED 전환 | 일 1회 | `UPDATE org_entitlement SET status='EXPIRED' WHERE valid_until < NOW() AND status='TRIALING'` |
+| 만료 구독 정리 | 일 1회 | `UPDATE org_entitlement SET status='EXPIRED' WHERE valid_until < NOW() AND status='ACTIVE'` |
+| GRACE 구독 전환 | 일 1회 | `valid_until < NOW() AND grace_until > NOW() → status='GRACE'` |
+| audit_log 파티션 추가 | 분기 1회 | `ALTER TABLE audit_log ADD PARTITION (PARTITION pYYYYMM VALUES LESS THAN (...))` |
+| 만료 초대 토큰 정리 | 일 1회 | `UPDATE membership_invite SET status='EXPIRED' WHERE expires_at < NOW() AND status='PENDING'` |
+| 해시 사슬 검증 | 월 1회 | audit_log + user_consent_event 전체 재계산 |
+
+---
+
+## 13. 기능 우선순위
+
+### P0 — 지금 필요 (서비스 최소 요건)
+
+- platform_db + academy_db 멀티DB 연결
+- identity·membership·org_relation(스키마) 완성
+- `org_entitlement`(수동) + 3-gate `canXXX`
+- `user_consent_event`(14세·제3자 포함) — PIPA §22 법적 필수
+- `audit_log` + 파티션
+- `service` VARCHAR+CHECK (academy/market/agent 3개 이상)
+
+### P1 — 다음 단계 (운영 요건)
+
+- `api_key` + 하드닝(`allowed_ip_cidr`, `rotated_at`, `revoked_reason`)
+- 결제 연동 (payment_ledger + pg_webhook + outbox 완전 가동)
+- `permission_snapshot` + perm_version 멀티인스턴스 전파
+- 감사 해시체이닝
+- 정보주체 열람 fan-out (`internal/`)
+- 약관 재동의 인터셉터
+- NIST 환경속성(Gateway/WAF IP)
+- CI 린트: org_pk 누락 쿼리 감지
+- Qdrant `is_tenant` 최적화 마커
+- Neo4j APOC 쓰기측 교차 테넌트 관계 차단
+
+### P2 — 장기 / 트리거 조건부
+
+- 외부 WORM(S3 Object Lock, T4 트리거 시)
+- DB role/capability 레지스트리 (테넌트 커스텀롤 실수요 시)
+- usage OLAP (T3 트리거 시)
+- OpenFGA / 정책 엔진 (학원 1000+ 시)
+- Option B `platform-api` HTTP 서비스 분리 (소비 앱 3개+ 시)
+- DB-per-tenant (T1/T2 트리거 시)
+- Kafka/Debezium CDC (T4 감사 요건 시)
+
+---
+
+## 14. 법 / 표준 준거
+
+> **읽기 주의**: "설계 확정" ≠ "구현 완료". ⚠️는 설계는 됐으나 아직 코드 없음(phase-17 대상). 감사자는 ⚠️ 항목을 준수로 읽으면 안 됨.
+
+| 근거 | 설계 상태 | 구현 상태 | 비고 |
+|---|---|---|---|
+| PIPA §15 (보유) | ✅ 설계 | ⚠️ phase-17 | user_consent_event 5년 보존 — 미구현 |
+| PIPA §17~18 (제3자 제공) | ✅ 설계 | ⚠️ phase-17 | 4요건 meta_json 정형화 — 미구현(CON-4) |
+| PIPA §22 (14세 미만) | ✅ 설계 | ⚠️ **법적 필수** phase-17 | guardian 동의 로직 미구현(CON-3) |
+| PIPA §35 (열람) | 🟡 설계 중 | ⚠️ phase-17 | fan-out 조회 미구현 |
+| PIPA §37 (철회) | ✅ 설계 | ⚠️ phase-17 | REVOKED 이벤트 미구현(CON-6) |
+| 정보통신망법 §50 (수신거부) | ✅ 설계 | ⚠️ phase-17 | 마케팅 옵트아웃 미구현(CON-5) |
+| 정보통신망법 국외이전 고지 | ✅ 설계 | ⚠️ phase-17 | `platform.third_party_firebase` 동의 미구현 |
+| (구)유효기간제 (휴면) | ⛔ | ⛔ | **2023 폐지 — 법 의무 아님** |
+| NIST SP 800-162 (ABAC) | 🟡 설계 중 | 🟡 부분 | Subject×Object ✅. Environment(client_ip) P1 |
+| OWASP API #1 (BOLA) | ✅ 설계 | ✅ 구현됨 | org_pk 질의 강제 |
+| ISMS-P/SOC2 | 🟡 설계 중 | 🟡 부분 | 감사 append-only ✅. 해시 P1, WORM P2, break-glass P1 |
+
+---
+
+## 15. 열린 결정
+
+1. **ROLE_PERMISSION 변경 배포 SLA** (hot-fix vs weekly) — 유일한 미해결. 운영팀이 "DB 한 줄이면 될 걸 왜 배포 기다리냐" 압박 예상, 정책 명문화 필요.
+2. **만 14세 미만 본인확인 강도** — 서명 PDF vs PASS/카카오 본인인증(법무 확인).
+3. **감사 외부 WORM 시점** — P2 유지 vs ISMS-P 일정 따라 앞당김.
+4. **데이터 리전/주권** — 단일 리전(AWS Seoul) 가정, 해외 고객 시 리전 분리.
+5. **휴면(DORMANT) 채택 여부** — 법 의무 아님, 제품 결정.
+6. **결제 정식화 범위** — 1회성/쿠폰/proration/인보이스/세금.
+7. **강사 콘텐츠 소유권 ToS 조항** — "플랫폼에서 생성된 교육 콘텐츠의 소유권은 해당 콘텐츠를 생성한 강사에게 있으며, 강사 본인 요청 및 소속 학원 동의 시 이전 가능"을 ToS에 명시해야 admin 이전이 법적 근거를 가짐. **법무 검토 후 확정 필요.**
+8. **이메일 인증 필수 기능 범위** — 결제·초대·민감 쓰기에서 email_verified=false 차단 여부. 제품 결정 후 Guard 레벨에서 강제.
+
+---
+
+## 16. 용어 사전
+
+| 용어 | 뜻 |
 |---|---|
-| v0.1 | 학원장·강사 이름이 알림톡·검수화면·감사로그에 출력 |
-| v1.0 | 학생·학부모 이름도 등록됨 |
-| v2.0 | market 판매자, agent 이름 등 서비스 확장 |
-| v3.0 | 글로벌: locale, timezone 필요 |
-
-### 결정: `identity_db.user_profile` 신규 생성
-
-**이유**: 사람의 표시 이름·아바타는 학원·마켓·에이전트 어디서나 동일한 플랫폼 공통 정보다. 서비스별로 다른 이름이 필요한 경우(예: 판매자 상호명)는 서비스별 extension 테이블로 처리한다.
-
-```sql
--- identity_db
-CREATE TABLE user_profile (
-  user_pk      BIGINT UNSIGNED NOT NULL,
-  display_name VARCHAR(120)  NOT NULL,
-  avatar_url   VARCHAR(500)  NULL,
-  locale       VARCHAR(10)   NOT NULL DEFAULT 'ko',
-  timezone     VARCHAR(50)   NOT NULL DEFAULT 'Asia/Seoul',
-  updated_at   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_pk),
-  CONSTRAINT fk_up_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk)
-);
--- ★ identity_user와 1:1. identity_user INSERT 즉시 함께 INSERT.
--- ★ 서비스별 추가 프로필(예: academy 강사 소개글)은 academy_db.teacher_profile 등 별도 테이블.
--- ★ SERVICE/SYSTEM type 계정도 row 생성 (시스템 이름 표시 필요).
-```
-
-**서비스별 extension 패턴 (나중에 필요할 때):**
-```sql
--- academy_db
-CREATE TABLE teacher_profile (
-  user_pk    BIGINT UNSIGNED NOT NULL,
-  org_pk     BIGINT UNSIGNED NOT NULL,
-  subjects   JSON,          -- ["수학","영어"]
-  bio        VARCHAR(500),
-  PRIMARY KEY (user_pk, org_pk)
-);
-```
+| `platform_db` | identity+billing+product+consent+audit 공통 코어 단일 DB |
+| `membership.platform_role` | 테넌트 소속 + 플랫폼 권위(OWNER/ADMIN/MEMBER/SERVICE) |
+| `service_membership.role_code` | 서비스별 도메인 역할(`academy.director`, `market.seller` 등) |
+| `org_entitlement` | 런타임 권위 access 상태 — canXXX Gate B의 유일 진실 원천 |
+| `delegation_grant.capability_code` | 위임 capability(`<service>.<action>`), ReBAC |
+| `org_relation` | 조직 계층(HQ_BRANCH/HOLDING). **권한 근거 아님** — 명시적 membership만 |
+| `user_consent_event` | append-only 동의 이벤트(PIPA/정보통신망법) |
+| `outbox_event` | async 부수효과 발행원(결제 부수효과·fan-out 등) |
+| `perm_version` | 권한 변경 전파 카운터(user_pv / org_pv 분리) |
+| 3-gate canXXX | A 소속 · B 이용권 · C 정책(RBAC/ABAC/ReBAC) |
+| Pool 모델 | 공유 DB + org_pk 행 격리. 테넌트마다 별도 DB 없음 |
+| Option A→B | 공유 패키지(`db-platform`) → HTTP 서비스(`platform-api`) 전환 |
+| 비대칭 분리 | 공통(platform_db)은 묶고, 도메인은 별도 DB로 분리하는 전략 |
+| Break-glass | 승인된 긴급 운영 접근. 임퍼소네이션과 다름 |
 
 ---
 
-## 2. `membership.status` — INVITED 제거
+## 17. 왜 이 설계를 신뢰할 수 있나
 
-### 배경
+> **이 설계는 "예쁜 ERD"가 아니라 8라운드 검토를 거쳐 수렴한 의사결정의 기록이다.**
 
-현재 `membership.status ENUM('ACTIVE','INVITED','SUSPENDED')`.
-
-### 장기 문제
-
-'INVITED' 멤버가 membership 테이블에 있으면:
-- "학원 멤버 몇 명?" 쿼리가 INVITED 포함 여부에 따라 다름 → 항상 WHERE status='ACTIVE' 강제
-- 초대 거절 시 membership row를 지우는지, INVITED 상태로 두는지 모호
-- `membership_invite`와 상태 이중 관리
-
-### 결정: `membership.status` = ACTIVE / SUSPENDED 만
-
-```sql
-status ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE'
-```
-
-**초대 흐름 표준화:**
-1. 초대 발송 → `membership_invite` INSERT (status='PENDING', token 포함)
-2. 수락 → `membership_invite.status='ACCEPTED'` + `membership` INSERT (status='ACTIVE')
-3. 거절/만료 → `membership_invite.status='EXPIRED'/'REVOKED'` (membership에 row 없음)
-4. 탈퇴 → `membership.status='SUSPENDED'` (identity_user는 유지)
+- 결제↔권한을 단일 트랜잭션으로 묶어 SaaS 최악 UX("결제됐는데 권한 미반영")를 구조적으로 없앴다.
+- 권한 어휘를 academy 종속에서 서비스 네임스페이스(`<service>.<action>`)로 끌어올려 5개+ 서비스 확장을 열었다.
+- 동의를 append-only 이벤트로 PIPA 분쟁을 법적으로 방어했다.
+- **무엇보다, 표준·자문을 맹종하지 않고 우리 원칙·위협모델·규모에 비춰 걸러냈고(§10.2), 일부러 안 한 것과 그 도입 트리거를 명시했으며(§11), 비대화 같은 장기 리스크의 운영 전략을 미리 적어뒀다(§12).** 차단성 미해결은 1건(배포 SLA)뿐이다.
 
 ---
 
-## 3. `student` — 지금 스키마 정의, MVP는 부분 구현
-
-### 배경
-
-BDD에서 학생 데이터가 이미 v0.1부터 필요한 것이 확인됨:
-- **F20-01**: `lecture.class_group → 학생 목록 → 학부모 phone` (알림톡 발송 대상)
-- **F24-01**: 학원 일 업로드 cap 체크 (학원 단위 설정)
-- **F25**: 자녀 등장 동의 (`consent_video_appearance`)
-- **F26-02**: 학원 폐업 시 학생 데이터 처리
-
-현재 `notification` 테이블에 `parent_phone`, `parent_email`이 denormalized되어 있음.
-이것으로는 "학생 김민서의 학부모 연락처" 조회가 불가 — MVP에서도 알림 발송이 필요하므로 **학생 테이블이 v0.1부터 필요하다.**
-
-### 결정: `academy_db.student` 신규 생성 (MVP 포함)
-
-```sql
--- academy_db
-CREATE TABLE student (
-  pk                       BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  public_id                CHAR(26)     NOT NULL UNIQUE,          -- ULID
-  org_pk                   BIGINT UNSIGNED NOT NULL,
-  user_pk                  BIGINT UNSIGNED NULL,                   -- v1.0+ 학생 계정 연결 시
-  display_name             VARCHAR(120) NOT NULL,
-  grade_level              VARCHAR(20)  NULL,
-  class_group              VARCHAR(120) NULL,                      -- 반 이름
-  parent_name              VARCHAR(120) NULL,
-  parent_phone             VARCHAR(20)  NULL,
-  parent_email             VARCHAR(254) NULL,
-  consent_video_appearance TINYINT(1)   NOT NULL DEFAULT 0,        -- 자녀 등장 동의
-  consent_pdf_s3_url       VARCHAR(500) NULL,                      -- 14세 미만 법정대리인 서명본
-  status                   ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
-  created_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  deleted_at               TIMESTAMP NULL,
-  INDEX idx_org (org_pk),
-  INDEX idx_org_class (org_pk, class_group),
-  INDEX idx_user (user_pk)
-);
--- ★ MVP: user_pk=NULL (학생 계정 없음). v1.0에서 연결.
--- ★ parent_phone/email: notification의 denormalized 컬럼을 여기서 정규화.
--- ★ consent_video_appearance: PIPA 의무. 초기값 0(미동의) — 명시 동의 시만 1.
--- ★ class_group은 lecture.class_group과 매핑 키. 변경 시 lecture 과거 데이터 영향 없음.
-```
-
-**알림 발송 흐름 변경:**
-- 기존: `notification.parent_phone` denormalized
-- 신규: `lecture.class_group` → `student(class_group)` → `student.parent_phone` → `notification`
-- `notification.parent_phone`/`parent_email`은 발송 시점 스냅샷으로 유지 (기록 목적)
-
----
-
-## 4. `usage_log` — API 비용 추적 (신규)
-
-### 배경
-
-BDD F24-03: "A학원의 월 Claude 비용 누적 = $148" → 학원별 비용 추적이 명시적으로 요구됨.
-현재 이 데이터를 저장할 테이블이 없음.
-
-### 장기 시나리오
-
-| Phase | 필요 이유 |
-|---|---|
-| v0.1 | 일/월 비용 cap 체크 (F24-03) |
-| v0.5 | 학원장 대시보드에 "이번 달 사용 비용" 표시 |
-| v1.0 | 강사별 비용 attribution |
-| v2.0 | 학원별 청구 자동화 (billing_db 연동) |
-
-### 결정: `academy_db.usage_log` 신규 생성
-
-```sql
--- academy_db
-CREATE TABLE usage_log (
-  pk          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  org_pk      BIGINT UNSIGNED NOT NULL,
-  lecture_pk  BIGINT UNSIGNED NULL,
-  chunk_pk    BIGINT UNSIGNED NULL,
-  service     ENUM('GOOGLE_STT','GOOGLE_TTS','CLAUDE','HYPERFRAMES',
-                   'UPSTAGE_EMBEDDING','YOUTUBE_API','KMS') NOT NULL,
-  units       DECIMAL(12,4) NOT NULL,       -- 서비스별 단위 (초/토큰/청크/API call)
-  cost_usd    DECIMAL(12,6) NOT NULL,       -- 실비용 USD (float 금지 → DECIMAL)
-  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (pk, created_at),             -- 파티셔닝 키 포함
-  INDEX idx_org_service (org_pk, service, created_at)
-)
-PARTITION BY RANGE COLUMNS(created_at) (
-  PARTITION p202601 VALUES LESS THAN ('2026-02-01'),
-  PARTITION p202602 VALUES LESS THAN ('2026-03-01'),
-  PARTITION p202603 VALUES LESS THAN ('2026-04-01'),
-  PARTITION p202604 VALUES LESS THAN ('2026-05-01'),
-  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
-  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
-  PARTITION p202607 VALUES LESS THAN ('2026-08-01'),
-  PARTITION p202608 VALUES LESS THAN ('2026-09-01'),
-  PARTITION p202609 VALUES LESS THAN ('2026-10-01'),
-  PARTITION p202610 VALUES LESS THAN ('2026-11-01'),
-  PARTITION p202611 VALUES LESS THAN ('2026-12-01'),
-  PARTITION p202612 VALUES LESS THAN ('2027-01-01'),
-  PARTITION p_future VALUES LESS THAN MAXVALUE
-);
--- ★ DECIMAL(12,6): float 금지. 마이크로달러 단위까지 기록.
--- ★ 파티셔닝: 월별 삭제/보관이 DROP PARTITION 한 줄로 가능.
--- ★ cap 체크: SELECT SUM(cost_usd) WHERE org_pk=? AND service='CLAUDE' AND MONTH=? → 파티션 pruning.
-```
-
----
-
-## 5. `audit_log` — 파티셔닝 + 보존 정책
-
-### 배경
-
-BDD F26-02: "permission_audit_log 는 보존 (의무 기간 3년)".
-규모 추정: 학원 100개 × 일 200 이벤트 = 연 730만 row. 3년 = 2,190만 row.
-
-### 결정: 월별 파티셔닝 + 보존 정책 명시
-
-```sql
--- identity_db
-CREATE TABLE audit_log (
-  pk            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  org_pk        BIGINT UNSIGNED NULL,
-  actor_type    ENUM('HUMAN','API_KEY','SYSTEM') NOT NULL,
-  actor_pk      BIGINT UNSIGNED NULL,
-  api_key_pk    BIGINT UNSIGNED NULL,
-  action        VARCHAR(100) NOT NULL,
-  resource_type VARCHAR(50)  NULL,
-  resource_pk   BIGINT UNSIGNED NULL,
-  result        ENUM('ALLOW','DENY','ERROR') NOT NULL,
-  ip            VARBINARY(16) NULL,
-  meta_json     JSON NULL,
-  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (pk, created_at),             -- 파티셔닝 키 포함
-  INDEX idx_org_created (org_pk, created_at),
-  INDEX idx_actor (actor_pk, created_at)
-)
-PARTITION BY RANGE COLUMNS(created_at) (
-  -- usage_log와 동일 패턴, 월별 파티션
-  PARTITION p202601 VALUES LESS THAN ('2026-02-01'),
-  -- ...
-  PARTITION p_future VALUES LESS THAN MAXVALUE
-);
-```
-
-**보존 정책 (코드/운영 문서에 명시):**
-- 보존 기간: **3년** (개인정보보호법 의무)
-- 파기 방식: `ALTER TABLE audit_log DROP PARTITION p{yyyymm}` (36개월 후 월 1회)
-- 개인정보 포함 row: `ip`, `actor_pk` → 파기 전 anonymize job (ip=NULL, actor_pk 유지, meta_json에서 이메일 제거)
-
----
-
-## 6. `public_id` (ULID) 적용 범위 확정
-
-### 기준
-
-API로 외부에 노출되거나, 클라이언트가 참조하는 ID를 가진 테이블은 모두 `public_id CHAR(26) NOT NULL UNIQUE` 보유.
-
-| 테이블 | public_id 필요 | 이유 |
-|---|---|---|
-| `identity_user` | ✅ (있음) | API 응답, webhook |
-| `organization` | ✅ (있음) | API 응답 |
-| `lecture` | ✅ (있음) | 영상 관리 API |
-| `student` | ✅ (추가) | 학생 관리 API, 동의 관리 |
-| `youtube_video` | ✅ (추가) | 영상 페이지 URL |
-| `lecture_chunk` | ✅ (추가) | RAG API 응답, `qdrant_point_ids` 추적 |
-| `notification` | ✅ (추가) | 클릭 추적 URL `/track/click/<public_id>` |
-| `trust_relationship` | ✅ (추가) | 권한 관리 API |
-| `membership_invite` | ❌ — `token` 이 public ID 역할 | |
-| `academy_config` | ❌ — `org.public_id` 로 접근 | |
-| `youtube_channel` | ❌ — org 단위 1:1, org_pk 기반 조회 | |
-| `video_asset` | ❌ — 내부 자산, API 노출 X | |
-| `user_profile` | ❌ — `identity_user.public_id` 사용 | |
-| `usage_log` | ❌ — 내부 집계 전용 | |
-| `audit_log` | ❌ — 내부 감사 전용 | |
-
----
-
-## 7. Soft Delete 패턴 표준화
-
-### 문제
-
-현재 두 패턴이 혼재:
-- `deleted_at TIMESTAMP NULL` (content tables)
-- `status ENUM + deleted_at` (일부)
-- `status='DELETED'` only (identity_user)
-
-### 결정: 테이블 종류별로 패턴 분리
-
-**상태 머신 테이블** (비즈니스 상태가 핵심인 테이블):
-```
-identity_user: status ENUM('ACTIVE','SUSPENDED','DELETED') + deleted_at
-organization: status ENUM('ACTIVE','SUSPENDED','CLOSED') + deleted_at
-membership: status ENUM('ACTIVE','SUSPENDED') — deleted_at 없음 (상태로만 제어)
-org_entitlement: status ENUM('ACTIVE','GRACE','SUSPENDED','EXPIRED') — deleted_at 없음
-```
-
-**컨텐츠 테이블** (CRUD 대상 리소스):
-```
-lecture, lecture_chunk, video_asset, youtube_video, youtube_channel,
-student, trust_relationship, notification:
-  deleted_at TIMESTAMP NULL (soft delete)
-  Application WHERE deleted_at IS NULL 자동 적용
-```
-
-**이벤트/로그 테이블** (append-only):
-```
-audit_log, usage_log, payment_ledger: 
-  삭제 없음. 보존 기간 경과 시 파티션 DROP.
-```
-
-**Hard delete 배치 (90일 규칙):**
-- soft delete 후 90일 지난 컨텐츠 테이블 row를 배치로 hard delete
-- 단, audit_log/usage_log는 보존 정책 기간(3년)까지 유지
-
----
-
-## 8. `org_entitlement.feature_limits` — JSON 유지 + 쿼리 전략
-
-### 배경
-
-JSON 컬럼은 개별 키 인덱싱 불가 → 분석 쿼리에 취약.
+## 18. 부록 A — ADR 통합 기록
 
-### 결정: JSON 유지 + 필요 시 Generated Column 추가
+> 본문이 참조하는 ADR의 **원문 핵심(배경·결정·이유·기각)을 한 곳에 통합**. 외부 문서를 열 필요 없이 이 문서로 완결된다.
 
-MVP에서는 JSON 그대로 사용 (런타임 gate check는 전체 row를 읽어 앱에서 파싱).
+### ADR-044 — `platform_db` 경계: identity + billing + product 통합
 
-분석 필요 시점에 STORED Generated Column 추가 (MySQL 8 online DDL 지원):
-```sql
-ALTER TABLE org_entitlement
-  ADD COLUMN rag_enabled TINYINT(1) GENERATED ALWAYS AS (
-    JSON_VALUE(feature_limits, '$.rag_enabled')
-  ) STORED,
-  ADD COLUMN daily_uploads INT GENERATED ALWAYS AS (
-    JSON_VALUE(feature_limits, '$.daily_uploads')
-  ) STORED,
-  ADD INDEX idx_rag (rag_enabled),
-  ADD INDEX idx_daily (daily_uploads);
-```
+- **배경**: DB 분리 3안 검토 — (A)`identity_db`/`billing_db`/서비스별 세분화, (B)`platform_db`(identity만)+서비스별 billing, (C)`platform_db`(identity+billing+product)+서비스별 DB. 트리거: "market에서 academy·agent·store 상품을 한 곳에서 구매."
+- **결정**: **안 C 채택** — `platform_db` 하나에 identity+billing+product 통합, 서비스 도메인만 분리.
+- **이유**: ① market이 cross-service 단일 상품 카탈로그 필요(N개 DB 조회 회피) ② 각 서비스가 한 곳(platform_db)만 보고 entitlement 확인 ③ 구매 트랜잭션이 단일 DB 내 완결(분산 트랜잭션 없음) ④ 현 규모엔 완전 MSA보다 모듈형 모놀리스가 적합.
+- **기각**: 안A(같은 서비스가 identity/billing 두 커넥션·cross-DB 조인 불가·운영복잡 대비 실익 없음), 안B(cross-service 카탈로그/통합 구독현황 조회 불가).
 
-이 ALTER는 데이터 이동 없이 generated column 추가만 하므로 production에서도 안전.
-
----
-
-## 9. `delegation_grant` capability 확장 전략
-
-### 배경
-
-현재 ENUM:
-```
-ENUM('PUBLISH_VIDEO','APPROVE_VIDEO','VIEW_ALL_LECTURES',
-     'MANAGE_SCHEDULE','MANAGE_MEMBERS','VIEW_BILLING')
-```
-
-서비스 확장 시 새 capability 추가 필요 → MySQL ENUM ALTER 필요.
-
-### 결정: VARCHAR(50)으로 변경 + CHECK constraint
-
-```sql
-capability VARCHAR(50) NOT NULL,
-CONSTRAINT chk_capability CHECK (capability IN (
-  'PUBLISH_VIDEO','APPROVE_VIDEO','VIEW_ALL_LECTURES',
-  'MANAGE_SCHEDULE','MANAGE_MEMBERS','VIEW_BILLING'
-  -- 추가 시 여기에 append (ALTER TABLE, 온라인 DDL)
-)),
-```
+### ADR-041 — 멀티테넌시 DB 전략: 단일 DB 행 격리 + 분리 트리거
 
-이유: ENUM 추가는 MySQL에서 온라인 DDL이지만 CHECK constraint 수정이 더 명시적이고 ORM과도 잘 맞는다. VARCHAR + 앱 레벨 validation으로 유연성 확보.
+- **배경**: SaaS, 테넌트=`organization`. 고속 증가 테이블(homework_chat, usage_log, notification, audit_log) 존재.
+- **결정**: **단일 DB + `org_pk` 행 격리.** 모든 도메인 테이블 `org_pk NOT NULL` 불변식. 미래 분리를 위해 앱이 항상 org_pk 전달.
+- **분리 트리거**: T1(단일 org가 고속 테이블 20%+) · T2(조회 P99>500ms) · T3(usage_log 월 500만/50GB+) · T4(ISMS-P/GDPR). 단계: Read replica → 고속 테이블 분리(chat_db/analytics_db) → DB-per-large-tenant.
+- **기각**: schema-per-tenant(MySQL은 db=schema, 테넌트마다 DB면 connection pool 복잡), 즉시 DB-per-tenant(현 규모 운영비만↑), NoSQL 전환(MySQL+Drizzle 투자 보호).
 
-단, CASL의 `CAPABILITY_ACTION` 매핑 코드(코드 상수)도 함께 관리 → DB 변경 + 코드 변경 동기화 필수.
+### ADR-042 — cross-tenant 조회: Admin Role 거부 + 아키텍처 분리
 
----
+- **배경**: 운영 집계(전 테넌트 가로지르는 학원수·강의수·사용량) 필요. MySQL/Qdrant/Neo4j 모두 org 격리 중.
+- **결정**: **Admin role 방식 거부.** cross-tenant 조회는 전용 모듈(`internal/`) 또는 별도 서비스(`*-admin`)에서만 — raw SQL로 의도를 코드 *위치*로 드러냄.
+- **이유**: Admin role = ① 단일 장애점(탈취 시 전 테넌트 노출) ② 비즈니스 로직에 보안우회 혼재 ③ role 남용 확산 ④ 격리 불변식이 런타임 조건에 의존하게 됨.
+- **규칙**: 일반 모듈은 `org_pk`/`org_id` 필수 타입, 위반 PR reject, `internal/` 컨트롤러는 외부 라우팅 노출 금지(내부망/별도 인증).
 
-## 10. 전체 스키마 변경 요약
+### ADR-032 — identity/billing 접근: 공유 패키지(Option A) + 분리 서비스(Option B) 전환 준비
 
-아래가 이번 재검토로 확정된 변경 사항이다.
+- **배경**: academy-api 외 agent/market도 동일 identity/billing 인프라 공유 필요. "어떤 앱이 어떻게 접근하나"를 초기에 결정해야(잘못하면 앱 증가 시 마이그레이션 비용 지수증가).
+- **결정**: **Option A 채택**(`@aiagent/db-platform` 공유 패키지로만 접근, Drizzle 직접 금지). 단 **인터페이스를 Option B처럼 설계**해 전환 비용 최소화 — 마이그레이션 비용의 실체는 "A vs B"가 아니라 "경계가 있나 없나".
+- **Option B 전환 트리거**(`platform-api` HTTP 서비스): 소비 앱 3개 이상 동시 / platform 전담 팀 분리 / SOC2·PCI-DSS. 전환 시 소비 앱 0 변경(`getPermissionContext()` 시그니처 유지, 구현만 HTTP로 교체).
+- **기각**: Option C(각 앱이 Drizzle 직접 — 스키마 변경 시 전 앱 동시 수정·통제 불가), 즉시 Option B(소비 앱 1개 단계에 ROI 음수).
 
-### 신규 테이블
+### ADR-035 — Qdrant 멀티테넌시: shared collection + payload 필터
 
-| 테이블 | 위치 | 이유 |
-|---|---|---|
-| `user_profile` | `identity_db` | `display_name` SSOT, 플랫폼 공통 프로필 |
-| `student` | `academy_db` | v0.1부터 알림톡 대상 + PIPA 동의 관리 필요 |
-| `usage_log` | `academy_db` | BDD F24 비용 cap 체크, 과금 기반 |
-
-### 스키마 수정
-
-| 테이블 | 변경 |
-|---|---|
-| `membership` | `status` ENUM에서 'INVITED' 제거 → ('ACTIVE','SUSPENDED') |
-| `audit_log` | 월별 파티셔닝 + PK에 created_at 포함 |
-| `usage_log` | 월별 파티셔닝 + PK에 created_at 포함 |
-| `delegation_grant` | `capability` ENUM → VARCHAR(50) + CHECK |
-| `youtube_video` | `public_id CHAR(26)` 추가 |
-| `lecture_chunk` | `public_id CHAR(26)` 추가 |
-| `notification` | `public_id CHAR(26)` 추가 |
-| `trust_relationship` | `public_id CHAR(26)` 추가 |
-
-### 컬럼 이동
-
-| 이동 대상 | 기존 위치 | 신규 위치 |
-|---|---|---|
-| `display_name` | `identity_user` (제거됨) | `identity_db.user_profile` |
-| `parent_phone`, `parent_email` | `notification` (denormalized 유지) | `academy_db.student` (정규화, notification은 스냅샷) |
-
----
-
-## 11. `org_relation` — 독립 학원 + 프랜차이즈 동시 지원
-
-### 배경
-
-학원장이 여러 학원을 운영하는 시나리오가 두 가지로 나뉜다.
-
-| 시나리오 | 구조 | 예시 |
-|---|---|---|
-| **독립 복수 학원** | 무관한 학원 여러 개를 동일 원장이 운영 | 박원장이 A학원·B학원 각각 DIRECTOR |
-| **프랜차이즈/체인** | 그룹 본부 아래 단위 학원 위계 | 한울학원 그룹 → 강남점·강북점·수원점 |
-
-MVP 설계 시 "프랜차이즈는 Enterprise 기능"으로 P2 DEFER 처리했으나, **스키마 나중 추가 비용이 크다**. `org_relation`은 단순 참조 테이블이라 지금 생성해도 비용이 없고, 없으면 나중에 데이터 마이그레이션이 필요하다.
-
-### 결정
-
-**`org_relation` 스키마 v0.1 포함, 코드 P1 연결.**
-
-| 레이어 | 시점 | 내용 |
-|---|---|---|
-| 테이블 DDL | **P0 (v0.1)** | `org_relation` 생성. 독립 학원은 row 없이 운영 |
-| 계층 탐색 코드 | **P1** | `getAncestors(orgPk)`, `getDescendants(orgPk)` 유틸 |
-| 정책 상속 | **P1** | 그룹 OWNER의 자식 org 접근 범위 계산 |
-| 통합 대시보드 | **P1** | 그룹 단위 집계 API |
-
-### 두 구조의 공존 방식
-
-```
-독립 학원 (org_relation row 없음):
-  organization(pk=10, type='ACADEMY', name='별빛학원')
-  membership(user_pk=박원장, org_pk=10, role='DIRECTOR')
-
-프랜차이즈 (org_relation row 있음):
-  organization(pk=1,  type='COMPANY', name='한울학원 그룹')   ← 그룹 부모
-  organization(pk=2,  type='ACADEMY', name='한울학원 강남')   ← 단위 학원
-  organization(pk=3,  type='ACADEMY', name='한울학원 강북')
-  org_relation(parent=1, child=2, relation_type='HQ_BRANCH')
-  org_relation(parent=1, child=3, relation_type='HQ_BRANCH')
-  membership(user_pk=김지영, org_pk=1, role='OWNER')    ← 그룹 수준
-  membership(user_pk=김지영, org_pk=2, role='DIRECTOR') ← 지점 직접 (명시적)
-  membership(user_pk=김지영, org_pk=3, role='DIRECTOR')
-```
-
-### 멤버십 상속 전략
-
-P1에서 **명시적 멤버십** 방식을 채택한다 (상속 방식 배제).
-
-- **명시적**: 그룹 OWNER도 각 지점 org_pk에 membership row가 있어야 접근 가능
-- **상속**: OWNER이면 자식 org 자동 접근 (계층 트리 재귀 탐색 필요)
-
-명시적 방식 채택 이유:
-1. 현재 3-gate canXXX() 변경 없이 작동 (Gate A: membership 직접 조회)
-2. 특정 지점만 위임하는 케이스 자연 표현 가능 (지점 A는 DIRECTOR, 지점 B는 MEMBER)
-3. 계층 재귀 쿼리 없이 단순 JOIN으로 권한 확인
-
-지점이 수백 개인 대형 프랜차이즈에서 상속이 필요해지면, 그때 `canXXX()`에 `getAncestors()` 경로를 추가한다.
-
-### 리스크
-
-- **순환 참조 방지**: `org_relation`에 parent ≠ child CHECK constraint 추가. 앱 레벨에서도 INSERT 시 순환 탐지.
-- **깊이 제한**: MVP는 depth 1 (그룹 → 단위학원)만 사용. depth 2 이상(그룹 → 지역본부 → 단위학원)은 P2.
-
----
-
-## 12. BDD 반영 필요 항목 (우선순위)
-
-| 우선순위 | 항목 | 영향 BDD |
-|---|---|---|
-| **P0** | `academy_pk` → `org_pk` 전면 교체 | F0.4, F2-01, F4-04, F5-01 |
-| **P0** | 학원 가입 → organization + academy_config + org_entitlement 3-step | F1-01 |
-| **P0** | 강사 초대 → membership_invite 기반 2-step 재작성 | F3-01~03 |
-| **P0** | `student` 테이블 기반 알림 대상 조회 흐름 | F20-01~03 |
-| **P0** | `permission_audit_log` → `audit_log` 전체 교체 | F2-02, F3-01, F4-03, F5-01 |
-| **P1** | membership 구조 (`product`/`workspace_pk` 제거) | F1-01, F3-01, F4-01, F6-01 |
-| **P1** | `identity_user` ENUM 대문자 통일 | F1-01, F3-01, F6-01 |
-| **P1** | `user_profile.display_name` 참조로 변경 | F1-01, F3-01 |
-| **P1** | `academy.daily_video_limit` → `org_entitlement.feature_limits` | F24-02 |
-| **P1** | 비용 cap → `usage_log` 집계 기반으로 변경 | F24-03 |
-| **P1** | org_entitlement Gate B 시나리오 추가 | 신규 Feature |
-| **P2** | `mvp-scope.md`, `features.md` `academy_id` → `org_id` | 텍스트 교체 |
-| **P2** | `perm_version` 동기화 시나리오 추가 | 신규 Feature |
+- **결정**: 단일 collection + payload 필터(`org_id`). collection-per-tenant 아님(인덱스가 RAM 상주 → 메모리 비용 폭탄). 대규모 시 `org_id` payload **인덱스 + `is_tenant` 최적화**(동일 테넌트 벡터 디스크 co-locate). Qdrant는 filterable HNSW라 post-filter recall 저하가 덜함.
+- **현재 구현**: 색인(`qdrant-index.adapter.ts`)과 검색(`qdrant-search.service.ts`) 모두 `org_id` must 필터 강제. `is_tenant` 마커는 P1 추가 예정.
+
+### ADR-036 — Neo4j 격리: orgId 속성 + Cypher 강제
+
+- **결정**: 단일 그래프 + 모든 노드 `org_id` 속성 + Cypher `WHERE org_id` 자동 주입. 동적 라벨(`:TenantA`) 아님(테넌트 수백~수천 → 라벨 카디널리티 폭발). **멀티홉 경로는 anchor만이 아니라 경로 전체 노드 org_id 강제**, 쓰기측 교차 관계 차단(APOC 트리거 P1 검토).
+- **현재 구현**: `neo4j-concept.adapter.ts` — `LectureChunk`, `Concept` 노드 생성 시 `orgId`를 MERGE key에 포함. 모든 읽기 쿼리에 `{ orgId: $orgId }` 강제. 멀티홉 관계(`RELATED_TO`) 양 끝 노드 모두 orgId 필터. APOC 쓰기측 차단은 P1.
+
+### ADR-025 — 도메인 바운디드 컨텍스트 / YAGNI 원칙
+
+- **결정(원래 academy content-api 맥락)**: `domain/` 레이어 경계 명확화(content/stt/upload), 첫 사용처 없는 디렉토리 안 만듦(YAGNI), dispatch 신호(SourceType)는 단일 출처, `shared/`는 순수 cross-cutting만.
+- **platform 계승**: "컨텍스트 경계를 코드로 강하게, 빈 추상 미리 만들지 않기"가 platform_db **논리 소유권(§12.1)**·**YAGNI 보류 목록(§11)**의 뿌리.
+
+> 참고: `agent_db` 관련 ADR-038(video pipeline nodejs)·ADR-039(3pod worker/qdrant chunking)·ADR-043(lecture ownership)은 서비스 도메인 영역이라 본 platform 핸드북 범위 밖.
