@@ -113,7 +113,7 @@ async function checkGateB(orgPk: bigint, service: EntitlementService) {
 
 projection 동기화가 신뢰할 수 없다면 (배치 실패가 잦다면):
 - `gate-b-billing-grace.md`의 `validUntil` 복합체크가 2차 방어선 역할을 함
-- 이미 구현됨. 배치 실패 시에도 만료일 이후 접근 차단 보장.
+- 이미 설계 확정. 배치 실패 시에도 만료일 이후 접근 차단 보장.
 
 ---
 
