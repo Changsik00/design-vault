@@ -274,9 +274,33 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 ### 5.1 기능 우선순위
 
-**P0 (서비스 최소 요건)**: 멀티DB 연결 · identity/membership/org_relation · `org_entitlement`+3-gate · `user_consent_event`(14세·제3자, PIPA 법적 필수) · `audit_log`+파티션 · `service` VARCHAR+CHECK.  
-**P1 (운영 요건)**: `api_key`+하드닝 · 결제 연동(ledger+webhook+outbox) · perm_version 멀티인스턴스 전파 · 감사 해시체이닝 · 열람 fan-out · CI 린트(org_pk 누락) · Qdrant `is_tenant` · Neo4j APOC 차단 · **운영 가능성(operator-plane·audit-2lane·permission-debug)**.  
-**P2 (트리거 조건부)**: 외부 WORM(T4) · DB role 레지스트리(커스텀롤) · usage OLAP(T3) · OpenFGA(1000+) · Option B `platform-api`(소비앱 3개+) · DB-per-tenant(T1/T2) · Kafka CDC(T4).
+**🥇 P0 — 서비스 최소 요건** (이게 없으면 서비스가 안 돈다)
+- 멀티DB 연결
+- identity / membership / org_relation
+- `org_entitlement` + 3-gate
+- `user_consent_event` (14세·제3자, **PIPA 법적 필수**)
+- `audit_log` + 파티션
+- `service` VARCHAR+CHECK
+
+**🥈 P1 — 운영 요건** (돌긴 하지만 운영하려면 필요)
+- `api_key` + 하드닝
+- 결제 연동 (ledger + webhook + outbox)
+- perm_version 멀티인스턴스 전파
+- 감사 해시체이닝
+- 열람 fan-out
+- CI 린트 (org_pk 누락)
+- Qdrant `is_tenant`
+- Neo4j APOC 차단
+- 운영 가능성 (operator-plane · audit-2lane · permission-debug)
+
+**🥉 P2 — 트리거 조건부** (특정 조건 충족 시 착수)
+- 외부 WORM (T4)
+- DB role 레지스트리 (커스텀롤)
+- usage OLAP (T3)
+- OpenFGA (1000+)
+- Option B `platform-api` (소비앱 3개+)
+- DB-per-tenant (T1/T2)
+- Kafka CDC (T4)
 
 ### 5.2 법·표준 준거
 
