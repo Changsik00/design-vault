@@ -125,12 +125,12 @@ flowchart TD
 
 **전략: 공유 DB + `org_pk` 행 격리**([[multitenancy-pool]]).
 
-| 저장소 | 격리 방법 | 상태 |
-|---|---|---|
-| PostgreSQL | RLS(`CREATE POLICY … USING(org_pk=current_setting('app.org_pk')::bigint)`)로 DB가 격리 강제 + `org_pk NOT NULL`·앱 레이어 `WHERE org_pk`(defense-in-depth) | ✅ RLS + 스키마 강제 · 🟡 CI 린트 보조 미완 |
-| Qdrant | `org_id` payload 필터 강제 | ✅ · 🟡 `is_tenant` 마커 미추가 ([[rag-multitenancy]]) |
-| Neo4j | `orgId` 노드 속성 + Cypher 강제 | ✅ · 🟡 APOC 쓰기측 차단 P1 |
-| Redis | key prefix `org:{org_pk}:...` | ✅ |
+| 저장소        | 격리 방법                                                                                                                                            | 상태                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| PostgreSQL | RLS(`CREATE POLICY … USING(org_pk=current_setting('app.org_pk')::bigint)`)로 DB가 격리 강제 + `org_pk NOT NULL`·앱 레이어 `WHERE org_pk`(defense-in-depth) | ✅ RLS + 스키마 강제 · 🟡 CI 린트 보조 미완                  |
+| Qdrant     | `org_id` payload 필터 강제                                                                                                                           | ✅ · 🟡 `is_tenant` 마커 미추가 ([[rag-multitenancy]]) |
+| Neo4j      | `orgId` 노드 속성 + Cypher 강제                                                                                                                        | ✅ · 🟡 APOC 쓰기측 차단 P1                            |
+| Redis      | key prefix `org:{org_pk}:...`                                                                                                                    | ✅                                                |
 
 **분리 트리거** — 하나라도 충족 시 착수 (단계: Read replica → 고속 테이블 분리 → DB-per-large-tenant):
 
@@ -150,7 +150,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 - **`user_consent_event` append-only**: `user × consent_type × terms_version × action(GRANTED/REVOKED) × meta_json × prev_hash/row_hash`. 반복 이력 전부 보존([[pipa-consent]]).
 - **consent_type 네임스페이스**: `platform.*`(계정) / `pg.*`(결제 제3자) / 서비스 `*`(도메인 DB).
 - **전자서명법 §3**: 약관 체크박스 동의 = 서면 서명과 동일 효력. `user_consent_event` row가 법적 증거.
-- **데이터 이전 경계**: 본인 정보(identity·profile·멤버십)는 이전 가능, 학생·수업기록·결제이력은 org 소유로 이전 불가 — `org_pk NOT NULL` 격리가 강제. (동의: `platform.content_ownership`·`platform.data_transfer`)
+- **데이터 이전 경계**: 본인에 귀속된 정보(identity·profile·멤버십)는 이전 가능. 반면 **멤버가 org 안에서 남긴 활동·기록과 거래 이력(=org 귀속 자산)**은 org 소유라 개인이 가지고 나갈 수 없다 — `org_pk NOT NULL` 격리가 강제. *예: academy면 수업기록, market이면 거래·리뷰 — 서비스마다 형태는 달라도 "org 자산"이라는 경계는 같다.* (동의: `platform.content_ownership`·`platform.data_transfer`)
 - **법 요건**: 14세 미만 법정대리인 동의(§22, 법적 필수) · 제3자 제공 4요건(§17, meta_json + JSON Schema + RFC 8785 canonical) · 철회권(§37, REVOKED + perm_version) · 마케팅 옵트아웃(정보통신망법 §50).
 - 보존 5년 + 해시 사슬(tamper-evident). 약관 본문은 S3/CMS, DB엔 `terms_version`만.
 
