@@ -150,6 +150,8 @@ await db.insert(orgEntitlement)...;          // 영영 실행 안 됨 → 결제
 
 > 💡 **한 줄 요약**: ACID의 원자성(Atomicity)은 결제+권한을 "전부 또는 전무"의 한 덩어리로 묶어, 계좌이체처럼 중간 크래시에도 불일치 상태가 생기지 않게 합니다.
 
+> 🔒 **상태 전환엔 행 잠금이 필수**: 원자성(전부/전무)과 별개로, **read-modify-write**(구독·entitlement 상태를 읽고→판단→갱신)는 동시에 두 트랜잭션이 같은 행을 읽으면 둘 다 "전환해도 됨"으로 판단해 **중복 전환·outbox 이중 발행**이 납니다(lost update). 그래서 상태 전환 함수는 대상 행을 `SELECT … FOR UPDATE`로 **잠근 뒤** 변경합니다(architecture 불변식 #12). 락 없는 `SELECT`-then-`UPDATE`는 금지. (outbox 워커의 `FOR UPDATE SKIP LOCKED`와는 목적이 다름 — 그건 워커 간 작업 분배, 이건 상태 전환 직렬화.)
+
 ---
 
 ## Q4. 우리 설계는 정확히 뭘 강하게, 뭘 결과적으로 처리하나요? (단일 트랜잭션 + outbox)

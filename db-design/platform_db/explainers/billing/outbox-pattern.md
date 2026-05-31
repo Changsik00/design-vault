@@ -473,6 +473,45 @@ COMMIT;
 
 ---
 
+## 발행 의무 대상 (registry)
+
+이 절은 [[architecture]] 불변식 #13("외부 부수효과가 있는 쓰기는 같은 트랜잭션에서 `outbox_event`를 발행")의 **권위 목록**입니다. 어떤 연산이 발행 의무를 지는지, 그리고 각 이벤트의 `aggregate_pk`를 무엇으로 채워야 하는지를 한곳에 모읍니다.
+
+### aggregate_pk 규칙
+
+`outbox_event`의 `aggregate_pk`는 **이벤트가 *관한* 엔티티의 pk**(the entity the event is about)여야 합니다. `org_pk`가 아닙니다. 여기를 잘못 넣으면 consumer가 엉뚱한 aggregate를 추적하게 됩니다 — 실제로 이슈 H5에서 `recordRefund`가 `aggregate_pk`에 `orgPk`를 넣어, 환불 이벤트가 결제 원장이 아니라 조직을 가리키는 버그가 있었습니다.
+
+| 이벤트 부류 | aggregate_pk |
+|---|---|
+| 구독 상태 이벤트 (activated / grace / expired / canceled) | `org_subscription.pk` |
+| 환불 이벤트 (refund) | `payment_ledger.pk` |
+| entitlement 변경 | `org_entitlement.pk` |
+| 사용자/조직 상태 (suspend / reactivate / close) | 해당 `identity_user.pk` / `organization.pk` |
+
+### 발행 의무 대상 표
+
+아래 연산들은 상태를 바꾸고 외부 부수효과(이메일·정산·검색 색인·캐시 무효화 등)를 유발하므로, *반드시* 같은 트랜잭션에서 `outbox_event`를 발행해야 합니다. (이슈 H1은 이 중 일부, 특히 admin 함수군이 발행을 누락하고 있었음을 지적했습니다.)
+
+| 연산 | 이벤트 타입 (예) | aggregate_pk |
+|---|---|---|
+| `activateSubscription` | `subscription.activated` | `org_subscription.pk` |
+| `markGrace` | `subscription.grace` | `org_subscription.pk` |
+| `expireSubscription` | `subscription.expired` | `org_subscription.pk` |
+| `cancelSubscription` | `subscription.canceled` | `org_subscription.pk` |
+| `recordRefund` | `payment.refunded` | **`payment_ledger.pk`** |
+| `closeOrg` | `org.closed` | `organization.pk` |
+| `adminForceSubscriptionStatus` | `subscription.activated` / `.grace` / `.expired` / `.canceled` | `org_subscription.pk` |
+| `adminForceEntitlementStatus` | `entitlement.changed` | `org_entitlement.pk` |
+| `adminSuspendUser` | `user.suspended` | `identity_user.pk` |
+| `adminReactivateUser` | `user.reactivated` | `identity_user.pk` |
+| `adminRevokeApiKey` | `apikey.revoked` | `identity_user.pk` |
+
+admin/operator override 연산(`adminForce*`, `adminSuspendUser`, `adminReactivateUser`, `adminRevokeApiKey`)은 outbox 발행에 더해 **`support_action` 감사 기록이 필수**입니다 — 운영자 평면의 모든 상태 변경은 감사 레인을 남겨야 합니다([[operator-plane]] · [[break-glass]] · [[audit-two-lane]] 참고).
+
+이 레지스트리는 architecture 불변식 #13의 권위 목록입니다. **새 상태 전환 연산을 추가할 때는 여기에 등재하고 outbox를 발행**하세요.
+
+---
+
 ## 테스트 방법
 
 > 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]

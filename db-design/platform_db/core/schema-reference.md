@@ -547,6 +547,7 @@ CREATE INDEX idx_entitlement_expiry  ON org_entitlement (valid_until, status);  
 - **Gate B 체크**: `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > now())`. status만 보면 배치 실패 시 영구 무료 위험(불변식 #9).
 - **grace_until**: Gate B 판정 기준. `org_subscription.grace_until`은 빌링 추적용, Gate B는 이 컬럼만 읽음.
 - UNIQUE(org_pk, product_code): 한 org가 같은 product를 두 번 entitlement 받을 수 없음
+- **변경 API 스코프**: entitlement UPDATE/UPSERT는 unique 키 `(org_pk, product_code)`로 단일 행을 변경한다(불변식 #14). `(org_pk, service)`만으로 UPDATE하면 동일 service에 복수 product가 있을 때 **전부 갱신**된다(예: ACADEMY Basic + ACADEMY Pro). 운영자 override(`adminForceEntitlementStatus`)도 동일 — [[operator-plane]] override 계약.
 - **product_code↔service 정합은 앱 불변식**: UNIQUE에 service 미포함(`product_code`가 전역 UNIQUE라 service 유도). §F.1 UPSERT가 `product.service`와 일치하는 service만 기록하도록 보장 — 어긋난 행이 들어가면 Gate B 핫패스 인덱스(`idx_org_service_status`) 오통과 위험.
 - `GRACE`: 결제 실패 후 유예 기간 (grace_until까지 서비스 유지)
 
