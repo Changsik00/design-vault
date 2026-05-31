@@ -61,7 +61,7 @@ INSERT INTO role_capability VALUES ('TEACHER', 'view_students');
 ## 우리 결정 — 코드 상수 (D3)
 
 ```typescript
-// packages/db-platform/src/permissions.ts
+// packages/platform-db/src/permissions.ts
 export const ROLE_PERMISSION = {
   academy: {
     OWNER:    ['publish_video', 'view_students', 'manage_members', 'view_billing', 'manage_schedule'],

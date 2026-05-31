@@ -9,7 +9,7 @@ aliases: [ORM 테스트, Drizzle 테스트, orm-testing-drizzle]
 > **대상**: ORM은 써봤지만 ORM 코드를 *어떻게 테스트하는지*는 막막한 개발자 (공부용)
 > **연관 문서**: [[testing-strategy|테스트 전략]] · [[architecture|architecture.md §1 토폴로지]] · [[schema-reference|schema-reference.md §A.2 접근 계층]] · [[bola-object-authz|BOLA 객체 인가]] · [[multitenancy-rls|멀티테넌시 격리]]
 
-이 프로젝트는 **PostgreSQL 16 + Drizzle ORM** 스택입니다. 그리고 DB 접근은 오직 `@db-platform` 패키지 함수로만 합니다 — Drizzle 스키마를 직접 참조하는 것은 금지입니다([[schema-reference|§A.2]]). ORM은 SQL을 손으로 안 써도 되게 해주는 편한 도구지만, 바로 그 "편함" 때문에 **테스트에서 잘못된 안도감**을 주기 쉽습니다. 타입 체크는 초록불인데 운영에서 터지는 일이 ORM 코드에서 자주 납니다. 이 문서는 Drizzle 코드를 어디까지 mock하고 어디부터 진짜 DB로 검증해야 하는지, 그리고 그걸 실제로 어떻게 짜는지 공부하는 노트입니다.
+이 프로젝트는 **PostgreSQL 16 + Drizzle ORM** 스택입니다. 그리고 DB 접근은 오직 `@platform-db` 패키지 함수로만 합니다 — Drizzle 스키마를 직접 참조하는 것은 금지입니다([[schema-reference|§A.2]]). ORM은 SQL을 손으로 안 써도 되게 해주는 편한 도구지만, 바로 그 "편함" 때문에 **테스트에서 잘못된 안도감**을 주기 쉽습니다. 타입 체크는 초록불인데 운영에서 터지는 일이 ORM 코드에서 자주 납니다. 이 문서는 Drizzle 코드를 어디까지 mock하고 어디부터 진짜 DB로 검증해야 하는지, 그리고 그걸 실제로 어떻게 짜는지 공부하는 노트입니다.
 
 핵심 비유 하나를 먼저 깔고 갑니다. **ORM = 통역사**입니다. 내가 한국어(타입 안전한 메서드 체인)로 말하면 통역사가 현지어(SQL)로 옮겨줍니다. 편하죠. 그런데 *통역된 말이 현지에서 진짜 통하는지*는 현지에 가서 대화해 봐야 압니다. 타입 체크는 "내 한국어 문법이 맞나" 검사일 뿐이고, real DB 테스트가 "현지에서 실제로 대화"하는 것입니다.
 
@@ -121,7 +121,7 @@ await migrate(db, { migrationsFolder: "./drizzle" });
 
 여기서 **Testcontainers**는 테스트 시작 시 도커로 진짜 PostgreSQL 16 컨테이너를 띄우고 끝나면 버리는 도구입니다. "진짜 Postgres인데 일회용"이라, real DB의 신뢰성과 테스트의 격리성을 동시에 얻습니다. 프로젝트의 테스트 정책([[testing-strategy]])은 "쿼리·제약·격리는 real DB로"를 기본선으로 잡습니다.
 
-주의할 함정: **`@db-platform` 패키지 함수를 테스트할 때는 패키지를 mock하지 마세요.** 그 패키지 함수의 *존재 이유*가 "org_pk를 강제하고 올바른 SQL을 만드는 것"이므로, 그걸 mock하면 검증 대상 자체가 사라집니다. 반대로 그 패키지를 *소비하는 서비스 로직*을 단위 테스트할 때는 패키지 함수를 mock해도 됩니다(Q4).
+주의할 함정: **`@platform-db` 패키지 함수를 테스트할 때는 패키지를 mock하지 마세요.** 그 패키지 함수의 *존재 이유*가 "org_pk를 강제하고 올바른 SQL을 만드는 것"이므로, 그걸 mock하면 검증 대상 자체가 사라집니다. 반대로 그 패키지를 *소비하는 서비스 로직*을 단위 테스트할 때는 패키지 함수를 mock해도 됩니다(Q4).
 
 > 💡 **한 줄 요약**: 순수 로직은 mock으로 빠르게, 쿼리·제약·org_pk 격리·트랜잭션은 real DB(Testcontainers)로, 외부 시스템은 sandbox/mock으로 — "무엇을 증명하려는가"로 가릅니다.
 
@@ -129,7 +129,7 @@ await migrate(db, { migrationsFolder: "./drizzle" });
 
 ## Q4. repository 패턴은 어떻게 테스트하나요?
 
-**repository pattern(리포지토리 패턴)**은 "DB 접근 코드를 한 계층으로 모아, 서비스 로직이 SQL을 직접 모르게 하는" 구조입니다. 이 프로젝트에선 `@db-platform` 패키지가 그 계층이고, 특히 **base repo가 `org_pk`를 자동 주입**해 BOLA 방어를 프레임워크화합니다([[bola-object-authz]]). 개발자가 매번 손으로 `WHERE org_pk`를 붙이면 언젠가 빠뜨리니, base repo가 대신 강제하는 것이죠.
+**repository pattern(리포지토리 패턴)**은 "DB 접근 코드를 한 계층으로 모아, 서비스 로직이 SQL을 직접 모르게 하는" 구조입니다. 이 프로젝트에선 `@platform-db` 패키지가 그 계층이고, 특히 **base repo가 `org_pk`를 자동 주입**해 BOLA 방어를 프레임워크화합니다([[bola-object-authz]]). 개발자가 매번 손으로 `WHERE org_pk`를 붙이면 언젠가 빠뜨리니, base repo가 대신 강제하는 것이죠.
 
 테스트는 **두 층으로 나뉩니다.**
 
@@ -279,7 +279,7 @@ await db.insert(paymentLedger).values({ orgPk, amount, status: "WHATEVER" });
 | **Drizzle** | 이 프로젝트의 ORM/query builder. 타입 안전 + 얇은 추상화(생성 SQL이 예측 가능) |
 | **drizzle-kit** | Drizzle의 CLI. `generate`(마이그레이션 생성)·`migrate`(적용)·`push`(직접 반영) |
 | **migration drift** | 스키마 정의(코드)와 실제 테이블(DB)이 어긋난 상태. 테스트를 거짓 통과시킴 |
-| **repository pattern** | DB 접근을 한 계층으로 모으는 구조. 여기선 `@db-platform` 패키지가 그 계층 |
+| **repository pattern** | DB 접근을 한 계층으로 모으는 구조. 여기선 `@platform-db` 패키지가 그 계층 |
 | **base repo** | 모든 repo의 부모. `org_pk`를 자동 주입해 BOLA 방어를 프레임워크화 |
 | **N+1** | 부모 1개 + 자식 N개를 각각 따로 조회해 쿼리가 N+1번 나가는 성능 함정 |
 | **raw SQL escape hatch** | ORM으로 표현 못 하는 SQL을 `sql\`...\`` 템플릿으로 직접 쓰는 탈출구 |
@@ -353,7 +353,7 @@ it("강의 목록 조회는 쿼리 1번이어야 한다 (N+1 금지)", async () 
 □ drift: 스키마 정의 = 적용된 마이그레이션 (drizzle-kit generate가 빈 diff)
 □ N+1: 핵심 목록 쿼리의 발생 쿼리 수가 1(또는 상수)이다
 □ raw SQL: escape hatch로 쓴 sql`...`는 real DB로 직접 검증한다
-□ mock 경계: @db-platform 패키지 자체는 mock하지 않는다 (검증 대상이므로)
+□ mock 경계: @platform-db 패키지 자체는 mock하지 않는다 (검증 대상이므로)
 ```
 
 > 💡 **테스트 한 줄 요약**: 쿼리·제약·격리·트랜잭션은 Testcontainers Postgres로 real 검증하고, drift는 `drizzle-kit generate`(PG 방언) 빈-diff로, N+1은 쿼리 수 단언으로 잡으세요 — 타입이 못 보는 것을 DB가 보게 하는 게 전부입니다.
@@ -389,5 +389,5 @@ ORM은 좋은 통역사지만, 통역된 말이 현지에서 통하는지는 현
 - [[fk-strategy|FK 전략]] — 타입엔 없는 FK 제약이 런타임에 거부되는 갭의 한 예
 > 소스 문서
 - [[architecture]] — §1 토폴로지, base repo(org_pk 자동 주입)
-- [[schema-reference]] — §A.2 접근 계층(@db-platform·Drizzle, 패키지 함수만 호출), §M 계정, §G org_pk 강제
+- [[schema-reference]] — §A.2 접근 계층(@platform-db·Drizzle, 패키지 함수만 호출), §M 계정, §G org_pk 강제
 - [[requirements]] — 테스트·격리 관련 요구사항(테넌트 격리·트랜잭션 원자성)

@@ -233,7 +233,7 @@ PG에서는 `org_pk` 조건을 빠뜨려도 **RLS 정책이 DB에서 자동으�
 **현재 구현된 방어:**
 
 ```typescript
-// @db-platform 패키지의 모든 게이트 함수는 orgPk를 필수 파라미터로 받음
+// @platform-db 패키지의 모든 게이트 함수는 orgPk를 필수 파라미터로 받음
 // → TypeScript 컴파일러가 빠뜨리면 오류
 
 export async function getActiveMembership(

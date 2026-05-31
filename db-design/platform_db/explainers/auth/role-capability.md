@@ -128,7 +128,7 @@ DB에 저장되어 있지 **않습니다**. 이것은 의도적인 결정([[arch
 "TEACHER는 어떤 행동을 할 수 있다"는 규칙은 **코드 상수**로 관리합니다.
 
 ```typescript
-// @db-platform 패키지 어딘가에 이런 상수가 있습니다
+// @platform-db 패키지 어딘가에 이런 상수가 있습니다
 const ROLE_PERMISSION = {
   ACADEMY: {
     OWNER: [

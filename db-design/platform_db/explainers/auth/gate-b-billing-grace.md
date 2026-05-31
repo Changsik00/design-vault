@@ -418,7 +418,7 @@ Gate B 체크: status ∈ {ACTIVE, GRACE} AND (validUntil IS NULL OR validUntil 
 | status=EXPIRED, validUntil=미래 | → 차단이어야 함
 ```
 
-`packages/db-platform/src/gates.test.ts`에 이 케이스들이 단위 테스트 18건으로 존재합니다. 새로운 변경사항도 이 테스트를 통과해야 합니다.
+`packages/platform-db/src/gates.test.ts`에 이 케이스들이 단위 테스트 18건으로 존재합니다. 새로운 변경사항도 이 테스트를 통과해야 합니다.
 
 ---
 

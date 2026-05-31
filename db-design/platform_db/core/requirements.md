@@ -192,7 +192,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | ARCH-1 | 공통 코어(identity/billing/product) 단일 `platform_db`, 도메인은 서비스별 DB | R0 | [[design-asymmetry]] | ✅ |
 | ARCH-2 | strong-consistency(결제↔권한)는 단일 DB 트랜잭션, 2PC·Kafka 없음 | R0 | [[payment-atomicity]] | ✅ |
 | ARCH-3 | cross-DB는 서비스→platform 읽기만, peer 금지, least-privilege 계정 | R0 | 불변식 #6 | ✅ |
-| ARCH-4 | `@db-platform` 패키지로만 platform 접근 | R0 | [[identity-billing-access]] (A) | ✅ |
+| ARCH-4 | `@platform-db` 패키지로만 platform 접근 | R0 | [[identity-billing-access]] (A) | ✅ |
 | ARCH-5 | cross-schema FK 하드 금지(독립 백업/복원) | R0 | [[fk-strategy]] | ✅ |
 | ARCH-6 | async 부수효과는 `outbox_event` | R0 | [[outbox-pattern]] | ✅ |
 | SEC-1 | BOLA 방어 — org_pk 질의 강제 프레임워크화 | R4 | Drizzle base repo | ✅ |

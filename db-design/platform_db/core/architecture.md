@@ -50,7 +50,7 @@ flowchart LR
     D2["Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)"]
   end
 
-  APIS -->|"@db-platform 패키지로만 접근"| CORE
+  APIS -->|"@platform-db 패키지로만 접근"| CORE
   APIS --> DOMAIN
 ```
 
@@ -62,7 +62,7 @@ flowchart LR
 
 ```
 Layer 1 인증  : Firebase Auth (누구냐) — JWT, firebase_uid
-Layer 2 소속  : db-platform (어디 소속이냐) — membership tuple
+Layer 2 소속  : platform-db (어디 소속이냐) — membership tuple
 Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 ```
 

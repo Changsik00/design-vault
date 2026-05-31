@@ -19,7 +19,7 @@ tags:
 
 ## 결정
 
-소비 앱(academy-api, agent-api, marketplace-api 등)은 identity/billing에 **`@db-platform` 공유 패키지로만** 접근한다(Drizzle 직접 참조 금지). 단, **인터페이스를 분리 서비스(Option B)처럼 설계**해 전환 비용을 최소화한다.
+소비 앱(academy-api, agent-api, marketplace-api 등)은 identity/billing에 **`@platform-db` 공유 패키지로만** 접근한다(Drizzle 직접 참조 금지). 단, **인터페이스를 분리 서비스(Option B)처럼 설계**해 전환 비용을 최소화한다.
 
 ---
 
@@ -37,7 +37,7 @@ identity/billing DB는 academy 전용이 아니다 — 여러 앱이 같은 인�
 - **단점**: identity 컬럼 하나 바꾸면 모든 앱 쿼리 동시 수정·배포 / "누가 membership 테이블을 쓰는가" 추적 불가 / Gate 로직이 앱마다 중복돼 불일치 버그
 - **기각** — 앱이 2개를 넘는 순간 통제 불가.
 
-### 선택지 A — 공유 패키지 `@db-platform` (채택)
+### 선택지 A — 공유 패키지 `@platform-db` (채택)
 
 모든 앱이 같은 패키지를 통해 접근, Drizzle 쿼리는 패키지 내부에 캡슐화.
 
@@ -75,7 +75,7 @@ identity/billing을 독립 서비스로 운영, 소비 앱은 HTTP로 접근.
 
 ```typescript
 // 소비 앱 코드 — A/B 전환 불문 동일
-import { getPermissionContext } from '@db-platform'
+import { getPermissionContext } from '@platform-db'
 const ctx = await getPermissionContext(userPk, orgPk)
 ```
 

@@ -558,7 +558,7 @@ Scenario: 두 OWNER 가 동시에 서로를 강등하면 하나는 200·하나�
 
 > **검증 관점**: 동시 강등 레이스에서 (a) 한쪽 200·다른 쪽 409/`LAST_OWNER`, (b) 둘 다 200 은 발생하지 않음, (c) 사후 GET 의 OWNER count 가 정확히 ≥1 임을 검증. `FOR UPDATE` 직렬화(§N.3 1차 가드)는 내부라 단언하지 않고 *결과로서의 최소 1 OWNER 보존*만 관찰.
 > **통합 화이트박스 / 커버**: 17-10 (동시 강등 레이스) / OWN-1 · RBAC-6
-> **academy-api 구현**: 🔴 미구현 — 동시 강등 레이스 시나리오 없음. `removeOrgMember` (`packages/db-platform`)에 last-owner 가드가 구현됐으나 동시 접근 검증 테스트 없음
+> **academy-api 구현**: 🔴 미구현 — 동시 강등 레이스 시나리오 없음. `removeOrgMember` (`packages/platform-db`)에 last-owner 가드가 구현됐으나 동시 접근 검증 테스트 없음
 
 #### D1-08: SUSPENDED 멤버 재활성화 — 정지는 가역(DELETED 와 대비)
 
