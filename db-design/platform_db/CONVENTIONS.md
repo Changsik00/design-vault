@@ -25,7 +25,7 @@ tags:
   - `core/` — 아키텍처·요구·스키마·운영·검증 (한 주제당 한 파일)
   - `decisions/` — "왜 이렇게 했나" 의사결정 (비교 + 결정)
   - `explainers/<주제>/` — 학습 문서. 주제 = `auth · billing · data-modeling · security · compliance · operations`
-- 새 explainer는 **반드시 주제 디렉토리 안**에 두고, 그 디렉토리의 `README.md` 인덱스와 `explainers/README.md` 마스터 인덱스에 한 줄 추가.
+- 새 explainer는 **반드시 주제 디렉토리 안**에 두고, **`explainers/README.md` 마스터 인덱스**(주제별 섹션 + 편수)에 한 줄 추가. 마스터 인덱스가 explainer 목록의 단일 정본(SSOT) — 주제 디렉토리에는 별도 README를 두지 않는다(중복 방지).
 
 ---
 

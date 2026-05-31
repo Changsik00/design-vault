@@ -10,7 +10,7 @@ tags: [platform-db, explainer, index]
 > **분류**: 디렉토리 = 주제, `difficulty` 속성 = 난이도(🟢 초 → 🟡 중 → 🔴 고).
 > 강의 진도는 각 주제 안에서 초 → 고 순으로 따라가면 됩니다.
 
-**주제별 인덱스**: [🔐 auth](./auth/README.md) · [💳 billing](./billing/README.md) · [🗃️ data-modeling](./data-modeling/README.md) · [🛡️ security](./security/README.md) · [📋 compliance](./compliance/README.md) · [🛠️ operations](./operations/README.md) · [🧭 decisions](../decisions/README.md)
+**주제별 폴더**: [🔐 auth](./auth/) · [💳 billing](./billing/) · [🗃️ data-modeling](./data-modeling/) · [🛡️ security](./security/) · [📋 compliance](./compliance/) · [🛠️ operations](./operations/) — 아래 섹션이 이 인덱스의 정본. 의사결정은 [🧭 decisions](../decisions/README.md).
 
 ## 🔐 인가·인증 (Auth)  ·  10편
 
