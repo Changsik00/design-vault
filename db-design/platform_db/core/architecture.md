@@ -26,14 +26,32 @@ tags:
 
 회사의 여러 SaaS(academy / agent / market / store / fitness)를 받치는 **공통 플랫폼 코어 DB**.
 
-```
-                  ┌──────────────── platform_db (공통 코어, 단일 PostgreSQL) ──────────────┐
-                  │  identity · authZ(membership/role/capability) · entitlement        │
-   academy-api ──▶│  product · billing · consent · audit · api_key                    │◀── @aiagent/db-platform 패키지로만 접근
-   agent-api   ──▶│  = "누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의"의 SSOT │
-   market-api  ──▶└────────────────────────────────────────────────────────────────────┘
-   store-api   ──▶   academy_db / agent_db / market_db / store_db  (서비스 도메인, org_pk 격리)
-   fitness-api ──▶   + Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)
+```mermaid
+flowchart LR
+  subgraph APIS["서비스 API"]
+    direction TB
+    A1["academy-api"]
+    A2["agent-api"]
+    A3["market-api"]
+    A4["store-api"]
+    A5["fitness-api"]
+  end
+
+  subgraph CORE["platform_db — 공통 코어 · 단일 PostgreSQL"]
+    direction TB
+    C1["identity · authZ(membership/role/capability) · entitlement"]
+    C2["product · billing · consent · audit · api_key"]
+    C3["= 누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의 의 SSOT"]
+  end
+
+  subgraph DOMAIN["서비스 도메인 (org_pk 격리)"]
+    direction TB
+    D1["academy_db · agent_db · market_db · store_db"]
+    D2["Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)"]
+  end
+
+  APIS -->|"@platform-db 패키지로만 접근"| CORE
+  APIS --> DOMAIN
 ```
 
 **한 줄 철학**: *공통은 묶고(strong consistency), 도메인은 뗀다(독립 확장)* — **비대칭 분리**([[design-asymmetry]]).
@@ -42,21 +60,33 @@ tags:
 
 ### 1.2 권한 모델 — 3-gate
 
-```
-Layer 1 인증  : Firebase Auth (누구냐) — JWT, firebase_uid
-Layer 2 소속  : db-platform (어디 소속이냐) — membership tuple
-Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
+**인증으로 *누구냐*를 식별(step 0)한 뒤, 세 게이트(소속·이용권·정책)를 모두 통과해야 `ALLOW`.** 각 게이트는 fail-closed — 하나라도 막히면 `DENY`. (인증은 게이트가 아니라 사전 식별 단계다.)
+
+```mermaid
+flowchart TD
+  P["0 · 인증/식별 (principal resolve)<br/>HUMAN: Firebase → user.pk<br/>MACHINE: api_key → principal_pk"]
+  A{"Gate A · 소속<br/>membership.status = ACTIVE (+ platform_role)"}
+  B{"Gate B · 이용권/결제<br/>org_entitlement.status = ACTIVE/GRACE + feature_limit"}
+  C{"Gate C · 정책<br/>RBAC · ReBAC · ABAC (CASL ability)"}
+  OK(["ALLOW · audit_log 기록"])
+  NO(["DENY (fail-closed)"])
+  P --> A
+  A -->|통과| B
+  B -->|통과| C
+  C -->|통과| OK
+  A -->|실패| NO
+  B -->|실패| NO
+  C -->|실패| NO
 ```
 
-```
-0) principal resolve   HUMAN: Firebase→user.pk / MACHINE: api_key→principal_pk
-1) Gate A 소속   membership(principal, org).status = ACTIVE  (+ platform_role)
-2) Gate B 이용권 org_entitlement(org, service).status ∈ {ACTIVE, GRACE} + feature_limit
-3) Gate C 정책   RBAC : service_membership.role_code → ROLE_PERMISSION[service][role] (코드)
-                 ReBAC: delegation_grant(grantee, capability, ACTIVE, !expired)
-                 ABAC : resource.owner_pk == principal.pk  +  환경(client_ip 등)
-→ A ∧ B ∧ C → ALLOW, audit_log 기록
-```
+게이트별 확인 대상:
+
+| 단계 | 질문 | 확인 |
+|---|---|---|
+| 0 인증 | 누구냐 | Firebase JWT(`firebase_uid`) 또는 `api_key` → `principal_pk` 해석 |
+| Gate A 소속 | 어디 소속이냐 | `membership(principal, org).status = ACTIVE` (+ `platform_role`) |
+| Gate B 이용권 | 구독·결제가 유효한가 | `org_entitlement(org, service).status ∈ {ACTIVE, GRACE}` + `feature_limit` |
+| Gate C 정책 | 무엇을 할 수 있나 | RBAC `role_code→ROLE_PERMISSION` · ReBAC `delegation_grant` · ABAC `owner_pk`+환경 |
 
 | 모델 | 의미 | 저장 |
 |---|---|---|
@@ -73,14 +103,15 @@ Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
 
 ### 1.3 데이터 일관성 — billing → projection → auth
 
-```
-PG Webhook (Stripe/Toss 이벤트 스트림)
-    ↓
-org_subscription  ← Billing Canonical Truth (provider, invoice, retry, grace, refund, trial, ...)
-    ↓ [이벤트 투영 — 단일 트랜잭션]
-org_entitlement   ← Authorization Projection (status, valid_until, grace_until, feature_limits)
-    ↓
-Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(불변식 #4)
+```mermaid
+flowchart TD
+  W["PG(결제대행사) Webhook<br/>Stripe / Toss 이벤트 스트림"]
+  S["org_subscription — Billing Canonical Truth<br/>provider · invoice · retry · grace · refund · trial …"]
+  E["org_entitlement — Authorization Projection<br/>status · valid_until · grace_until · feature_limits"]
+  G["Gate B — can_access? 만 판단<br/>subscription 직접 조회 금지 (불변식 #4)"]
+  W --> S
+  S -->|"이벤트 투영 · 단일 Postgres 트랜잭션"| E
+  E --> G
 ```
 
 - **왜 분리하나**: billing 복잡도(provider/invoice/retry)를 auth에서 격리 → auth 단일 테이블 조회, billing 장애 격리, 캐시 단순. ([[auth-projection]])
@@ -94,12 +125,12 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(
 
 **전략: 공유 DB + `org_pk` 행 격리**([[multitenancy-pool]]).
 
-| 저장소 | 격리 방법 | 상태 |
-|---|---|---|
-| PostgreSQL | RLS(`CREATE POLICY … USING(org_pk=current_setting('app.org_pk')::bigint)`)로 DB가 격리 강제 + `org_pk NOT NULL`·앱 레이어 `WHERE org_pk`(defense-in-depth) | ✅ RLS + 스키마 강제 · 🟡 CI 린트 보조 미완 |
-| Qdrant | `org_id` payload 필터 강제 | ✅ · 🟡 `is_tenant` 마커 미추가 ([[rag-multitenancy]]) |
-| Neo4j | `orgId` 노드 속성 + Cypher 강제 | ✅ · 🟡 APOC 쓰기측 차단 P1 |
-| Redis | key prefix `org:{org_pk}:...` | ✅ |
+| 저장소        | 격리 방법                                                                                                                                            | 상태                                               |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| PostgreSQL | RLS(`CREATE POLICY … USING(org_pk=current_setting('app.org_pk')::bigint)`)로 DB가 격리 강제 + `org_pk NOT NULL`·앱 레이어 `WHERE org_pk`(defense-in-depth) | ✅ RLS + 스키마 강제 · 🟡 CI 린트 보조 미완                  |
+| Qdrant     | `org_id` payload 필터 강제                                                                                                                           | ✅ · 🟡 `is_tenant` 마커 미추가 ([[rag-multitenancy]]) |
+| Neo4j      | `orgId` 노드 속성 + Cypher 강제                                                                                                                        | ✅ · 🟡 APOC 쓰기측 차단 P1                            |
+| Redis      | key prefix `org:{org_pk}:...`                                                                                                                    | ✅                                                |
 
 **분리 트리거** — 하나라도 충족 시 착수 (단계: Read replica → 고속 테이블 분리 → DB-per-large-tenant):
 
@@ -119,7 +150,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 - **`user_consent_event` append-only**: `user × consent_type × terms_version × action(GRANTED/REVOKED) × meta_json × prev_hash/row_hash`. 반복 이력 전부 보존([[pipa-consent]]).
 - **consent_type 네임스페이스**: `platform.*`(계정) / `pg.*`(결제 제3자) / 서비스 `*`(도메인 DB).
 - **전자서명법 §3**: 약관 체크박스 동의 = 서면 서명과 동일 효력. `user_consent_event` row가 법적 증거.
-- **데이터 이전 경계**: 본인 정보(identity·profile·멤버십)는 이전 가능, 학생·수업기록·결제이력은 org 소유로 이전 불가 — `org_pk NOT NULL` 격리가 강제. (동의: `platform.content_ownership`·`platform.data_transfer`)
+- **데이터 이전 경계**: 본인에 귀속된 정보(identity·profile·멤버십)는 이전 가능. 반면 **멤버가 org 안에서 남긴 활동·기록과 거래 이력(=org 귀속 자산)**은 org 소유라 개인이 가지고 나갈 수 없다 — `org_pk NOT NULL` 격리가 강제. *예: academy면 수업기록, market이면 거래·리뷰 — 서비스마다 형태는 달라도 "org 자산"이라는 경계는 같다.* (동의: `platform.content_ownership`·`platform.data_transfer`)
 - **법 요건**: 14세 미만 법정대리인 동의(§22, 법적 필수) · 제3자 제공 4요건(§17, meta_json + JSON Schema + RFC 8785 canonical) · 철회권(§37, REVOKED + perm_version) · 마케팅 옵트아웃(정보통신망법 §50).
 - 보존 5년 + 해시 사슬(tamper-evident). 약관 본문은 S3/CMS, DB엔 `terms_version`만.
 
@@ -131,7 +162,11 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 1. **Firebase = 인증, 인가 = 우리 DB.** `firebase_uid`는 조회 키일 뿐 PK/FK 아님.
 2. **내부 PK는 BIGINT, 외부 노출은 ULID(`public_id`).** 시퀀셜 PK를 URL·API에 노출 금지.
-3. **테넌트 데이터를 담는 모든 도메인 테이블은 `org_pk NOT NULL`.** 예외는 3부류뿐 — ① 전역 카탈로그(`product`·`product_sku`·`plan_definition`) ② 플랫폼 이벤트 버스(`pg_webhook_event`·`outbox_event`) ③ `audit_log`(SYSTEM actor 이벤트는 org 무관, nullable). `user_consent_event`는 user-scoped, `subscription_item`은 부모로 격리. 그 외 누락 = PR 반려([[schema-reference]] §G.1).
+3. **테넌트 데이터를 담는 모든 도메인 테이블은 `org_pk NOT NULL`.** 누락 = PR 반려([[schema-reference]] §G.1). 아래 예외만 허용:
+   - **전역 카탈로그** — `product` · `product_sku` · `plan_definition` (테넌트 무관 공용 데이터)
+   - **플랫폼 이벤트 버스** — `pg_webhook_event` · `outbox_event`
+   - **`audit_log`** — SYSTEM actor 이벤트는 org 무관이라 nullable
+   - **`user_consent_event`** — user-scoped(개인 귀속) · **`subscription_item`** — 부모(`org_subscription`)로 격리
 4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. entitlement는 billing의 authorization projection이며 Gate B의 유일 진실 원천.
 5. **`service`는 `VARCHAR(50)` + `CHECK`.** ENUM 아님. 새 서비스 = CHECK 1줄 추가([[service-extensibility]]). 현재: `ACADEMY`·`MARKET`·`AGENT`·`YOUTUBE`·`STORE`.
 6. **cross-DB는 아래로만.** `service_db → platform_db` 읽기 OK. 옆으로(`academy_db → store_db`) 금지. cross-schema FK 금지([[fk-strategy]]).

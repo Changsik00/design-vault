@@ -1,0 +1,8 @@
+# Obsidian — 개인/세션 UI 상태(자동 생성, 커밋 제외)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.obsidian/cache
+
+# OS
+.DS_Store

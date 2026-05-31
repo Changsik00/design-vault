@@ -147,7 +147,7 @@ T1~T4 트리거 도달 시 단계 실행:
 ## 관련 문서
 
 - [[cross-tenant-separation]] — 격리를 의도적으로 벗어나는 cross-tenant 집계 처리
-- [[rag-multitenancy]] — 같은 "공유 + 격리" 철학의 Qdrant 적용
+- [[rag-multitenancy]] — 같은 "공유 + 격리" 철학의 RAG(Qdrant 벡터·Neo4j 그래프) 적용
 > 소스 문서
 - [[architecture]] — §1.4 멀티테넌시 격리 전략 전문
 - [[schema-reference]] — §G Qdrant·Neo4j·Redis 격리 구현 현황

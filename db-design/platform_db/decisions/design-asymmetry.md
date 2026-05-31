@@ -80,7 +80,7 @@ market-api   →  market_db   (identity 복사본 + 상품 데이터)
 ```
                   ┌─────────── platform_db (공통 코어) ───────────┐
                   │  identity · billing · product · consent · audit │
-  academy-api ───▶│                                                 │◀── @aiagent/db-platform 패키지만 접근
+  academy-api ───▶│                                                 │◀── @platform-db 패키지만 접근
   agent-api   ───▶│  = "누구 / 어디 소속 / 무엇을 구독 / 무엇에 동의"   │
   market-api  ───▶└─────────────────────────────────────────────────┘
                         ↕ (읽기만. platform_db → 서비스 금지)

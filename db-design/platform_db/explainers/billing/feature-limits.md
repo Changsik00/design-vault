@@ -166,7 +166,7 @@ const feature = await db.query.productFeature.findFirst({
 const limit = feature?.limitValue; // ← 이 값은 org별 조정이 반영 안 됨
 ```
 
-`@aiagent/db-platform` 패키지에 이미 헬퍼 함수가 있습니다:
+`@platform-db` 패키지에 이미 헬퍼 함수가 있습니다:
 
 ```typescript
 // billing/index.ts
