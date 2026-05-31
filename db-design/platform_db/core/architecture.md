@@ -26,14 +26,32 @@ tags:
 
 회사의 여러 SaaS(academy / agent / market / store / fitness)를 받치는 **공통 플랫폼 코어 DB**.
 
-```
-                  ┌──────────────── platform_db (공통 코어, 단일 PostgreSQL) ──────────────┐
-                  │  identity · authZ(membership/role/capability) · entitlement        │
-   academy-api ──▶│  product · billing · consent · audit · api_key                    │◀── @aiagent/db-platform 패키지로만 접근
-   agent-api   ──▶│  = "누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의"의 SSOT │
-   market-api  ──▶└────────────────────────────────────────────────────────────────────┘
-   store-api   ──▶   academy_db / agent_db / market_db / store_db  (서비스 도메인, org_pk 격리)
-   fitness-api ──▶   + Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)
+```mermaid
+flowchart LR
+  subgraph APIS["서비스 API"]
+    direction TB
+    A1["academy-api"]
+    A2["agent-api"]
+    A3["market-api"]
+    A4["store-api"]
+    A5["fitness-api"]
+  end
+
+  subgraph CORE["platform_db — 공통 코어 · 단일 PostgreSQL"]
+    direction TB
+    C1["identity · authZ(membership/role/capability) · entitlement"]
+    C2["product · billing · consent · audit · api_key"]
+    C3["= 누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의 의 SSOT"]
+  end
+
+  subgraph DOMAIN["서비스 도메인 (org_pk 격리)"]
+    direction TB
+    D1["academy_db · agent_db · market_db · store_db"]
+    D2["Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)"]
+  end
+
+  APIS -->|"@aiagent/db-platform 패키지로만 접근"| CORE
+  APIS --> DOMAIN
 ```
 
 **한 줄 철학**: *공통은 묶고(strong consistency), 도메인은 뗀다(독립 확장)* — **비대칭 분리**([[design-asymmetry]]).
