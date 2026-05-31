@@ -4,7 +4,7 @@
 
 요구수렴부터 아키텍처 · 스키마 · 의사결정 · 검증 · **교육 문서**까지 한 흐름으로 정리해서, 강의 · 온보딩 · 컨설팅 레퍼런스로 바로 쓸 수 있게 했어요.
 
-> 모든 내용은 👉 [db-design/platform_db/](./db-design/platform_db/) 안에 있습니다.
+> 📂 **무엇이 어디 있는지는 전체 카탈로그 [index.md](./index.md)** 한 곳에서. 설계 문서는 [db-design/platform_db/](./db-design/platform_db/), 위키 운영 규약은 [WIKI.md](./WIKI.md).
 
 ---
 
@@ -40,7 +40,7 @@
 
 ## 📚 학습 경로
 
-상세 커리큘럼은 [explainers 학습 인덱스](./db-design/platform_db/explainers/README.md)(주제별·난이도순)를 따라가면 됩니다.
+상세 커리큘럼은 [전체 카탈로그 index.md](./index.md)의 explainers 섹션(주제별·난이도순)을 따라가면 됩니다.
 
 1. **큰 그림** — `architecture` → `requirements`
 2. **🟢 초** — multitenancy-rls · gate-abc-flow · pk-ulid-strategy · delete-patterns
