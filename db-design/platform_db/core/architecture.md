@@ -60,21 +60,33 @@ flowchart LR
 
 ### 1.2 권한 모델 — 3-gate
 
-```
-Layer 1 인증  : Firebase Auth (누구냐) — JWT, firebase_uid
-Layer 2 소속  : platform-db (어디 소속이냐) — membership tuple
-Layer 3 정책  : 각 서비스 CASL ability (무엇을 할 수 있냐)
+**인증으로 *누구냐*를 식별(step 0)한 뒤, 세 게이트(소속·이용권·정책)를 모두 통과해야 `ALLOW`.** 각 게이트는 fail-closed — 하나라도 막히면 `DENY`. (인증은 게이트가 아니라 사전 식별 단계다.)
+
+```mermaid
+flowchart TD
+  P["0 · 인증/식별 (principal resolve)<br/>HUMAN: Firebase → user.pk<br/>MACHINE: api_key → principal_pk"]
+  A{"Gate A · 소속<br/>membership.status = ACTIVE (+ platform_role)"}
+  B{"Gate B · 이용권/결제<br/>org_entitlement.status = ACTIVE/GRACE + feature_limit"}
+  C{"Gate C · 정책<br/>RBAC · ReBAC · ABAC (CASL ability)"}
+  OK(["ALLOW · audit_log 기록"])
+  NO(["DENY (fail-closed)"])
+  P --> A
+  A -->|통과| B
+  B -->|통과| C
+  C -->|통과| OK
+  A -->|실패| NO
+  B -->|실패| NO
+  C -->|실패| NO
 ```
 
-```
-0) principal resolve   HUMAN: Firebase→user.pk / MACHINE: api_key→principal_pk
-1) Gate A 소속   membership(principal, org).status = ACTIVE  (+ platform_role)
-2) Gate B 이용권 org_entitlement(org, service).status ∈ {ACTIVE, GRACE} + feature_limit
-3) Gate C 정책   RBAC : service_membership.role_code → ROLE_PERMISSION[service][role] (코드)
-                 ReBAC: delegation_grant(grantee, capability, ACTIVE, !expired)
-                 ABAC : resource.owner_pk == principal.pk  +  환경(client_ip 등)
-→ A ∧ B ∧ C → ALLOW, audit_log 기록
-```
+게이트별 확인 대상:
+
+| 단계 | 질문 | 확인 |
+|---|---|---|
+| 0 인증 | 누구냐 | Firebase JWT(`firebase_uid`) 또는 `api_key` → `principal_pk` 해석 |
+| Gate A 소속 | 어디 소속이냐 | `membership(principal, org).status = ACTIVE` (+ `platform_role`) |
+| Gate B 이용권 | 구독·결제가 유효한가 | `org_entitlement(org, service).status ∈ {ACTIVE, GRACE}` + `feature_limit` |
+| Gate C 정책 | 무엇을 할 수 있나 | RBAC `role_code→ROLE_PERMISSION` · ReBAC `delegation_grant` · ABAC `owner_pk`+환경 |
 
 | 모델 | 의미 | 저장 |
 |---|---|---|
