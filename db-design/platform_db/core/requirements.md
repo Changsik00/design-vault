@@ -150,7 +150,7 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 | TEN-3 | cross-tenant 조회는 아키텍처 분리(`internal/`) | R1 | [[cross-tenant-separation]] | ✅ |
 | TEN-4 | PG RLS로 테넌트 격리 강제 + 앱 `org_pk`·CI 린트(defense-in-depth) | R1 | 🟡 린트 미도입 | 🟡 |
 | TEN-5 | Qdrant payload 필터 + `org_id` 인덱스 | R1 | [[rag-multitenancy]] | 🟡 |
-| TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | — | 🟡 |
+| TEN-6 | Neo4j `org_id` 속성 + 멀티홉 경로 전체 강제 | R1 | [[rag-multitenancy]] | 🟡 |
 | TEN-7 | 분리 트리거 T1~T4 사전 정의 | R0 | [[multitenancy-pool]] | ✅ |
 | TEN-9 | rate-limit 정책 위치 — org=`feature_limits` / 머신=`api_key.rate_limit_tier`, 강제는 Gateway | R6 | §3.1 결정 | 🟡 |
 
