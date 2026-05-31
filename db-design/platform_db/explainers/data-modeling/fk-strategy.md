@@ -37,7 +37,7 @@ CONSTRAINT fk_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk)
 INSERT INTO membership (user_pk, ...) VALUES (999, ...);
 -- user_pk=999가 identity_user에 없으면?
 FK 없음: INSERT 성공 → 고아(orphan) 데이터 생성
-FK 있음: ERROR 1452 → 앱이 에러 처리
+FK 있음: SQLSTATE 23503 (foreign_key_violation) → 앱이 에러 처리
 ```
 
 FK가 해주는 일: ① 고아 row 방지(정합성) ② ERD에서 관계 문서화 ③ FK 컬럼 인덱스 자동 생성(JOIN 성능). 그래서 **같은 스키마 안에서는** FK를 씁니다 — 정합성 보장 비용이 낮고 효과가 큽니다.
@@ -52,7 +52,7 @@ FK가 해주는 일: ① 고아 row 방지(정합성) ② ERD에서 관계 문�
 
 ```sql
 CREATE TABLE lecture (
-  teacher_pk BIGINT UNSIGNED NOT NULL,  -- identity_user.pk 참조하지만 FK 없음
+  teacher_pk BIGINT NOT NULL,  -- identity_user.pk 참조하지만 FK 없음
   ...
 );
 ```

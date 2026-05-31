@@ -96,7 +96,7 @@ market-api   →  market_db   (identity 복사본 + 상품 데이터)
 
 **채택 근거**:
 1. market의 cross-service 단일 상품 카탈로그 → `platform_db.product`에 통합
-2. 결제↔권한 단일 트랜잭션 → 같은 InnoDB 안에서 `BEGIN/COMMIT` (분산 트랜잭션 불필요)
+2. 결제↔권한 단일 트랜잭션 → 같은 Postgres(MVCC) 안에서 `BEGIN/COMMIT` (분산 트랜잭션 불필요)
 3. 모든 서비스가 한 곳(`platform_db`)만 보고 entitlement 확인
 4. 현 규모(팀 5인 이하)에서 분산 트랜잭션 운영 비용이 이익보다 큼
 

@@ -5,7 +5,7 @@ tags:
   - explainer
   - p1
   - db-ops
-  - mysql
+  - postgres
   - index
   - performance
 aliases:
@@ -26,10 +26,10 @@ aliases:
 
 ## Q1. 인덱스가 뭔가요? 없으면 어떤 일이 생기나요?
 
-인덱스는 **책 뒤의 색인(index)** 과 똑같습니다. 책 500페이지 중에서 "MySQL"이라는 단어가 어디 있는지 찾으려면 두 가지 방법이 있습니다.
+인덱스는 **책 뒤의 색인(index)** 과 똑같습니다. 책 500페이지 중에서 "PostgreSQL"이라는 단어가 어디 있는지 찾으려면 두 가지 방법이 있습니다.
 
 - 방법 A: 1페이지부터 500페이지를 전부 읽는다 (풀스캔)
-- 방법 B: 책 뒤의 색인에서 "MySQL → 23, 47, 189 페이지"를 찾아 그 페이지만 읽는다 (인덱스 스캔)
+- 방법 B: 책 뒤의 색인에서 "PostgreSQL → 23, 47, 189 페이지"를 찾아 그 페이지만 읽는다 (인덱스 스캔)
 
 테이블에 1,000만 건의 데이터가 있고 인덱스가 없다면, `WHERE user_pk = 12345` 한 줄로도 1,000만 건을 전부 읽어야 합니다.
 
@@ -43,7 +43,7 @@ SELECT * FROM membership WHERE user_pk = 12345;
 -- → 인덱스 트리를 타고 몇 건만 읽음. 수 ms
 ```
 
-MySQL InnoDB는 인덱스를 **B-Tree(균형 이진 트리)** 구조로 저장합니다. 데이터를 정렬된 트리 형태로 관리하기 때문에 원하는 값을 찾을 때 트리를 타고 내려가기만 하면 됩니다. 1,000만 건이어도 탐색 횟수는 약 24번(log₂(10,000,000) ≈ 24)에 불과합니다.
+PostgreSQL의 기본 인덱스는 **B-Tree(균형 트리)** 구조입니다. 데이터를 정렬된 트리 형태로 관리하기 때문에 원하는 값을 찾을 때 트리를 타고 내려가기만 하면 됩니다. 1,000만 건이어도 탐색 횟수는 약 24번(log₂(10,000,000) ≈ 24)에 불과합니다. (JSONB 포함 검색이라면 B-Tree 대신 GIN 인덱스를 씁니다 — [[json-column]].)
 
 > 💡 **한 줄 요약**: 인덱스는 책 색인처럼 특정 컬럼 기준으로 데이터 위치를 미리 정리해 놓은 구조로, 없으면 매번 전체 데이터를 뒤져야 합니다.
 
@@ -72,9 +72,9 @@ MySQL InnoDB는 인덱스를 **B-Tree(균형 이진 트리)** 구조로 저장�
 ```
 풀스캔 발견 방법:
   EXPLAIN SELECT * FROM org_entitlement WHERE org_pk=1 AND service='ACADEMY';
-  → type: ALL     (풀스캔, 위험)
-  → type: ref     (인덱스 사용, 안전)
-  → type: range   (인덱스 범위 스캔, 안전)
+  → Seq Scan        (풀스캔, 위험)
+  → Index Scan      (인덱스 사용, 안전)
+  → Bitmap Index Scan / Index Only Scan (인덱스 기반, 안전)
 ```
 
 > 💡 **한 줄 요약**: 풀스캔은 데이터 증가에 비례해 느려지고, 동시 요청이 많으면 서버 전체를 멈출 수 있습니다.
@@ -123,7 +123,10 @@ WHERE org_pk = ?
 이를 위한 인덱스:
 
 ```sql
-INDEX idx_org_service_status (org_pk, service, status, valid_until)
+CREATE INDEX idx_org_service_status
+  ON org_entitlement (org_pk, service, status, valid_until);
+-- PostgreSQL에선 valid_until을 INCLUDE 컬럼으로 빼 더 명시적으로 커버링할 수도 있습니다:
+--   CREATE INDEX ... ON org_entitlement (org_pk, service, status) INCLUDE (valid_until);
 ```
 
 컬럼 순서를 하나씩 따져봅니다:
@@ -166,15 +169,15 @@ INDEX idx_org_service_status (org_pk, service, status, valid_until)
 -- 매일 실행되는 배치 쿼리
 UPDATE org_entitlement
 SET status = 'EXPIRED'
-WHERE valid_until < NOW()
+WHERE valid_until < now()
   AND status = 'ACTIVE';
 ```
 
 이 쿼리는 Gate B 쿼리와 다른 패턴입니다. Gate B는 "특정 org_pk"([[multitenancy-rls|멀티테넌시]] 격리 선두 컬럼)로 좁히지만, 배치는 **날짜 기준으로 전체 테이블**을 봅니다. 그래서 인덱스도 다르게 설계됩니다.
 
 ```sql
-INDEX idx_entitlement_expiry (valid_until, status)
--- 배치 쿼리: WHERE valid_until < NOW() AND status='ACTIVE'
+CREATE INDEX idx_entitlement_expiry ON org_entitlement (valid_until, status);
+-- 배치 쿼리: WHERE valid_until < now() AND status='ACTIVE'
 ```
 
 이 인덱스가 없으면 배치가 실행될 때 수백만 건의 `org_entitlement` 전체를 스캔해야 합니다. 배치 실행 시간이 길어지면:
@@ -183,7 +186,7 @@ INDEX idx_entitlement_expiry (valid_until, status)
 2. 배치가 테이블 락(lock)을 잡으면 Gate B가 대기해야 함
 3. 서비스 전체가 느려짐
 
-인덱스가 있으면 `valid_until < NOW()`에 해당하는 적은 수의 행만 빠르게 찾아 처리합니다.
+인덱스가 있으면 `valid_until < now()`에 해당하는 적은 수의 행만 빠르게 찾아 처리합니다.
 
 ```
 만료 배치 인덱스 효과:
@@ -193,7 +196,7 @@ INDEX idx_entitlement_expiry (valid_until, status)
   (예상 시간: 수십 초)
 
 인덱스 있음:
-  valid_until < NOW() 범위를 인덱스에서 바로 찾음 → 1,000건만 접근
+  valid_until < now() 범위를 인덱스에서 바로 찾음 → 1,000건만 접근
   (예상 시간: 수십 ms)
 ```
 
@@ -244,7 +247,7 @@ INDEX idx_entitlement_expiry (valid_until, status)
 | 인덱스 | 목적 | 쿼리 패턴 |
 |---|---|---|
 | `idx_org_service_status` | Gate B 핫패스 | `WHERE org_pk=? AND service=? AND status IN(...)` |
-| `idx_entitlement_expiry` | 만료 배치 | `WHERE valid_until < NOW() AND status='ACTIVE'` |
+| `idx_entitlement_expiry` | 만료 배치 | `WHERE valid_until < now() AND status='ACTIVE'` |
 | `idx_pg_webhook_status` | 재처리 워커 | `WHERE status='FAILED' ORDER BY created_at` |
 | `idx_audit_break_glass` | 보안 감사 | `WHERE break_glass=TRUE ORDER BY created_at` |
 
@@ -260,7 +263,7 @@ INDEX idx_entitlement_expiry (valid_until, status)
 - 배치처럼 날짜 범위로 스캔하는 쿼리 → 날짜 컬럼이 선두인 전용 인덱스
 - 재처리 워커처럼 상태 + 시간 기준 → 상태 컬럼이 선두인 복합 인덱스
 
-새 기능을 만들 때 쿼리를 작성했다면 반드시 `EXPLAIN`으로 인덱스가 제대로 타는지 확인하는 습관을 들이세요. `type: ALL`이 보이면 인덱스 추가를 검토해야 합니다.
+새 기능을 만들 때 쿼리를 작성했다면 반드시 `EXPLAIN`으로 인덱스가 제대로 타는지 확인하는 습관을 들이세요. 플랜에 `Seq Scan`이 보이면 인덱스 추가를 검토해야 합니다.
 
 ---
 

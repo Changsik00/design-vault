@@ -29,7 +29,7 @@ tags:
 ## A.1 DB 구조
 
 ```
-MySQL 8 (단일 인스턴스)
+PostgreSQL 16 (단일 인스턴스)
 ├── platform_db          ← 모든 서비스 공유 (이 문서 범위)
 │     [identity]   organization, identity_user, user_profile
 │                  membership, membership_invite, delegation_grant
@@ -54,18 +54,18 @@ MySQL 8 (단일 인스턴스)
 - `academy_db → store_db` (peer): **금지**
 - cross-schema FK: **전면 금지** (독립 백업/복원 보장)
 
-> **🛢️ MySQL 사용 배경**: MySQL 8은 회사 표준 인프라 규약에 따른 선택으로 기술적 선호의 결과가 아니다. DB를 자유롭게 선택할 수 있다면 **PostgreSQL을 권장**한다.
+> **🐘 PostgreSQL 1순위 권장**: 이 문서의 DDL·정책은 PostgreSQL을 기준으로 작성한다. RLS 네이티브(`CREATE POLICY`)·JSONB GIN·선언적 파티셔닝(TIMESTAMPTZ 그대로)·`pgcrypto`·`FOR UPDATE SKIP LOCKED`를 1순위로 활용한다. **회사 인프라가 MySQL이면 각 절의 "🐬 MySQL이라면" 노트를 따른다.**
 >
 > | 이유 | 상세 |
 > |---|---|
 > | **RLS 네이티브 지원** | `CREATE POLICY org_isolation ON table USING (org_pk = ...)` — §G "CI 린트 보강" 우회로가 처음부터 불필요 |
 > | **JSONB GIN 인덱스** | `feature_limits`, `meta_json`, `payload_json`에 `@>` 연산자 인덱스 → MySQL JSON 대비 대폭 빠른 쿼리 |
-> | **파티셔닝 완전 지원** | `audit_log.created_at`에 TIMESTAMP 그대로 사용 가능. MySQL 8.0의 `PARTITION BY RANGE COLUMNS` + TIMESTAMP 미지원 버그로 인해 §D.8의 DATETIME 우회가 필요 없어짐 |
+> | **파티셔닝 완전 지원** | `audit_log.created_at`에 TIMESTAMPTZ 그대로 사용 + 선언적 `PARTITION OF` 자식 테이블 |
 > | **`pgcrypto` 내장** | 감사 해시 체이닝(`prev_hash`/`row_hash`)을 DB 네이티브 SHA-256으로 처리 — 앱 레이어 불필요 |
 > | **`FOR UPDATE SKIP LOCKED`** | outbox_event 워커 lock 경합 없는 네이티브 지원 |
-> | **Drizzle PG 방언 풍부** | GENERATED ALWAYS 컬럼, CTE with writes, 더 많은 타입 지원 |
+> | **GENERATED ALWAYS / CTE writes** | IDENTITY 컬럼, writable CTE, 풍부한 타입 지원 |
 >
-> 현재는 MySQL + Drizzle 스택이 확립되어 있어 전환보다 최적화를 선택한다. **"MySQL은 RLS 없음"은 PostgreSQL을 사용했다면 발생하지 않았을 구조적 제약임을 명시한다.**
+> 각 DDL 블록은 PostgreSQL 형이 1순위이고, 🐬 MySQL이라면 노트가 동등 기능의 MySQL 표현을 제공한다.
 
 ## A.2 접근 계층
 
@@ -77,7 +77,7 @@ MySQL 8 (단일 인스턴스)
   ├── billing/index.ts    (getEntitlement, getFeatureLimit, …)
   └── gates.ts            (getPermissionContext, checkGateA/B)
   ↓
-Drizzle ORM → platform_db (MySQL)
+Drizzle ORM → platform_db (PostgreSQL)
 ```
 
 Drizzle 스키마 직접 참조 금지. 패키지 함수만 호출.
@@ -88,10 +88,34 @@ Drizzle 스키마 직접 참조 금지. 패키지 함수만 호출.
 
 | 용도 | 타입 | 규칙 |
 |---|---|---|
-| 내부 PK / JOIN | `BIGINT UNSIGNED AUTO_INCREMENT` | DB 외부 노출 금지 |
+| 내부 PK / JOIN | `BIGINT GENERATED ALWAYS AS IDENTITY` | DB 외부 노출 금지 |
 | 외부 노출 | `CHAR(26)` ULID (`public_id`) | API 응답, URL에 사용 |
 | Firebase UID | `VARCHAR(128)` | 인증 연결 키. PK·FK 아님 |
 | API Key | `VARCHAR(255)` prefix+hash | B2B 머신 인증 (§J) |
+
+내부 PK는 서명 `BIGINT`(최대 ~9.2×10¹⁸) 범위로 충분 — PG엔 UNSIGNED가 없으나 식별자 고갈은 비현실적이다. ULID `public_id`(외부)와 BIGINT 내부 pk를 분리하는 전략은 그대로 유지한다.
+
+> 🐬 **MySQL이라면**: 내부 PK는 `BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY`, FK 컬럼은 `BIGINT UNSIGNED NOT NULL`.
+
+## B.1 공통 DDL 규약 (PostgreSQL 기준)
+
+아래 규약은 이 문서의 모든 DDL 블록에 일관 적용된다. 개별 테이블에는 PG 형만 보여주고, MySQL 대응은 여기에 한 번 정리한다.
+
+| 항목 | PostgreSQL (1순위) | 🐬 MySQL이라면 |
+|---|---|---|
+| 식별자 PK | `BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY` | `BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY` |
+| FK 컬럼 | `BIGINT NOT NULL` | `BIGINT UNSIGNED NOT NULL` |
+| 음수 불가 수량 | `BIGINT NOT NULL + CHECK (col >= 0)` (UNSIGNED 없음) | `BIGINT UNSIGNED` |
+| 시각 | `TIMESTAMPTZ ... DEFAULT now()` | `TIMESTAMP ... DEFAULT NOW()` |
+| 자동 갱신 | `updated_at`은 트리거/앱 (아래) | `... ON UPDATE NOW()` |
+| 가변 집합 컬럼 | `VARCHAR(n) + CHECK (col IN (...))` | `ENUM(...)` 또는 동일 패턴 |
+| 반구조화 | `JSONB` (+ GIN 인덱스 가능) | `JSON` |
+| 이진 | `BYTEA` | `VARBINARY(n)` |
+
+- **금액·카운트 컬럼**(`price_krw`, `tokens_used`, `used`, `quantity`, `amount*` 등): PG엔 UNSIGNED가 없으므로 `CHECK (col >= 0)`로 음수를 막는다.
+- **`updated_at` 갱신**: PG엔 `ON UPDATE NOW()`가 없다. `BEFORE UPDATE` 트리거 `set_updated_at()`(NEW.updated_at := now()) 또는 앱 레이어로 갱신한다. 이 트리거는 **편의 갱신이지 감사 불변성 통제가 아니다**(append-only 4종의 WORM 보장은 GRANT로 강제 — §M, §N.3 트리거 비목표와 무관).
+- **ENUM 대신 VARCHAR+CHECK**: PG 네이티브 ENUM은 여러 테이블에 전역 타입으로 결합되고 `ALTER TYPE ADD VALUE`가 트랜잭션 블록 내에서 실행 불가한 제약이 있다. 테이블 로컬이고 풍부한 조건 표현(`IN (...)`, 복합 조건)이 가능한 `VARCHAR(n) + CHECK`를 1순위로 유지한다(§K 온라인 확장도 이 형태가 유리).
+- **시각 타입**: 모든 시각 컬럼은 `TIMESTAMPTZ`(UTC 저장). `DEFAULT now()`.
 
 ---
 
@@ -163,28 +187,30 @@ platform_db 이벤트 버스:
 
 ```sql
 CREATE TABLE identity_user (
-  pk                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   public_id         CHAR(26)       NOT NULL,              -- ULID (외부 노출 전용)
   firebase_uid      VARCHAR(128),                          -- 인증 연결 키 (PK/FK 아님)
   email             VARCHAR(255),
   email_verified    BOOLEAN NOT NULL DEFAULT FALSE,        -- Firebase JWT email_verified 동기화
-  email_verified_at TIMESTAMP,
+  email_verified_at TIMESTAMPTZ,
   phone_e164        VARCHAR(20),                           -- E.164 형식 (+821012345678)
   phone_verified    BOOLEAN NOT NULL DEFAULT FALSE,        -- SMS OTP 또는 Firebase Phone Auth
-  phone_verified_at TIMESTAMP,
-  type              ENUM('HUMAN','SERVICE','SYSTEM') NOT NULL DEFAULT 'HUMAN',
-  status            ENUM('ACTIVE','SUSPENDED','DELETED') NOT NULL DEFAULT 'ACTIVE',
-  -- DORMANT: 열린결정(architecture.md §5.3) — 법 의무 아님, 제품 정책 결정 후 ENUM 추가
-  perm_version      BIGINT UNSIGNED NOT NULL DEFAULT 1,
-  created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at        TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  deleted_at        TIMESTAMP,
-  UNIQUE KEY uq_identity_user_public_id (public_id),
-  UNIQUE KEY uq_identity_user_firebase_uid (firebase_uid),
-  INDEX idx_identity_user_email (email),
-  INDEX idx_identity_user_email_verified (email_verified),
-  INDEX idx_identity_user_phone (phone_e164)
+  phone_verified_at TIMESTAMPTZ,
+  type              VARCHAR(10) NOT NULL DEFAULT 'HUMAN',
+  status            VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  -- DORMANT: 열린결정(architecture.md §5.3) — 법 의무 아님, 제품 정책 결정 후 CHECK 목록에 추가
+  perm_version      BIGINT NOT NULL DEFAULT 1 CHECK (perm_version >= 0),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),    -- 갱신은 트리거/앱 (§B.1)
+  deleted_at        TIMESTAMPTZ,
+  CONSTRAINT chk_identity_user_type   CHECK (type IN ('HUMAN','SERVICE','SYSTEM')),
+  CONSTRAINT chk_identity_user_status CHECK (status IN ('ACTIVE','SUSPENDED','DELETED')),
+  CONSTRAINT uq_identity_user_public_id    UNIQUE (public_id),
+  CONSTRAINT uq_identity_user_firebase_uid UNIQUE (firebase_uid)
 );
+CREATE INDEX idx_identity_user_email          ON identity_user (email);
+CREATE INDEX idx_identity_user_email_verified ON identity_user (email_verified);
+CREATE INDEX idx_identity_user_phone          ON identity_user (phone_e164);
 ```
 
 **설계 포인트**:
@@ -199,12 +225,12 @@ CREATE TABLE identity_user (
 
 ```sql
 CREATE TABLE user_profile (
-  user_pk      BIGINT UNSIGNED PRIMARY KEY,          -- identity_user.pk 참조 (FK)
+  user_pk      BIGINT PRIMARY KEY,                   -- identity_user.pk 참조 (FK)
   display_name VARCHAR(120) NOT NULL,
   avatar_url   VARCHAR(500),
   locale       VARCHAR(10)  NOT NULL DEFAULT 'ko',
   timezone     VARCHAR(50)  NOT NULL DEFAULT 'Asia/Seoul',
-  updated_at   TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),   -- 갱신은 트리거/앱 (§B.1)
   CONSTRAINT fk_up_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk)
 );
 ```
@@ -215,42 +241,46 @@ CREATE TABLE user_profile (
 
 ```sql
 CREATE TABLE organization (
-  pk           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   public_id    CHAR(26)       NOT NULL,              -- ULID
-  type         ENUM('COMPANY','TEAM','PERSONAL') NOT NULL,
+  type         VARCHAR(10)    NOT NULL,
   -- ACADEMY 제거(서비스 종류는 org_entitlement.service가 결정). 향후: org_kind VARCHAR(30)+CHECK로 전환
   slug         VARCHAR(50)    NOT NULL DEFAULT '',
   name         VARCHAR(100)   NOT NULL,
-  status       ENUM('ACTIVE','SUSPENDED','CLOSED') NOT NULL DEFAULT 'ACTIVE',
-  perm_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
-  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  deleted_at   TIMESTAMP,
-  UNIQUE KEY uq_org_public_id (public_id),
-  UNIQUE KEY uq_org_slug (slug),
-  INDEX idx_org_status (status)
+  status       VARCHAR(10)    NOT NULL DEFAULT 'ACTIVE',
+  perm_version BIGINT NOT NULL DEFAULT 1 CHECK (perm_version >= 0),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at   TIMESTAMPTZ,
+  CONSTRAINT chk_org_type   CHECK (type IN ('COMPANY','TEAM','PERSONAL')),
+  CONSTRAINT chk_org_status CHECK (status IN ('ACTIVE','SUSPENDED','CLOSED')),
+  CONSTRAINT uq_org_public_id UNIQUE (public_id),
+  CONSTRAINT uq_org_slug      UNIQUE (slug)
 );
+CREATE INDEX idx_org_status ON organization (status);
 ```
 
 **설계 포인트**:
 - **설계 확정**: `ACADEMY` 타입 제거 — org는 순수 테넌트, 서비스 종류는 `org_entitlement.service`가 결정(D5 부분 완료).
-- ⚠️ **여전히 ENUM**: `org_kind VARCHAR(30)+CHECK` 전환(완전 service-agnostic)은 미완. org.type은 저빈도 변경이라 ENUM 유지가 당장 큰 비용은 아니나, D6 원칙(VARCHAR+CHECK)과는 부분 불일치.
+- ⚠️ **`org_kind` 일반화 미완**: `type`은 이미 `VARCHAR(10)+CHECK`(3종)이나, 완전 service-agnostic한 `org_kind VARCHAR(30)+CHECK`로의 의미 일반화는 미완. org.type은 저빈도 변경이라 당장 큰 비용은 아니다.
 
 ## D.4 membership
 
 ```sql
 CREATE TABLE membership (
-  user_pk       BIGINT UNSIGNED NOT NULL,
-  org_pk        BIGINT UNSIGNED NOT NULL,
-  platform_role ENUM('OWNER','MEMBER','SERVICE') NOT NULL DEFAULT 'MEMBER',
+  user_pk       BIGINT NOT NULL,
+  org_pk        BIGINT NOT NULL,
+  platform_role VARCHAR(10) NOT NULL DEFAULT 'MEMBER',
   -- 서비스 무관 테넌트 권위만 표현. 도메인 역할은 service_membership.role_code(D.4a)
-  status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
-  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+  status        VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_pk, org_pk),
-  INDEX idx_membership_org_platform_role (org_pk, platform_role),
-  INDEX idx_membership_user (user_pk),
+  CONSTRAINT chk_membership_role   CHECK (platform_role IN ('OWNER','MEMBER','SERVICE')),
+  CONSTRAINT chk_membership_status CHECK (status IN ('ACTIVE','SUSPENDED')),
   CONSTRAINT fk_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk),
   CONSTRAINT fk_mbr_org  FOREIGN KEY (org_pk)  REFERENCES organization(pk)
 );
+CREATE INDEX idx_membership_org_platform_role ON membership (org_pk, platform_role);
+CREATE INDEX idx_membership_user              ON membership (user_pk);
 ```
 
 **설계 포인트**:
@@ -262,19 +292,20 @@ CREATE TABLE membership (
 
 ```sql
 CREATE TABLE service_membership (
-  user_pk    BIGINT UNSIGNED NOT NULL,
-  org_pk     BIGINT UNSIGNED NOT NULL,
+  user_pk    BIGINT NOT NULL,
+  org_pk     BIGINT NOT NULL,
   service    VARCHAR(50) NOT NULL,              -- 'ACADEMY', 'MARKET', …
   role_code  VARCHAR(50) NOT NULL,              -- 'DIRECTOR', 'TEACHER', 'STUDENT'
-  status     ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  status     VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_pk, org_pk, service),
-  INDEX idx_service_membership_org_service (org_pk, service),
-  INDEX idx_service_membership_user_service (user_pk, service),
   CONSTRAINT chk_svc_mbr_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
+  CONSTRAINT chk_svc_mbr_status  CHECK (status IN ('ACTIVE','SUSPENDED')),
   CONSTRAINT fk_svc_mbr_user FOREIGN KEY (user_pk) REFERENCES identity_user(pk),
   CONSTRAINT fk_svc_mbr_org  FOREIGN KEY (org_pk)  REFERENCES organization(pk)
 );
+CREATE INDEX idx_service_membership_org_service  ON service_membership (org_pk, service);
+CREATE INDEX idx_service_membership_user_service ON service_membership (user_pk, service);
 ```
 
 **설계 포인트**:
@@ -287,23 +318,24 @@ CREATE TABLE service_membership (
 
 ```sql
 CREATE TABLE membership_invite (
-  pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk     BIGINT UNSIGNED NOT NULL,
+  pk         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk     BIGINT NOT NULL,
   service    VARCHAR(50)  NOT NULL,                   -- 수락 시 service_membership(PK에 service 포함)에 INSERT할 대상 서비스
   email      VARCHAR(255) NOT NULL,
-  role_code  VARCHAR(50)  NOT NULL,                   -- ENUM → VARCHAR. 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
+  role_code  VARCHAR(50)  NOT NULL,                   -- 'DIRECTOR','TEACHER','STUDENT' 등(service_membership.role_code와 동일 어휘)
   token      CHAR(43)     NOT NULL,                   -- URL-safe base64(32bytes)
-  status     ENUM('PENDING','ACCEPTED','EXPIRED','REVOKED') NOT NULL DEFAULT 'PENDING',
-  invited_by BIGINT UNSIGNED NOT NULL,
-  expires_at TIMESTAMP NOT NULL,                      -- 24시간
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_membership_invite_token (token),
-  INDEX idx_invite_org_status (org_pk, status),
-  INDEX idx_invite_email (email),
+  status     VARCHAR(10)  NOT NULL DEFAULT 'PENDING',
+  invited_by BIGINT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,                    -- 24시간
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_invite_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
+  CONSTRAINT chk_invite_status  CHECK (status IN ('PENDING','ACCEPTED','EXPIRED','REVOKED')),
+  CONSTRAINT uq_membership_invite_token UNIQUE (token),
   CONSTRAINT fk_invite_org     FOREIGN KEY (org_pk)     REFERENCES organization(pk),
   CONSTRAINT fk_invite_inviter FOREIGN KEY (invited_by) REFERENCES identity_user(pk)
 );
+CREATE INDEX idx_invite_org_status ON membership_invite (org_pk, status);
+CREATE INDEX idx_invite_email      ON membership_invite (email);
 ```
 
 **설계 포인트**:
@@ -314,27 +346,28 @@ CREATE TABLE membership_invite (
 
 ```sql
 CREATE TABLE delegation_grant (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  grantor_pk  BIGINT UNSIGNED NOT NULL,
-  grantee_pk  BIGINT UNSIGNED NOT NULL,
-  org_pk      BIGINT UNSIGNED NOT NULL,
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  grantor_pk  BIGINT NOT NULL,
+  grantee_pk  BIGINT NOT NULL,
+  org_pk      BIGINT NOT NULL,
   capability  VARCHAR(100) NOT NULL,
   -- <service>.<action> 네임스페이스 적용. 향후: capability_code로 컬럼명 변경 검토
-  scope_json  JSON,
-  status      ENUM('ACTIVE','REVOKED') NOT NULL DEFAULT 'ACTIVE',
-  expires_at  TIMESTAMP,
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+  scope_json  JSONB,
+  status      VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  expires_at  TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_delegation_status CHECK (status IN ('ACTIVE','REVOKED')),
   CONSTRAINT chk_capability CHECK (capability IN (
     'ACADEMY.PUBLISH_VIDEO','ACADEMY.APPROVE_VIDEO','ACADEMY.VIEW_ALL_LECTURES',
     'ACADEMY.MANAGE_SCHEDULE','ACADEMY.MANAGE_MEMBERS','ACADEMY.VIEW_BILLING'
   )),
   CONSTRAINT chk_no_self_delegation CHECK (grantor_pk <> grantee_pk),  -- 자기위임 차단(org_relation chk_no_self_ref와 대칭)
-  INDEX idx_delegation_grantee_org (org_pk, grantee_pk, status),
-  INDEX idx_delegation_grantor (grantor_pk),
   CONSTRAINT fk_grant_org      FOREIGN KEY (org_pk)     REFERENCES organization(pk),
   CONSTRAINT fk_grant_grantor  FOREIGN KEY (grantor_pk) REFERENCES identity_user(pk),
   CONSTRAINT fk_grant_grantee  FOREIGN KEY (grantee_pk) REFERENCES identity_user(pk)
 );
+CREATE INDEX idx_delegation_grantee_org ON delegation_grant (org_pk, grantee_pk, status);
+CREATE INDEX idx_delegation_grantor     ON delegation_grant (grantor_pk);
 ```
 
 **설계 포인트**:
@@ -345,57 +378,61 @@ CREATE TABLE delegation_grant (
 
 ```sql
 CREATE TABLE org_relation (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  parent_org_pk   BIGINT UNSIGNED NOT NULL,
-  child_org_pk    BIGINT UNSIGNED NOT NULL,
-  relation_type   ENUM('HQ_BRANCH','HOLDING') NOT NULL,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  parent_org_pk   BIGINT NOT NULL,
+  child_org_pk    BIGINT NOT NULL,
+  relation_type   VARCHAR(20) NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_relation_type CHECK (relation_type IN ('HQ_BRANCH','HOLDING')),
   CONSTRAINT chk_no_self_ref CHECK (parent_org_pk != child_org_pk),
-  UNIQUE KEY uq_org_relation_parent_child (parent_org_pk, child_org_pk),
-  INDEX idx_org_relation_child (child_org_pk)
+  CONSTRAINT uq_org_relation_parent_child UNIQUE (parent_org_pk, child_org_pk)
 );
+CREATE INDEX idx_org_relation_child ON org_relation (child_org_pk);
 ```
 
 ## D.8 audit_log
 
 ```sql
 CREATE TABLE audit_log (
-  pk            BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- AUTO_INCREMENT 필수
-  org_pk        BIGINT UNSIGNED,                       -- nullable: actor_type='SYSTEM'(org 무관) 이벤트 허용 — 불변식 #3의 명시적 예외(§G.1)
-  actor_type    ENUM('HUMAN','API_KEY','SYSTEM','OPERATOR') NOT NULL,  -- OPERATOR: 운영자 평면([[operator-plane]]) 이벤트. SERVICE 사용자(identity_user.type='SERVICE')의 행위는 'API_KEY'로 기록(어휘 매핑)
-
-  actor_pk      BIGINT UNSIGNED,
-  api_key_pk    BIGINT UNSIGNED,                      -- api_key 구현 후 FK 추가 예정
+  pk            BIGINT GENERATED ALWAYS AS IDENTITY,
+  org_pk        BIGINT,                              -- nullable: actor_type='SYSTEM'(org 무관) 이벤트 허용 — 불변식 #3의 명시적 예외(§G.1)
+  actor_type    VARCHAR(10) NOT NULL,                -- OPERATOR: 운영자 평면([[operator-plane]]) 이벤트. SERVICE 사용자(identity_user.type='SERVICE')의 행위는 'API_KEY'로 기록(어휘 매핑)
+  actor_pk      BIGINT,
+  api_key_pk    BIGINT,                              -- api_key 구현 후 FK 추가 예정
   action        VARCHAR(100) NOT NULL,
   resource_type VARCHAR(50),
-  resource_pk   BIGINT UNSIGNED,
-  result        ENUM('ALLOW','DENY','ERROR') NOT NULL,
-  ip            VARBINARY(16),                        -- IPv4(4byte) or IPv6(16byte). PIPA 감사 요건
-  meta_json     JSON,
-  break_glass   BOOLEAN NOT NULL DEFAULT FALSE,        -- P1: break-glass 비상접근 플래그 (ISMS-P §6.4)
-  support_action BOOLEAN NOT NULL DEFAULT FALSE,        -- 운영자 override(entitlement 강제부여·환불·Trial 연장 등) 표식 (SUPP-1, who/when/why는 meta_json·actor_pk → operator.pk)
-  created_at    DATETIME NOT NULL DEFAULT (NOW()),     -- RANGE 파티셔닝 호환 (TIMESTAMP 불가)
-  PRIMARY KEY (pk, created_at),                       -- 파티션 테이블 PK = 파티션 키 포함 필수 (MySQL 규칙)
-  INDEX idx_audit_org_created (org_pk, created_at),
-  INDEX idx_audit_actor (actor_pk, created_at),
-  INDEX idx_audit_break_glass (break_glass, created_at) -- break_glass=TRUE 비상접근 이벤트 빠른 조회
-) PARTITION BY RANGE COLUMNS(created_at) (
-  PARTITION p202601 VALUES LESS THAN ('2026-02-01 00:00:00'),
-  PARTITION p202602 VALUES LESS THAN ('2026-03-01 00:00:00'),
-  PARTITION p202603 VALUES LESS THAN ('2026-04-01 00:00:00'),
-  PARTITION p202604 VALUES LESS THAN ('2026-05-01 00:00:00'),
-  PARTITION p202605 VALUES LESS THAN ('2026-06-01 00:00:00'),
-  PARTITION p202606 VALUES LESS THAN ('2026-07-01 00:00:00'),
-  PARTITION p_future VALUES LESS THAN (MAXVALUE)
-);
+  resource_pk   BIGINT,
+  result        VARCHAR(10) NOT NULL,
+  ip            INET,                                -- IPv4/IPv6 (PIPA 감사 요건). PG 네이티브 INET 타입
+  meta_json     JSONB,
+  break_glass   BOOLEAN NOT NULL DEFAULT FALSE,       -- P1: break-glass 비상접근 플래그 (ISMS-P §6.4)
+  support_action BOOLEAN NOT NULL DEFAULT FALSE,       -- 운영자 override(entitlement 강제부여·환불·Trial 연장 등) 표식 (SUPP-1, who/when/why는 meta_json·actor_pk → operator.pk)
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),   -- 파티션 키
+  PRIMARY KEY (pk, created_at),                       -- PG 선언적 파티셔닝: PK·UNIQUE에 파티션 키 포함 필수
+  CONSTRAINT chk_audit_actor_type CHECK (actor_type IN ('HUMAN','API_KEY','SYSTEM','OPERATOR')),
+  CONSTRAINT chk_audit_result     CHECK (result IN ('ALLOW','DENY','ERROR'))
+) PARTITION BY RANGE (created_at);
+
+-- 월별 자식 파티션 (예시)
+CREATE TABLE audit_log_2026_01 PARTITION OF audit_log FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE audit_log_2026_02 PARTITION OF audit_log FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+CREATE TABLE audit_log_2026_03 PARTITION OF audit_log FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+-- 범위 밖 데이터를 받는 안전망 파티션
+CREATE TABLE audit_log_default  PARTITION OF audit_log DEFAULT;
+
+CREATE INDEX idx_audit_org_created  ON audit_log (org_pk, created_at);
+CREATE INDEX idx_audit_actor        ON audit_log (actor_pk, created_at);
+CREATE INDEX idx_audit_break_glass  ON audit_log (break_glass, created_at); -- break_glass=TRUE 비상접근 이벤트 빠른 조회
 ```
 
 **설계 포인트**:
-- 월별 RANGE 파티셔닝 (조회 성능, 파티션 단위 아카이빙)
-- `ip VARBINARY(16)`: PIPA 개인정보 처리방침 감사 요건
-- `created_at DATETIME` (TIMESTAMP 아님): MySQL 8.0에서 `PARTITION BY RANGE COLUMNS`에 TIMESTAMP 미지원 버그 회피 — PostgreSQL에서는 불필요한 우회
-- WORM 원칙: 이 테이블은 INSERT만. UPDATE·DELETE 금지
-- ⚠️ **파티션 자동 추가 배치 미작성**: `p_future` 단일 파티션만 존재. 월별 파티션 자동 생성 배치가 없어 약 3개월 뒤 `p_future`가 신규 데이터를 단독 흡수 → INSERT 성능 저하. 구현 시 월초 `REORGANIZE PARTITION p_future` 배치 스케줄러 필요.
+- 월별 RANGE 파티셔닝 (조회 성능, 파티션 단위 아카이빙). 선언적 `PARTITION OF` 자식 테이블로 관리.
+- `ip INET`: PIPA 개인정보 처리방침 감사 요건. PG 네이티브 `INET`로 IPv4/IPv6 모두 표현·인덱싱(MySQL의 `VARBINARY(16)` raw 저장 대비 가독성·연산 우위).
+- 복합 PK `(pk, created_at)`: PG 선언적 파티셔닝은 PK·UNIQUE 제약에 파티션 키를 포함해야 한다.
+- WORM 원칙: 이 테이블은 INSERT만. UPDATE·DELETE 금지.
+- ⚠️ **파티션 자동 추가 배치 미작성**: 위 예시 외 월별 파티션을 자동 생성하는 배치가 없으면 신규 데이터가 `audit_log_default`로 몰려(또는 범위 결손 시 INSERT 실패) 성능 저하. 구현 시 월초 `CREATE TABLE ... PARTITION OF audit_log FOR VALUES FROM (...) TO (...)` 배치 스케줄러 필요(`pg_partman` 등 활용 가능).
+
+> 🐬 **MySQL이라면**: `created_at`을 `DATETIME`으로 두고(8.0의 `PARTITION BY RANGE COLUMNS` + TIMESTAMP 미지원 버그 회피), `PARTITION BY RANGE COLUMNS(created_at)(PARTITION p202601 VALUES LESS THAN ('2026-02-01 00:00:00'), …, PARTITION p_future VALUES LESS THAN (MAXVALUE))` + 월초 `REORGANIZE PARTITION p_future` 배치. `ip`는 `VARBINARY(16)`.
 
 ---
 
@@ -403,30 +440,31 @@ CREATE TABLE audit_log (
 
 ```sql
 CREATE TABLE product (
-  pk        BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   public_id CHAR(26)     NOT NULL,
   code      VARCHAR(50)  NOT NULL,
   service   VARCHAR(50)  NOT NULL,                   -- VARCHAR+CHECK (ENUM 아님)
   name      VARCHAR(100) NOT NULL,
-  status    ENUM('ACTIVE','RETIRED') NOT NULL DEFAULT 'ACTIVE',
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  status    VARCHAR(10)  NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),     -- 갱신은 트리거/앱 (§B.1)
   CONSTRAINT chk_product_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
-  UNIQUE KEY uq_product_public_id (public_id),
-  UNIQUE KEY uq_product_code (code),
-  INDEX idx_product_status (status)
+  CONSTRAINT chk_product_status  CHECK (status IN ('ACTIVE','RETIRED')),
+  CONSTRAINT uq_product_public_id UNIQUE (public_id),
+  CONSTRAINT uq_product_code      UNIQUE (code)
 );
+CREATE INDEX idx_product_status ON product (status);
 ```
 
 ## D.10 product_feature
 
 ```sql
 CREATE TABLE product_feature (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  product_pk  BIGINT UNSIGNED NOT NULL,
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  product_pk  BIGINT NOT NULL,
   feature_key VARCHAR(50) NOT NULL,
   limit_value BIGINT,                                -- NULL = 무제한
-  UNIQUE KEY uq_product_feature (product_pk, feature_key),
+  CONSTRAINT uq_product_feature UNIQUE (product_pk, feature_key),
   CONSTRAINT fk_pf_product FOREIGN KEY (product_pk) REFERENCES product(pk)
 );
 ```
@@ -435,50 +473,54 @@ CREATE TABLE product_feature (
 
 ```sql
 CREATE TABLE product_sku (
-  pk            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  product_pk    BIGINT UNSIGNED NOT NULL,
+  pk            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  product_pk    BIGINT NOT NULL,
   code          VARCHAR(50) NOT NULL,
-  billing_cycle ENUM('MONTHLY','ANNUAL','ONE_TIME','USAGE') NOT NULL,
-  price_krw     INT UNSIGNED NOT NULL DEFAULT 0,     -- KRW 원 단위 정수 (float 금지)
+  billing_cycle VARCHAR(10) NOT NULL,
+  price_krw     INT NOT NULL DEFAULT 0 CHECK (price_krw >= 0),  -- KRW 원 단위 정수 (float 금지, 음수 불가)
   plan_code     VARCHAR(50),
-  status        ENUM('ACTIVE','RETIRED') NOT NULL DEFAULT 'ACTIVE',
-  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at    TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  UNIQUE KEY uq_product_sku_code (code),
-  INDEX idx_product_sku_product (product_pk),
-  INDEX idx_product_sku_plan_code (plan_code)
+  status        VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
+  CONSTRAINT chk_sku_billing_cycle CHECK (billing_cycle IN ('MONTHLY','ANNUAL','ONE_TIME','USAGE')),
+  CONSTRAINT chk_sku_status        CHECK (status IN ('ACTIVE','RETIRED')),
+  CONSTRAINT uq_product_sku_code UNIQUE (code)
 );
+CREATE INDEX idx_product_sku_product   ON product_sku (product_pk);
+CREATE INDEX idx_product_sku_plan_code ON product_sku (plan_code);
 ```
 
 ## D.12 org_entitlement
 
 ```sql
 CREATE TABLE org_entitlement (
-  pk                   BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk               BIGINT UNSIGNED NOT NULL,
+  pk                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk               BIGINT          NOT NULL,
   product_code         VARCHAR(50)     NOT NULL,
   service              VARCHAR(50)     NOT NULL,    -- VARCHAR+CHECK
-  status               ENUM('ACTIVE','GRACE','SUSPENDED','EXPIRED') NOT NULL DEFAULT 'ACTIVE',
-  source               ENUM('SUBSCRIPTION','PROMO','MANUAL','FREE')  NOT NULL DEFAULT 'FREE',
-  feature_limits       JSON,                        -- {"daily_uploads":6, ...}
-  valid_until          TIMESTAMP,
-  grace_until          TIMESTAMP,
+  status               VARCHAR(10)     NOT NULL DEFAULT 'ACTIVE',
+  source               VARCHAR(20)     NOT NULL DEFAULT 'FREE',
+  feature_limits       JSONB,                       -- {"daily_uploads":6, ...}
+  valid_until          TIMESTAMPTZ,
+  grace_until          TIMESTAMPTZ,
   plan_code            VARCHAR(50),
-  current_period_start TIMESTAMP,
-  current_period_end   TIMESTAMP,
-  updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  current_period_start TIMESTAMPTZ,
+  current_period_end   TIMESTAMPTZ,
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
   CONSTRAINT chk_entitlement_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
-  UNIQUE KEY uq_org_product (org_pk, product_code),
-  INDEX idx_org_service_status (org_pk, service, status, valid_until),  -- Gate B 핫패스 (R8 자문 반영)
-  INDEX idx_entitlement_expiry (valid_until, status),  -- 만료 배치: WHERE valid_until < NOW() AND status='ACTIVE'
+  CONSTRAINT chk_entitlement_status  CHECK (status IN ('ACTIVE','GRACE','SUSPENDED','EXPIRED')),
+  CONSTRAINT chk_entitlement_source  CHECK (source IN ('SUBSCRIPTION','PROMO','MANUAL','FREE')),
+  CONSTRAINT uq_org_product UNIQUE (org_pk, product_code),
   CONSTRAINT fk_ent_org FOREIGN KEY (org_pk) REFERENCES organization(pk)
 );
+CREATE INDEX idx_org_service_status  ON org_entitlement (org_pk, service, status, valid_until);  -- Gate B 핫패스 (R8 자문 반영)
+CREATE INDEX idx_entitlement_expiry  ON org_entitlement (valid_until, status);  -- 만료 배치: WHERE valid_until < now() AND status='ACTIVE'
 ```
 
 **설계 포인트**:
 - **런타임 권위 access 상태** — `canXXX()`는 이 테이블만 읽음 (`payment_ledger` 직접 조회 금지)
-- **feature_limits 우선순위**: `org_entitlement.feature_limits`가 최종 권위(SSOT). `product_feature`·`plan_definition.default_limits`는 entitlement 최초 생성 시 초기값 복사용으로만 사용. 런타임 한도 판단 시 이 두 테이블 직접 조회 금지(불변식 #10).
-- **Gate B 체크**: `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > NOW())`. status만 보면 배치 실패 시 영구 무료 위험(불변식 #9).
+- **feature_limits 우선순위**: `org_entitlement.feature_limits`(JSONB)가 최종 권위(SSOT). `product_feature`·`plan_definition.default_limits`는 entitlement 최초 생성 시 초기값 복사용으로만 사용. 런타임 한도 판단 시 이 두 테이블 직접 조회 금지(불변식 #10). JSONB는 GIN 인덱스로 `@>` 키 검색이 가능하나, 권한·격리 키(`org_pk`·`service`·`status`)는 여전히 정규 컬럼으로 유지 — GIN은 보조.
+- **Gate B 체크**: `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > now())`. status만 보면 배치 실패 시 영구 무료 위험(불변식 #9).
 - **grace_until**: Gate B 판정 기준. `org_subscription.grace_until`은 빌링 추적용, Gate B는 이 컬럼만 읽음.
 - UNIQUE(org_pk, product_code): 한 org가 같은 product를 두 번 entitlement 받을 수 없음
 - **product_code↔service 정합은 앱 불변식**: UNIQUE에 service 미포함(`product_code`가 전역 UNIQUE라 service 유도). §F.1 UPSERT가 `product.service`와 일치하는 service만 기록하도록 보장 — 어긋난 행이 들어가면 Gate B 핫패스 인덱스(`idx_org_service_status`) 오통과 위험.
@@ -488,37 +530,40 @@ CREATE TABLE org_entitlement (
 
 ```sql
 CREATE TABLE org_subscription (
-  pk                   BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk               BIGINT UNSIGNED NOT NULL,
-  payer_user_pk        BIGINT UNSIGNED NOT NULL,
+  pk                   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk               BIGINT NOT NULL,
+  payer_user_pk        BIGINT NOT NULL,
   -- sku_pk 제거: subscription_item(N:M)이 진실 원천. 불변식 #11
-  status               ENUM('TRIALING','ACTIVE','PAST_DUE','CANCELED','EXPIRED') NOT NULL DEFAULT 'TRIALING',
-  pg_provider          ENUM('TOSS','STRIPE','PAYPAL','MANUAL') NOT NULL DEFAULT 'MANUAL',
+  status               VARCHAR(10) NOT NULL DEFAULT 'TRIALING',
+  pg_provider          VARCHAR(10) NOT NULL DEFAULT 'MANUAL',
   external_sub_id      VARCHAR(255),               -- PG 측 구독 ID
-  trial_ends_at        TIMESTAMP,
-  current_period_start TIMESTAMP NOT NULL,
-  current_period_end   TIMESTAMP NOT NULL,
-  grace_until          TIMESTAMP,                  -- 빌링 추적용. Gate B 판정은 org_entitlement.grace_until 사용
-  cancelled_at         TIMESTAMP,
-  created_at           TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at           TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  INDEX idx_org_subscription_org_status (org_pk, status),
-  INDEX idx_org_subscription_external_sub_id (external_sub_id),  -- PG webhook이 external_sub_id로 구독 조회
+  trial_ends_at        TIMESTAMPTZ,
+  current_period_start TIMESTAMPTZ NOT NULL,
+  current_period_end   TIMESTAMPTZ NOT NULL,
+  grace_until          TIMESTAMPTZ,                -- 빌링 추적용. Gate B 판정은 org_entitlement.grace_until 사용
+  cancelled_at         TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
+  CONSTRAINT chk_sub_status   CHECK (status IN ('TRIALING','ACTIVE','PAST_DUE','CANCELED','EXPIRED')),
+  CONSTRAINT chk_sub_provider CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL','MANUAL')),
   CONSTRAINT fk_sub_org   FOREIGN KEY (org_pk)        REFERENCES organization(pk),
   CONSTRAINT fk_sub_payer FOREIGN KEY (payer_user_pk) REFERENCES identity_user(pk)
 );
+CREATE INDEX idx_org_subscription_org_status      ON org_subscription (org_pk, status);
+CREATE INDEX idx_org_subscription_external_sub_id ON org_subscription (external_sub_id);  -- PG webhook이 external_sub_id로 구독 조회
 ```
 
 ## D.14 subscription_item
 
 ```sql
 CREATE TABLE subscription_item (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  subscription_pk BIGINT UNSIGNED NOT NULL,
-  sku_pk          BIGINT UNSIGNED NOT NULL,         -- product_sku 참조 (N:M 진실 원천)
-  quantity        INT NOT NULL DEFAULT 1,
-  status          ENUM('ACTIVE','CANCELED') NOT NULL DEFAULT 'ACTIVE',
-  UNIQUE KEY uq_sub_sku (subscription_pk, sku_pk),
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  subscription_pk BIGINT NOT NULL,
+  sku_pk          BIGINT NOT NULL,                  -- product_sku 참조 (N:M 진실 원천)
+  quantity        INT NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+  status          VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  CONSTRAINT chk_sub_item_status CHECK (status IN ('ACTIVE','CANCELED')),
+  CONSTRAINT uq_sub_sku UNIQUE (subscription_pk, sku_pk),
   CONSTRAINT fk_sub_item_sub FOREIGN KEY (subscription_pk) REFERENCES org_subscription(pk),
   CONSTRAINT fk_sub_item_sku FOREIGN KEY (sku_pk) REFERENCES product_sku(pk)
 );
@@ -531,16 +576,16 @@ CREATE TABLE subscription_item (
 
 ```sql
 CREATE TABLE plan_definition (
-  pk           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   plan_code    VARCHAR(50) NOT NULL,
   display_name VARCHAR(100) NOT NULL,
-  default_limits JSON NOT NULL,              -- {"daily_uploads":10, "members":50, ...}
+  default_limits JSONB NOT NULL,             -- {"daily_uploads":10, "members":50, ...}
   is_active    BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at   TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  UNIQUE KEY uq_plan_definition_plan_code (plan_code),
-  INDEX idx_plan_definition_active (is_active)
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
+  CONSTRAINT uq_plan_definition_plan_code UNIQUE (plan_code)
 );
+CREATE INDEX idx_plan_definition_active ON plan_definition (is_active);
 ```
 
 **설계 포인트**: `product_sku.plan_code`가 참조하는 플랜 정의. `default_limits`는 `org_entitlement.feature_limits` 초기값으로 사용.
@@ -549,97 +594,106 @@ CREATE TABLE plan_definition (
 
 ```sql
 CREATE TABLE billing_event (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk          BIGINT UNSIGNED NOT NULL,
-  subscription_pk BIGINT UNSIGNED,
-  event_type      ENUM('SUBSCRIPTION_START','SUBSCRIPTION_END','PLAN_CHANGE','INVOICE_PAID','INVOICE_FAILED') NOT NULL,
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk          BIGINT NOT NULL,
+  subscription_pk BIGINT,
+  event_type      VARCHAR(30) NOT NULL,
   plan_code       VARCHAR(50) NOT NULL,
-  metadata        JSON,
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_billing_event_org_created_at (org_pk, created_at),
-  INDEX idx_billing_event_subscription (subscription_pk)
+  metadata        JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_billing_event_type CHECK (event_type IN ('SUBSCRIPTION_START','SUBSCRIPTION_END','PLAN_CHANGE','INVOICE_PAID','INVOICE_FAILED'))
 );
+CREATE INDEX idx_billing_event_org_created_at ON billing_event (org_pk, created_at);
+CREATE INDEX idx_billing_event_subscription   ON billing_event (subscription_pk);
 ```
 
 **설계 포인트**: 구독 lifecycle 감사 이벤트. `payment_ledger`가 금융 원장이라면 `billing_event`는 구독 상태 변화의 로그. append-only — §M `ledger_append` INSERT-only 계정으로 GRANT 강제.
-- `event_type ENUM(5종)`: lifecycle 이벤트는 늘어남 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). 현재 ENUM 유지, 후속 마이그레이션.
+- `event_type VARCHAR(30)+CHECK(5종)`: lifecycle 이벤트는 늘어나므로 D6 동일 논리로 처음부터 VARCHAR+CHECK. 신규 타입은 §K 패턴으로 CHECK 목록만 ALTER.
 - **FK 없음(의도적)**: billing 도메인 고write·append-only 특성상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.17 payment_ledger
 
 ```sql
 CREATE TABLE payment_ledger (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk          BIGINT UNSIGNED NOT NULL,
-  subscription_pk BIGINT UNSIGNED,
-  type            ENUM('CHARGE','REFUND','CHARGEBACK','CREDIT') NOT NULL,
-  amount_minor    BIGINT NOT NULL,                  -- 정수 minor unit (KRW: 원, USD: cent)
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk          BIGINT NOT NULL,
+  subscription_pk BIGINT,
+  type            VARCHAR(10) NOT NULL,
+  amount_minor    BIGINT NOT NULL,                  -- 정수 minor unit (KRW: 원, USD: cent). 환불·역청구는 음수 허용이므로 CHECK 미부여
   currency        CHAR(3) NOT NULL DEFAULT 'KRW',
-  pg_provider     ENUM('TOSS','STRIPE','PAYPAL','MANUAL') NOT NULL DEFAULT 'MANUAL',
+  pg_provider     VARCHAR(10) NOT NULL DEFAULT 'MANUAL',
   pg_payment_id   VARCHAR(255),
   idempotency_key VARCHAR(255) NOT NULL,            -- 중복 결제 방지
-  status          ENUM('PENDING','SUCCEEDED','FAILED') NOT NULL DEFAULT 'PENDING',
+  status          VARCHAR(10) NOT NULL DEFAULT 'PENDING',
   receipt_url     VARCHAR(512),
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_idempotency_key (idempotency_key),
-  INDEX idx_ledger_org_created (org_pk, created_at)
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_ledger_type     CHECK (type IN ('CHARGE','REFUND','CHARGEBACK','CREDIT')),
+  CONSTRAINT chk_ledger_provider CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL','MANUAL')),
+  CONSTRAINT chk_ledger_status   CHECK (status IN ('PENDING','SUCCEEDED','FAILED')),
+  CONSTRAINT uq_idempotency_key UNIQUE (idempotency_key)
 );
+CREATE INDEX idx_ledger_org_created ON payment_ledger (org_pk, created_at);
 ```
 
 **설계 포인트**: append-only 금융 원장. UPDATE·DELETE 금지 — §M `ledger_append` INSERT-only 계정으로 GRANT 강제(주석 아님).
-- `pg_provider ENUM`: PG 추가 시 대형 테이블 `ALTER MODIFY COLUMN` 잠금 위험 → D6 동일 논리로 `VARCHAR(50)+CHECK` 전환 대상 (R8 자문). org_subscription·billing_event·pg_webhook_event 3곳 동시 마이그레이션 필요.
+- `pg_provider VARCHAR(10)+CHECK`: PG(결제대행사) 추가는 §K 패턴으로 CHECK 목록만 ALTER(테이블 락 없음). org_subscription·billing_event·pg_webhook_event와 동일 어휘 — 추가 시 4곳을 함께 변경.
 - **FK 없음(의도적)**: billing 고write·append-only 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.18 pg_webhook_event
 
 ```sql
 CREATE TABLE pg_webhook_event (
-  pk           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  pg_provider  ENUM('TOSS','STRIPE','PAYPAL') NOT NULL,
+  pk           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  pg_provider  VARCHAR(10) NOT NULL,
   event_id     VARCHAR(255) NOT NULL,
   signature_ok BOOLEAN NOT NULL DEFAULT FALSE,      -- HMAC 서명 검증 결과
-  payload_json JSON NOT NULL,
-  status       ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED') NOT NULL DEFAULT 'RECEIVED',
-  processed_at TIMESTAMP,
-  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_provider_event (pg_provider, event_id),  -- 멱등 보장
-  INDEX idx_pg_webhook_status (status, created_at)       -- 재처리 워커: WHERE status='FAILED' (R8 자문)
+  payload_json JSONB NOT NULL,
+  status       VARCHAR(10) NOT NULL DEFAULT 'RECEIVED',
+  processed_at TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_webhook_provider CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL')),
+  CONSTRAINT chk_webhook_status   CHECK (status IN ('RECEIVED','PROCESSED','SKIPPED','FAILED')),
+  CONSTRAINT uq_provider_event UNIQUE (pg_provider, event_id)  -- 멱등 보장
 );
+CREATE INDEX idx_pg_webhook_status ON pg_webhook_event (status, created_at);  -- 재처리 워커: WHERE status='FAILED' (R8 자문)
 ```
 
 **설계 포인트**:
 - `pg_provider ENUM`: `MANUAL` 제외 — 수동 결제는 webhook이 없으므로 의도적 제외 (org_subscription·payment_ledger와 달리 MANUAL 항목 없음)
-- `pg_provider ENUM → VARCHAR+CHECK`: D6 동일 논리 적용 대상 (R8 자문). 후속 마이그레이션.
+- `pg_provider VARCHAR(10)+CHECK`: D6 동일 논리로 처음부터 VARCHAR+CHECK.
 - **FK 없음(의도적)**: billing 고write 패턴상 FK 잠금 회피 (billing append-only 의도적 설계).
 
 ## D.19 outbox_event
 
 ```sql
 CREATE TABLE outbox_event (
-  pk             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   aggregate_type VARCHAR(50) NOT NULL,
-  aggregate_pk   BIGINT UNSIGNED NOT NULL,
+  aggregate_pk   BIGINT NOT NULL,
   event_type     VARCHAR(80) NOT NULL,
-  payload_json   JSON NOT NULL,
-  status         ENUM('PENDING','SENT','FAILED') NOT NULL DEFAULT 'PENDING',
-  created_at     TIMESTAMP NOT NULL DEFAULT NOW(),
-  sent_at        TIMESTAMP,
-  INDEX idx_outbox_status_created (status, created_at)
+  payload_json   JSONB NOT NULL,
+  status         VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  sent_at        TIMESTAMPTZ,
+  CONSTRAINT chk_outbox_status CHECK (status IN ('PENDING','SENT','FAILED'))
 );
+CREATE INDEX idx_outbox_status_created ON outbox_event (status, created_at);
 ```
+
+**설계 포인트**: 워커는 `SELECT ... WHERE status='PENDING' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT n`으로 행을 집어 다중 워커 경합 없이 처리한다 — PG 네이티브 `SKIP LOCKED`.
 
 ## D.20 usage_snapshot (사용량 집계)
 
 ```sql
 CREATE TABLE usage_snapshot (
-  org_pk     BIGINT UNSIGNED NOT NULL,
+  org_pk     BIGINT          NOT NULL,
   service    VARCHAR(50)     NOT NULL,            -- VARCHAR+CHECK (불변식 #5 동일 어휘)
   metric     VARCHAR(64)     NOT NULL,            -- 'members','daily_uploads','tokens' …
   period     VARCHAR(16)     NOT NULL,            -- 집계 단위 '2026-05' / '2026-05-31'
-  used       BIGINT UNSIGNED NOT NULL DEFAULT 0,  -- 분자: 집계된 사용량
+  used       BIGINT          NOT NULL DEFAULT 0 CHECK (used >= 0),  -- 분자: 집계된 사용량 (음수 불가)
   limit_val  BIGINT,                              -- 분모: feature_limits 대비 (NULL=무제한)
-  source_ts  DATETIME        NOT NULL,            -- 이 집계가 기준한 시점(신선도 검증)
-  updated_at TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  source_ts  TIMESTAMPTZ     NOT NULL,            -- 이 집계가 기준한 시점(신선도 검증)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
   PRIMARY KEY (org_pk, service, metric, period),
   CONSTRAINT chk_usage_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE'))
 );
@@ -656,18 +710,20 @@ CREATE TABLE usage_snapshot (
 
 ```sql
 CREATE TABLE operator (
-  pk            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  pk            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   public_id     CHAR(26) NOT NULL,                    -- ULID
   email         VARCHAR(255) NOT NULL,                -- 회사 IdP 계정 (테넌트 identity_user와 분리)
-  operator_role ENUM('SUPER_ADMIN','CS','FINANCE','SUPPORT','SECURITY','SRE','AUDITOR') NOT NULL,
+  operator_role VARCHAR(20) NOT NULL,
   mfa_enabled   BOOLEAN NOT NULL DEFAULT TRUE,         -- 운영자 MFA 강제
-  status        ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
-  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-  deleted_at    TIMESTAMP,
-  UNIQUE KEY uq_operator_public_id (public_id),
-  UNIQUE KEY uq_operator_email (email),
-  INDEX idx_operator_role (operator_role)
+  status        VARCHAR(10) NOT NULL DEFAULT 'ACTIVE',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at    TIMESTAMPTZ,
+  CONSTRAINT chk_operator_role   CHECK (operator_role IN ('SUPER_ADMIN','CS','FINANCE','SUPPORT','SECURITY','SRE','AUDITOR')),
+  CONSTRAINT chk_operator_status CHECK (status IN ('ACTIVE','SUSPENDED')),
+  CONSTRAINT uq_operator_public_id UNIQUE (public_id),
+  CONSTRAINT uq_operator_email     UNIQUE (email)
 );
+CREATE INDEX idx_operator_role ON operator (operator_role);
 ```
 
 **설계 포인트** ([[operator-plane]] B안 — OPER-1·OPER-2 설계 확정):
@@ -721,7 +777,7 @@ membership = await getActiveMembership(userPk, orgPk);   // platform_role, statu
 ```typescript
 entitlement = await getEntitlementByService(orgPk, service);
 // status NOT IN ('ACTIVE','GRACE') → 402
-// status IN ('ACTIVE','GRACE') but valid_until < NOW() → 402 (배치 실패 방어)
+// status IN ('ACTIVE','GRACE') but valid_until < now() → 402 (배치 실패 방어)
 const now = new Date();
 const pass =
   (entitlement.status === 'ACTIVE' || entitlement.status === 'GRACE') &&
@@ -799,8 +855,11 @@ BEGIN;
   -- 3. 권한 활성화 (upsert)
   INSERT INTO org_entitlement (org_pk, product_code, service, status, source, feature_limits, valid_until)
   VALUES (?orgPk, ?productCode, ?service, 'ACTIVE', 'SUBSCRIPTION', ?limits, ?validUntil)
-  ON DUPLICATE KEY UPDATE
-    status='ACTIVE', feature_limits=VALUES(feature_limits), valid_until=VALUES(valid_until);
+  ON CONFLICT (org_pk, product_code) DO UPDATE SET
+    status='ACTIVE',
+    feature_limits=EXCLUDED.feature_limits,
+    valid_until=EXCLUDED.valid_until;
+    -- 충돌 타깃: 유니크 제약 uq_org_product (org_pk, product_code)
 
   -- 4. perm_version 갱신 → 클라이언트 캐시 invalidation
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;
@@ -835,7 +894,7 @@ ACTIVE   ──취소 요청──▶ CANCELED
 ```
 1. pg_webhook_event에 UNIQUE(pg_provider, event_id) 로 중복 수신 차단
 2. signature_ok=FALSE이면 SKIPPED (처리 건너뜀, 기록은 남김)
-3. 처리 완료 후 status='PROCESSED', processed_at=NOW()
+3. 처리 완료 후 status='PROCESSED', processed_at=now()
 4. 같은 event_id 재수신 → INSERT 실패 → 앱에서 200 OK 반환 (PG 재전송 방지)
 ```
 
@@ -843,7 +902,7 @@ ACTIVE   ──취소 요청──▶ CANCELED
 
 # G. 멀티테넌시 격리
 
-## G.1 MySQL (platform_db) — 구현 현황
+## G.1 PostgreSQL (platform_db) — 구현 현황
 
 테넌트 데이터를 담는 모든 도메인 테이블: `org_pk NOT NULL` 컬럼으로 행 격리. **예외 3부류**(불변식 #3): ① 전역 카탈로그 `product`·`product_sku`·`plan_definition`(테넌트 무관) ② 플랫폼 이벤트 버스 `pg_webhook_event`·`outbox_event`(org_pk 없음, aggregate로 추적) ③ `audit_log`(SYSTEM actor 이벤트는 org 무관 → nullable). `user_consent_event`는 user-scoped(`user_pk`), `subscription_item`은 부모 `org_subscription`으로 격리.
 
@@ -861,6 +920,8 @@ WHERE org_pk = ?orgPk AND service = ?service AND status IN ('ACTIVE','GRACE');
 -- 금지 패턴 (CI 린트 P1 구현 후 빌드 차단 예정)
 SELECT * FROM org_entitlement WHERE service = ?service; -- org_pk 누락
 ```
+
+> **🐘 RLS 강제 옵션(PostgreSQL 1순위 활용처)**: PG에서는 앱 의존인 CI 린트 대신 DB가 직접 행 격리를 강제할 수 있다. `SET app.current_org = ?orgPk` 세션 변수 + `CREATE POLICY org_isolation ON org_entitlement USING (org_pk = current_setting('app.current_org')::bigint)` + `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`. org_pk를 빠뜨린 쿼리도 정책이 행을 걸러내므로 BOLA가 구조적으로 차단된다. (전역 카탈로그·이벤트 버스 등 예외 3부류는 RLS 미적용.) MySQL이면 RLS가 없어 CI 린트 + org_pk 컬럼 강제가 유일한 방어선이다.
 
 ## G.2 Qdrant (벡터) — 구현 현황
 
@@ -954,6 +1015,8 @@ audit_log: INSERT 전용. UPDATE·DELETE 금지.
 미래: prev_hash/row_hash 해시 체이닝 + 외부 WORM 연동 (ISMS-P 심사 트리거 시)
 ```
 
+> `prev_hash`/`row_hash`(CHAR(64))는 앱 레이어 또는 DB 네이티브로 계산할 수 있다 — PG는 `pgcrypto`의 `encode(digest(row_text, 'sha256'), 'hex')`로 DB 안에서 SHA-256을 산출한다(MySQL이면 앱 레이어 SHA-256).
+
 ## H.3 암호화 경계
 
 | 데이터 | 처리 | 비고 |
@@ -961,7 +1024,7 @@ audit_log: INSERT 전용. UPDATE·DELETE 금지.
 | 비밀번호 | Firebase Auth 관리 (bcrypt) | 직접 저장 안 함 |
 | OAuth refresh_token | AWS KMS envelope encryption | youtube_channel.oauth_refresh_token_kms |
 | api_key secret | bcrypt hash 저장 (prefix만 평문) | §J 참조 |
-| IP 주소 | VARBINARY(16) raw 저장 | PIPA 처리방침 |
+| IP 주소 | `INET` 저장 (IPv4/IPv6) | PIPA 처리방침 (MySQL이면 `VARBINARY(16)`) |
 | 결제 카드 정보 | PG 측 보관 (PCI-DSS) | 직접 저장 안 함 |
 
 ## H.4 secret 로테이션 정책
@@ -1013,20 +1076,21 @@ mutable boolean flag로는 반복 on/off 이력 소실 → PIPA 분쟁 시 입�
 
 ```sql
 CREATE TABLE user_consent_event (
-  pk            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_pk       BIGINT UNSIGNED NOT NULL,
+  pk            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  user_pk       BIGINT NOT NULL,
   consent_type  VARCHAR(50) NOT NULL,          -- 위 네임스페이스 참조
-  action        ENUM('GRANTED','REVOKED') NOT NULL,
+  action        VARCHAR(10) NOT NULL,
   version       VARCHAR(20) NOT NULL,               -- 약관 버전 (예: '2026-05-01')
-  ip            VARBINARY(16),
+  ip            INET,
   user_agent    VARCHAR(500),
-  meta_json     JSON,                               -- P1: PIPA §17 4요건 정형화 (제3자 제공 시 제공받는자·목적·항목·보유기간)
+  meta_json     JSONB,                              -- P1: PIPA §17 4요건 정형화 (제3자 제공 시 제공받는자·목적·항목·보유기간)
   prev_hash     CHAR(64),                           -- P1: 직전 row SHA-256 (해시 체이닝 무결성)
   row_hash      CHAR(64),                           -- P1: 현재 row 전체 SHA-256 (위변조 감지)
-  created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_consent_user_type (user_pk, consent_type, created_at)
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_consent_action CHECK (action IN ('GRANTED','REVOKED'))
   -- UPDATE·DELETE 금지 (append-only) — §M `consent_append` INSERT-only 계정으로 GRANT 강제
 );
+CREATE INDEX idx_consent_user_type ON user_consent_event (user_pk, consent_type, created_at);
 ```
 
 > **P1 해시 컬럼 참고**: `prev_hash`/`row_hash`는 DDL에는 있으나 구현 전까지 애플리케이션에서 NULL로 삽입. 해시 사슬 검증 배치([[audit-hash-chain]])는 컬럼 활성화 이후 운영. **baseline 규칙**: 활성화 이전(NULL) 구간은 검증 대상에서 제외하고, 활성화 첫 row를 genesis(`prev_hash`=고정 seed)로 삼는다 — NULL row에 대해 `computeSHA256(row) != NULL` 거짓 위변조 알림이 나는 것을 방지. `audit_log`·`user_consent_event`의 해시 활성화 트리거 일정을 일치시킨다.
@@ -1070,7 +1134,7 @@ Scenario: fan-out 익명화 (탈퇴 요청)
   Given 김지영이 회원 탈퇴를 요청한다
   When 탈퇴 처리가 실행된다
   Then user_consent_event에 (consent_type='ALL', action='REVOKED') row가 INSERT된다
-  And identity_user.status='DELETED', deleted_at=NOW()
+  And identity_user.status='DELETED', deleted_at=now()
   And 서비스 DB의 개인식별 컬럼들이 익명화된다 (fan-out)
   And audit_log에 actor_type='SYSTEM', action='USER_DELETION' 기록된다
 ```
@@ -1081,23 +1145,23 @@ Scenario: fan-out 익명화 (탈퇴 요청)
 
 ```sql
 CREATE TABLE api_key (
-  pk               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk           BIGINT UNSIGNED NOT NULL,
-  user_pk          BIGINT UNSIGNED NOT NULL,     -- 키 소유자 identity_user (type='SERVICE')
+  pk               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk           BIGINT NOT NULL,
+  user_pk          BIGINT NOT NULL,              -- 키 소유자 identity_user (type='SERVICE')
   key_prefix       VARCHAR(10) NOT NULL,         -- 평문 prefix (예: 'ak_live_')
   secret_hash      VARCHAR(255) NOT NULL,        -- bcrypt hash
-  scopes           JSON NOT NULL,                -- ["lecture:read", "membership:write"]
-  allowed_ip_cidr  VARCHAR(50),                 -- 허용 IP 범위 (NIST 환경속성)
-  allowed_services JSON,                         -- ["ACADEMY", "MARKET"]
-  rotated_at       TIMESTAMP,                   -- 마지막 rotation 시각
-  last_used_at     TIMESTAMP,
-  expires_at       TIMESTAMP,
-  revoked_at       TIMESTAMP,
+  scopes           JSONB NOT NULL,               -- ["lecture:read", "membership:write"]
+  allowed_ip_cidr  VARCHAR(50),                  -- 허용 IP 범위 (NIST 환경속성)
+  allowed_services JSONB,                        -- ["ACADEMY", "MARKET"]
+  rotated_at       TIMESTAMPTZ,                  -- 마지막 rotation 시각
+  last_used_at     TIMESTAMPTZ,
+  expires_at       TIMESTAMPTZ,
+  revoked_at       TIMESTAMPTZ,
   revoked_reason   VARCHAR(255),
-  created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_api_key_org (org_pk),
-  INDEX idx_api_key_user (user_pk)
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_api_key_org  ON api_key (org_pk);
+CREATE INDEX idx_api_key_user ON api_key (user_pk);
 ```
 
 **설계 포인트**:
@@ -1139,8 +1203,8 @@ ALTER TABLE membership_invite
 -- (service_membership.role_code는 무마이그레이션 확장이나 capability CHECK는 §D.6대로 ALTER 필요 — EXT-2 비대칭)
 ```
 
-**온라인 DDL**: CHECK constraint 추가/변경은 InnoDB에서 테이블 락 없음.  
-**ENUM과의 차이**: ENUM은 `MODIFY COLUMN` 필요 → 대형 테이블 잠금 유발.  
+**온라인 DDL**: PostgreSQL에서 새 CHECK는 `ADD CONSTRAINT ... NOT VALID` 후 `VALIDATE CONSTRAINT`로 짧은 락만으로 추가할 수 있다(기존 행 풀스캔을 트랜잭션 밖으로 분리).  
+**네이티브 ENUM과의 차이**: PG 네이티브 ENUM은 `ALTER TYPE ADD VALUE`가 트랜잭션 블록 내에서 실행 불가하고 전역 타입이 여러 테이블에 결합된다 → VARCHAR+CHECK가 마이그레이션에 유리(§B.1). (🐬 MySQL이면 ENUM은 `MODIFY COLUMN`이 대형 테이블 잠금을 유발하므로 동일하게 CHECK가 유리.)  
 **동반 대상 체크리스트**: `service` CHECK 4곳(org_entitlement·product·service_membership·membership_invite) + 위임 사용 시 `delegation_grant.chk_capability`. 1곳이라도 빠지면 신규 서비스 row가 fail-closed로 거부됨.
 
 ---
@@ -1154,16 +1218,17 @@ ALTER TABLE membership_invite
 ```sql
 -- 모든 테이블 공통 패턴
 CREATE TABLE lecture (
-  pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk     BIGINT UNSIGNED NOT NULL,           -- ← 필수. 격리 기준
+  pk         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk     BIGINT NOT NULL,                    -- ← 필수. 격리 기준
   public_id  CHAR(26) NOT NULL,
-  teacher_pk BIGINT UNSIGNED NOT NULL,           -- platform_db.identity_user.pk 참조 (FK 없음)
+  teacher_pk BIGINT NOT NULL,                    -- platform_db.identity_user.pk 참조 (FK 없음)
   title      VARCHAR(200) NOT NULL,
-  status     ENUM('DRAFT','PUBLISHED','ARCHIVED') NOT NULL DEFAULT 'DRAFT',
-  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_lecture_org_status (org_pk, status)
+  status     VARCHAR(10) NOT NULL DEFAULT 'DRAFT',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_lecture_status CHECK (status IN ('DRAFT','PUBLISHED','ARCHIVED'))
   -- cross-schema FK 금지: org_pk → platform_db.organization.pk (앱 레이어 검증)
 );
+CREATE INDEX idx_lecture_org_status ON lecture (org_pk, status);
 ```
 
 ## L.2 agent_db (설계 확정)
@@ -1171,32 +1236,33 @@ CREATE TABLE lecture (
 ```sql
 -- agent_db: AI 에이전트 실행 기록
 CREATE TABLE agent_session (
-  pk         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk     BIGINT UNSIGNED NOT NULL,
-  user_pk    BIGINT UNSIGNED NOT NULL,
+  pk         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk     BIGINT NOT NULL,
+  user_pk    BIGINT NOT NULL,
   agent_type VARCHAR(50) NOT NULL,
-  status     ENUM('RUNNING','COMPLETED','FAILED','CANCELED') NOT NULL DEFAULT 'RUNNING',
-  input_json JSON,
-  output_json JSON,
-  tokens_used INT UNSIGNED NOT NULL DEFAULT 0,
-  started_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  ended_at   TIMESTAMP,
-  INDEX idx_agent_session_org (org_pk, started_at),
-  INDEX idx_agent_session_user (user_pk, started_at)
+  status     VARCHAR(10) NOT NULL DEFAULT 'RUNNING',
+  input_json JSONB,
+  output_json JSONB,
+  tokens_used INT NOT NULL DEFAULT 0 CHECK (tokens_used >= 0),
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at   TIMESTAMPTZ,
+  CONSTRAINT chk_agent_session_status CHECK (status IN ('RUNNING','COMPLETED','FAILED','CANCELED'))
 );
+CREATE INDEX idx_agent_session_org  ON agent_session (org_pk, started_at);
+CREATE INDEX idx_agent_session_user ON agent_session (user_pk, started_at);
 
 CREATE TABLE agent_tool_call (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  session_pk  BIGINT UNSIGNED NOT NULL,
-  org_pk      BIGINT UNSIGNED NOT NULL,           -- 비정규화 (격리 쿼리 최적화)
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  session_pk  BIGINT NOT NULL,
+  org_pk      BIGINT NOT NULL,                    -- 비정규화 (격리 쿼리 최적화)
   tool_name   VARCHAR(100) NOT NULL,
-  input_json  JSON,
-  output_json JSON,
-  duration_ms INT UNSIGNED,
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_tool_call_session (session_pk),
-  INDEX idx_tool_call_org (org_pk, created_at)
+  input_json  JSONB,
+  output_json JSONB,
+  duration_ms INT CHECK (duration_ms >= 0),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_tool_call_session ON agent_tool_call (session_pk);
+CREATE INDEX idx_tool_call_org     ON agent_tool_call (org_pk, created_at);
 ```
 
 ## L.3 market_db (설계 확정)
@@ -1204,30 +1270,32 @@ CREATE TABLE agent_tool_call (
 ```sql
 -- market_db: 마켓플레이스 상품·주문
 CREATE TABLE market_item (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk      BIGINT UNSIGNED NOT NULL,           -- 판매 org
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk      BIGINT NOT NULL,                    -- 판매 org
   public_id   CHAR(26) NOT NULL,
-  seller_pk   BIGINT UNSIGNED NOT NULL,
+  seller_pk   BIGINT NOT NULL,
   title       VARCHAR(200) NOT NULL,
-  price_krw   INT UNSIGNED NOT NULL DEFAULT 0,
-  status      ENUM('DRAFT','ACTIVE','SOLD_OUT','RETIRED') NOT NULL DEFAULT 'DRAFT',
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-  updated_at  TIMESTAMP NOT NULL DEFAULT NOW() ON UPDATE NOW(),
-  UNIQUE KEY uq_market_item_public_id (public_id),
-  INDEX idx_market_item_org_status (org_pk, status)
+  price_krw   INT NOT NULL DEFAULT 0 CHECK (price_krw >= 0),
+  status      VARCHAR(10) NOT NULL DEFAULT 'DRAFT',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),  -- 갱신은 트리거/앱 (§B.1)
+  CONSTRAINT chk_market_item_status CHECK (status IN ('DRAFT','ACTIVE','SOLD_OUT','RETIRED')),
+  CONSTRAINT uq_market_item_public_id UNIQUE (public_id)
 );
+CREATE INDEX idx_market_item_org_status ON market_item (org_pk, status);
 
 CREATE TABLE market_order (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk      BIGINT UNSIGNED NOT NULL,           -- 구매 org
-  buyer_pk    BIGINT UNSIGNED NOT NULL,
-  item_pk     BIGINT UNSIGNED NOT NULL,
-  ledger_pk   BIGINT UNSIGNED,                    -- platform_db.payment_ledger.pk (FK 없음)
-  status      ENUM('PENDING','PAID','CANCELED','REFUNDED') NOT NULL DEFAULT 'PENDING',
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_market_order_org (org_pk, created_at),
-  INDEX idx_market_order_buyer (buyer_pk, created_at)
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk      BIGINT NOT NULL,                    -- 구매 org
+  buyer_pk    BIGINT NOT NULL,
+  item_pk     BIGINT NOT NULL,
+  ledger_pk   BIGINT,                             -- platform_db.payment_ledger.pk (FK 없음)
+  status      VARCHAR(10) NOT NULL DEFAULT 'PENDING',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_market_order_status CHECK (status IN ('PENDING','PAID','CANCELED','REFUNDED'))
 );
+CREATE INDEX idx_market_order_org   ON market_order (org_pk, created_at);
+CREATE INDEX idx_market_order_buyer ON market_order (buyer_pk, created_at);
 ```
 
 ## L.4 store_db (설계 확정)
@@ -1235,35 +1303,37 @@ CREATE TABLE market_order (
 ```sql
 -- store_db: 디지털 스토어 (템플릿·콘텐츠 판매)
 CREATE TABLE store_product (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk      BIGINT UNSIGNED NOT NULL,
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk      BIGINT NOT NULL,
   public_id   CHAR(26) NOT NULL,
-  product_type ENUM('TEMPLATE','COURSE','ASSET') NOT NULL,
+  product_type VARCHAR(10) NOT NULL,
   title       VARCHAR(200) NOT NULL,
-  price_krw   INT UNSIGNED NOT NULL DEFAULT 0,
-  status      ENUM('DRAFT','PUBLISHED','RETIRED') NOT NULL DEFAULT 'DRAFT',
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
-  UNIQUE KEY uq_store_product_public_id (public_id),
-  INDEX idx_store_product_org_status (org_pk, status)
+  price_krw   INT NOT NULL DEFAULT 0 CHECK (price_krw >= 0),
+  status      VARCHAR(10) NOT NULL DEFAULT 'DRAFT',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT chk_store_product_type   CHECK (product_type IN ('TEMPLATE','COURSE','ASSET')),
+  CONSTRAINT chk_store_product_status CHECK (status IN ('DRAFT','PUBLISHED','RETIRED')),
+  CONSTRAINT uq_store_product_public_id UNIQUE (public_id)
 );
+CREATE INDEX idx_store_product_org_status ON store_product (org_pk, status);
 
 CREATE TABLE store_purchase (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk      BIGINT UNSIGNED NOT NULL,           -- 구매 org (격리 키 — market_order와 명명 통일)
-  product_pk  BIGINT UNSIGNED NOT NULL,
-  buyer_user_pk BIGINT UNSIGNED NOT NULL,
-  ledger_pk   BIGINT UNSIGNED,
-  purchased_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  expires_at  TIMESTAMP,
-  INDEX idx_store_purchase_org (org_pk, purchased_at)
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk      BIGINT NOT NULL,                    -- 구매 org (격리 키 — market_order와 명명 통일)
+  product_pk  BIGINT NOT NULL,
+  buyer_user_pk BIGINT NOT NULL,
+  ledger_pk   BIGINT,
+  purchased_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ
 );
+CREATE INDEX idx_store_purchase_org ON store_purchase (org_pk, purchased_at);
 ```
 
 ---
 
 # M. DB 계정 최소 권한 (Least Privilege)
 
-각 서비스는 자기 DB에만 접근하는 전용 계정을 사용한다.
+각 서비스는 자기 DB에만 접근하는 전용 **PostgreSQL 롤**을 사용한다. PG 권한은 `GRANT ... TO <role>;`로 부여하고, **접속 호스트 제어는 GRANT가 아니라 `pg_hba.conf`**에서 한다(예: `host platform_db platform_rw 10.0.0.0/8 scram-sha-256` 한 줄).
 
 | 계정 | 접근 DB | 권한 |
 |---|---|---|
@@ -1283,8 +1353,24 @@ CREATE TABLE store_purchase (
 - cross-DB 접근 계정 없음. academy-api는 `academy_rw` + `platform_ro`만 사용
 - **append-only 4종 GRANT 강제**: `audit_log`·`payment_ledger`·`billing_event`·`user_consent_event`는 전용 INSERT-only 계정(`audit_append`·`ledger_append`·`consent_append`)으로만 write하고, `platform_rw`는 이 4개 테이블에 UPDATE를 **테이블 단위로 미부여**한다. → 주석이 아니라 GRANT가 위변조를 막음(architecture §4 'INSERT만' 단언이 DB로 참). 회귀는 GRANT 점검 CI로 방어(§N.2).
 - `DELETE` 권한: 어떤 계정에도 없음 (논리 삭제만 허용)
-- `DROP`, `TRUNCATE`: `migrator` 계정에만, CI/CD 파이프라인 내에서만 실행
+- `DROP`, `TRUNCATE`: `migrator` 롤에만, CI/CD 파이프라인 내에서만 실행
 - 비밀번호: AWS Secrets Manager 관리, 90일 자동 로테이션
+
+**append-only 롤 GRANT 예시 (PostgreSQL)**:
+```sql
+-- INSERT만 부여, UPDATE/DELETE는 부여하지 않음 → 위변조를 GRANT가 차단
+GRANT INSERT ON audit_log          TO audit_append;
+GRANT INSERT ON payment_ledger, billing_event TO ledger_append;
+GRANT INSERT ON user_consent_event TO consent_append;
+
+-- platform_rw: 4종 테이블에 UPDATE를 부여하지 않는다(테이블 단위)
+GRANT SELECT, INSERT, UPDATE ON org_entitlement, org_subscription, /* … */ TO platform_rw;
+GRANT SELECT, INSERT          ON audit_log, payment_ledger, billing_event, user_consent_event TO platform_rw;
+-- 어떤 롤에도 DELETE 미부여 (논리 삭제만)
+```
+검증 시 `information_schema.table_privileges`의 `grantee`는 **호스트 없는 롤명**(`platform_rw`)으로 조회된다 — 이 4종에 UPDATE row가 없어야 함을 GRANT 점검 CI가 단언(§N.2).
+
+> 🐬 **MySQL이라면**: 롤 대신 `GRANT ... TO 'platform_rw'@'%';`처럼 계정에 호스트(`@'%'`)가 붙고, `table_privileges`의 grantee도 `'platform_rw'@'%'` 형태다.
 
 ---
 
@@ -1301,7 +1387,7 @@ CREATE TABLE store_purchase (
 | append-only 4종 | 전용 INSERT-only 계정(`audit_append`·`ledger_append`·`consent_append`) + `platform_rw` 테이블단위 UPDATE 미부여 + 전 계정 DELETE 0(§M) | ✅ (회귀는 GRANT 점검 CI, §N.2) |
 | 참조 정합 | 스키마 내 FK(cross-schema는 앱 검증, [[fk-strategy]]) | ✅ |
 | 자기참조 차단 | `chk_no_self_ref`(org_relation) | ✅ |
-| 결제↔권한 원자성 | 단일 InnoDB 트랜잭션(§F.1) | ✅ |
+| 결제↔권한 원자성 | 단일 Postgres(MVCC) 트랜잭션(§F.1) | ✅ |
 
 ## N.2 앱/배치가 강제해야 하는 것 (DB로는 부족 — 갭)
 
@@ -1309,7 +1395,7 @@ CREATE TABLE store_purchase (
 |---|---|---|---|
 | **마지막 OWNER 보호** | 앱 트랜잭션만, **DB 무방비** | 유일 OWNER 삭제 → org 좀비화 | 앱 가드 + 모니터링(N.3) |
 | append-only GRANT 회귀 | 신규 append-only 테이블·계정 추가 시 UPDATE 재유입 | 감사·금융 원장 훼손 | DDL 단계 GRANT 점검 CI(§M 4종 INSERT-only·platform_rw UPDATE 미보유 검증) |
-| 파티션 자동 추가 | 미작성(`p_future` 단독) | 3개월 후 INSERT 성능 저하 | 월별 `REORGANIZE` 배치([[operability]] O3) |
+| 파티션 자동 추가 | 미작성(`audit_log_default` 단독) | default 파티션 적체·범위 결손 시 INSERT 실패 | 월별 `CREATE TABLE ... PARTITION OF` 배치(`pg_partman`)([[operability]] O3) |
 | sweeper(outbox/webhook) | 미작성 | PROCESSED 무한 누적 | +30/90일 DELETE 배치(O3) |
 | webhook reconciliation | 미작성 | webhook 완전 유실 시 복구 불가 | PG API 폴링 대사 잡([[operability]] O5) |
 | 보존·파기 | 미작성 | PIPA 5년 후 파기 안 됨 | 보존 매트릭스 배치(O3) |
@@ -1318,12 +1404,12 @@ CREATE TABLE store_purchase (
 
 ## N.3 마지막 OWNER 보호 — DB 레벨이 약한 이유
 
-MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적으로 못 건다**. 트리거는 가능하나 root가 DROP 가능·우회되어 채택하지 않는다(감사 트리거와 동일 이유, §H.2).
+"행 개수 조건부 제약"(예: org당 OWNER ≥ 1)은 **MySQL·PostgreSQL 모두 선언적으로 걸기 어렵다**(표준 CHECK는 단일 row만 본다). 트리거로는 가능하나, superuser가 트리거를 DROP·우회할 수 있어 감사 불변성과 같은 신뢰 경계가 되지 못한다(감사 트리거와 동일 이유, §H.2). 따라서 OWNER 보호 트리거는 채택하지 않는다.
 
 → **다층 방어**:
 - **1차 (앱 트랜잭션)**: `SELECT COUNT(*) ... WHERE platform_role='OWNER' AND status='ACTIVE' FOR UPDATE` → 1이면 마지막 OWNER 강등/삭제 거부.
 - **2차 (모니터링)**: `organization.status='ACTIVE'`인 org 중 `platform_role='OWNER'` ACTIVE count = 0 탐지 → 알림. CLOSED/SUSPENDED org는 제외(정상 종료·정지 org에 대한 거짓 알림 방지)([[operability]] O6).
-- 트리거·DB 제약은 미채택(MySQL 한계 + root 우회).
+- 트리거·DB 제약은 미채택(선언적 불가 + superuser 우회).
 
 ---
 
@@ -1335,7 +1421,7 @@ MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적�
 
 | 항목 | 초기 설계 | 자체 비교 분석 결과 | 결정 |
 |---|---|---|---|
-| `organization.type` | ENUM(4종) 고정 | ENUM(3종, ACADEMY 제거). `org_kind VARCHAR+CHECK`는 향후 | 🟡 부분 구현 (D5 일부) |
+| `organization.type` | 4종 고정 (ACADEMY 포함) | `VARCHAR(10)+CHECK`(3종, ACADEMY 제거). `org_kind` 의미 일반화는 향후 | 🟡 부분 구현 (D5 일부) |
 | `membership.platform_role` | 도메인 역할 혼재 | platform_role 분리 + service_membership 병행 | ✅ **설계 확정** |
 | `delegation_grant.capability` | 6종 고정 CHECK | `ACADEMY.<action>` 네임스페이스(6종 CHECK) | ✅ **설계 확정** |
 | org 인가 판단 소스 | payment_ledger 직접 | org_entitlement SSOT | **확정 구현** |
@@ -1344,17 +1430,16 @@ MySQL은 "행 개수 조건부 제약"(예: org당 OWNER ≥ 1)을 **선언적�
 | 멀티테넌시 격리 | 앱 레이어 관례 | org_pk NOT NULL + CI 린트 P1 | 진행 중 |
 | PG webhook 멱등 | 앱 레이어 처리 | UNIQUE(provider, event_id) + append | **확정 구현** |
 
-## O.2 MySQL vs PostgreSQL 구조적 차이
+## O.2 PostgreSQL 네이티브 기능과 MySQL 우회법
 
-자체 분석에서 도출된 MySQL 선택의 구조적 제약:
+이 설계가 1순위로 활용하는 PostgreSQL 네이티브 기능과, 인프라가 MySQL일 때의 동등 우회법:
 
-| 제약 | MySQL 우회법 | PostgreSQL 네이티브 |
+| 기능 | PostgreSQL 네이티브 (1순위) | (🐬 MySQL이라면) 우회법 |
 |---|---|---|
-| RLS 없음 | CI 린트 + org_pk 컬럼 강제 | `CREATE POLICY` |
-| TIMESTAMP 파티셔닝 버그 | `DATETIME` 컬럼 사용 | TIMESTAMP 직접 사용 |
-| JSON 인덱스 미흡 | JSON 쿼리 자제, 정규화 우선 | JSONB GIN 인덱스 |
-| 감사 해시 내장 없음 | 앱 레이어 SHA-256 | `pgcrypto` |
-| `FOR UPDATE SKIP LOCKED` | `SELECT ... FOR UPDATE` + 앱 retry | 네이티브 지원 |
+| 행 격리 | `CREATE POLICY` (RLS) | CI 린트 + org_pk 컬럼 강제 |
+| 시각 파티셔닝 | `TIMESTAMPTZ` + 선언적 `PARTITION OF` | `DATETIME` 컬럼 + `RANGE COLUMNS`(TIMESTAMP 버그 회피) |
+| JSON 인덱스 | JSONB GIN 인덱스(`@>`) | JSON 쿼리 자제, 정규화 우선 |
+| 감사 해시 | `pgcrypto` DB 네이티브 SHA-256 | 앱 레이어 SHA-256 |
+| 워커 큐 잠금 | `FOR UPDATE SKIP LOCKED` | `SELECT ... FOR UPDATE` + 앱 retry |
 
-현재 스택(MySQL + Drizzle)은 위 제약을 모두 앱/CI 레이어에서 보완 중.  
-전환 비용보다 최적화 비용이 낮은 현 시점에서는 MySQL 유지를 선택한다.
+이 설계는 **PostgreSQL 1순위**이며, MySQL은 배포 옵션 중 하나다. 인프라가 MySQL이면 위 우회법(각 절의 "🐬 MySQL이라면" 노트)을 앱/CI 레이어에서 보완한다.

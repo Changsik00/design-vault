@@ -56,26 +56,27 @@ ReBAC가 빛나는 지점은 RBAC로는 표현이 어색한 경우입니다. "�
 
 ```sql
 CREATE TABLE delegation_grant (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  grantor_pk  BIGINT UNSIGNED NOT NULL,  -- 권한을 "주는" 사람 (grantor)
-  grantee_pk  BIGINT UNSIGNED NOT NULL,  -- 권한을 "받는" 사람 (grantee)
-  org_pk      BIGINT UNSIGNED NOT NULL,  -- 어느 조직 안에서의 위임인가 (테넌트 경계)
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  grantor_pk  BIGINT NOT NULL,           -- 권한을 "주는" 사람 (grantor)
+  grantee_pk  BIGINT NOT NULL,           -- 권한을 "받는" 사람 (grantee)
+  org_pk      BIGINT NOT NULL,           -- 어느 조직 안에서의 위임인가 (테넌트 경계)
   capability  VARCHAR(100) NOT NULL,     -- 무엇을 위임하나 ('ACADEMY.<action>')
-  scope_json  JSON,                      -- 범위 제한 (예: 특정 반/기간만)
-  status      ENUM('ACTIVE','REVOKED') NOT NULL DEFAULT 'ACTIVE',  -- 살아있나/회수됐나
-  expires_at  TIMESTAMP,                 -- 언제 자동 만료되나
-  created_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+  scope_json  JSONB,                     -- 범위 제한 (예: 특정 반/기간만)
+  status      VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'  -- 살아있나/회수됐나
+                CHECK (status IN ('ACTIVE','REVOKED')),
+  expires_at  TIMESTAMPTZ,               -- 언제 자동 만료되나
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_capability CHECK (capability IN (
     'ACADEMY.PUBLISH_VIDEO','ACADEMY.APPROVE_VIDEO','ACADEMY.VIEW_ALL_LECTURES',
     'ACADEMY.MANAGE_SCHEDULE','ACADEMY.MANAGE_MEMBERS','ACADEMY.VIEW_BILLING'
   )),
   CONSTRAINT chk_no_self_delegation CHECK (grantor_pk <> grantee_pk),  -- 자기위임 차단
-  INDEX idx_delegation_grantee_org (org_pk, grantee_pk, status),
-  INDEX idx_delegation_grantor (grantor_pk),
   CONSTRAINT fk_grant_org      FOREIGN KEY (org_pk)     REFERENCES organization(pk),
   CONSTRAINT fk_grant_grantor  FOREIGN KEY (grantor_pk) REFERENCES identity_user(pk),
   CONSTRAINT fk_grant_grantee  FOREIGN KEY (grantee_pk) REFERENCES identity_user(pk)
 );
+CREATE INDEX idx_delegation_grantee_org ON delegation_grant (org_pk, grantee_pk, status);
+CREATE INDEX idx_delegation_grantor     ON delegation_grant (grantor_pk);
 ```
 
 각 컬럼을 시나리오로 읽으면 이해가 빠릅니다.
@@ -159,7 +160,7 @@ await auditLog.record({
 SELECT capability, scope_json FROM delegation_grant
 WHERE org_pk = ? AND grantee_pk = ?
   AND status = 'ACTIVE'
-  AND (expires_at IS NULL OR expires_at > NOW());  -- ← 만료된 건 자동 제외
+  AND (expires_at IS NULL OR expires_at > now());  -- ← 만료된 건 자동 제외
 ```
 
 `idx_delegation_grantee_org (org_pk, grantee_pk, status)` 인덱스가 이 조회를 빠르게 만듭니다([[index-design]]). `expires_at IS NULL`은 "무기한 위임"을 허용하지만, 운영상 만료를 두는 걸 권장합니다.
@@ -202,15 +203,16 @@ await bumpPermVersion(orgPk);  // ← 핵심! 권한 버전을 올린다
 
 ```sql
 CREATE TABLE org_relation (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  parent_org_pk   BIGINT UNSIGNED NOT NULL,  -- 본사 / 지주사
-  child_org_pk    BIGINT UNSIGNED NOT NULL,  -- 지점 / 자회사
-  relation_type   ENUM('HQ_BRANCH','HOLDING') NOT NULL,  -- 본사-지점 / 지주-자회사
-  created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  parent_org_pk   BIGINT NOT NULL,  -- 본사 / 지주사
+  child_org_pk    BIGINT NOT NULL,  -- 지점 / 자회사
+  relation_type   VARCHAR(20) NOT NULL  -- 본사-지점 / 지주-자회사
+                    CHECK (relation_type IN ('HQ_BRANCH','HOLDING')),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT chk_no_self_ref CHECK (parent_org_pk != child_org_pk),  -- 자기참조 차단
-  UNIQUE KEY uq_org_relation_parent_child (parent_org_pk, child_org_pk),
-  INDEX idx_org_relation_child (child_org_pk)
+  CONSTRAINT uq_org_relation_parent_child UNIQUE (parent_org_pk, child_org_pk)
 );
+CREATE INDEX idx_org_relation_child ON org_relation (child_org_pk);
 ```
 
 여기서 흔한 오해가 생깁니다. "강남본원이 강남지점의 *parent*니까, 본원 원장은 지점 데이터를 다 볼 수 있겠지?" — **틀립니다.**

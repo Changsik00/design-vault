@@ -77,9 +77,9 @@ JSON은 이 문제를 해결합니다:
 - 새 서비스 추가 시 스키마 변경 없음
 - NULL 컬럼 폭증 없음
 
-**주의**: JSON이라서 인덱스를 걸기 어렵습니다. 그래서 한도 값을 조건으로 검색하거나 집계하는 용도로는 쓰지 않고, org별로 꺼내는 용도로만 씁니다. (PostgreSQL JSONB GIN 인덱스를 쓸 수 있었다면 더 편했겠지만, 현재 MySQL 스택에서는 이 방식이 최선입니다.)
+**주의**: `feature_limits`는 `JSONB` 컬럼으로 저장합니다. JSONB는 GIN 인덱스로 `@>` 같은 포함 검색을 걸 수 있지만, 런타임 한도 판단은 불변식 #10에 따라 **org별로 entitlement 한 row를 통째로 읽어** 그 안의 JSON을 꺼내는 방식이라(검색·집계가 아니라 단건 조회), 한도 값을 조건으로 검색하거나 집계하는 용도로는 쓰지 않습니다. 즉 GIN을 깔 수는 있어도 이 경로에선 굳이 필요하지 않습니다.
 
-> 💡 **한 줄 요약**: feature_limits를 JSON으로 저장하는 이유는 서비스마다 한도 항목 자체가 달라서, 컬럼으로 만들면 서비스 추가 때마다 스키마를 바꿔야 하는 문제를 피하기 위해서입니다.
+> 💡 **한 줄 요약**: feature_limits를 JSONB로 저장하는 이유는 서비스마다 한도 항목 자체가 달라서, 컬럼으로 만들면 서비스 추가 때마다 스키마를 바꿔야 하는 문제를 피하기 위해서입니다.
 
 ---
 
@@ -217,12 +217,10 @@ const limit = await getFeatureLimit(orgPk, 'ACADEMY', 'daily_uploads');
 -- 특정 플랜을 쓰는 모든 org의 feature_limits 업데이트
 -- (주의: 이건 의도적 일괄 변경, 신중하게 실행)
 UPDATE org_entitlement
-SET feature_limits = JSON_MERGE_PATCH(
-  feature_limits,
-  '{"daily_uploads": 8}'
-)
+SET feature_limits = feature_limits || '{"daily_uploads": 8}'::jsonb
 WHERE plan_code = 'BASIC'
   AND service = 'ACADEMY';
+-- 중첩 키만 바꾸려면 jsonb_set(feature_limits, '{daily_uploads}', '8'::jsonb)
 
 -- 변경 후 perm_version 갱신 (bulk라서 신중하게 처리)
 ```
@@ -233,13 +231,13 @@ org가 BASIC → PRO로 플랜을 업그레이드하면 결제 성공 webhook �
 
 ```sql
 -- 결제 단일 트랜잭션 내에서
-INSERT INTO org_entitlement (org_pk, service, status, feature_limits, plan_code, valid_until)
-VALUES (?, 'ACADEMY', 'ACTIVE', ?, 'PRO', ?)
-ON DUPLICATE KEY UPDATE
+INSERT INTO org_entitlement (org_pk, product_code, service, status, feature_limits, plan_code, valid_until)
+VALUES (?, ?, 'ACADEMY', 'ACTIVE', ?, 'PRO', ?)
+ON CONFLICT (org_pk, product_code) DO UPDATE SET
   status = 'ACTIVE',
-  feature_limits = VALUES(feature_limits),  -- PRO 플랜 한도로 교체
-  plan_code = VALUES(plan_code),
-  valid_until = VALUES(valid_until);
+  feature_limits = EXCLUDED.feature_limits,  -- PRO 플랜 한도로 교체
+  plan_code = EXCLUDED.plan_code,
+  valid_until = EXCLUDED.valid_until;
 ```
 
 > 💡 **한 줄 요약**: `plan_definition`을 바꿔도 기존 org의 한도는 자동으로 안 바뀝니다. 기존 고객에게 새 한도를 적용하려면 명시적인 마이그레이션 스크립트가 필요합니다.
@@ -280,18 +278,18 @@ CREATE TABLE org_entitlement (
 
 4. **서비스별 org 분리 후 마이그레이션 어려움**: 향후 FITNESS가 별도 DB로 분리되면 컬럼을 이동해야 합니다.
 
-**JSON의 트레이드오프:**
+**JSONB의 트레이드오프:**
 
-물론 JSON에도 단점이 있습니다:
+물론 JSONB에도 단점이 있습니다:
 
 ```typescript
-// JSON이라 타입 안전성이 약함
+// JSONB라 타입 안전성이 약함
 const limits = entitlement.featureLimits as Record<string, number>;
 //                                          ^^^^ 타입 캐스팅 필요
 
-// 특정 한도로 org 목록을 검색하기 어려움
-// (MySQL JSON은 인덱스 지원이 제한적)
-// PostgreSQL JSONB라면 GIN 인덱스로 해결 가능했음
+// 특정 한도로 org 목록을 검색하려면 별도 인덱스가 필요
+// (JSONB라 GIN 인덱스로 @> 포함 검색은 가능하지만,
+//  런타임 한도는 org별 단건 조회라 이 경로에선 안 씀)
 ```
 
 하지만 이 시스템에서 feature_limits는 org별로 꺼내는 용도가 주이고, 한도값 기준으로 여러 org를 검색하는 케이스는 드뭅니다. 트레이드오프를 따졌을 때 JSON이 더 나은 선택입니다.
@@ -311,7 +309,7 @@ interface AcademyFeatureLimits {
 const limits = AcademyFeatureLimitsSchema.parse(entitlement.featureLimits);
 ```
 
-> 💡 **한 줄 요약**: 컬럼 방식은 서비스 추가 때마다 스키마를 바꿔야 하고 NULL 컬럼이 넘칩니다. JSON은 타입 안전성이 약한 대신 유연하게 확장됩니다. 이 시스템의 "한도 항목이 서비스마다 다르고 늘어난다"는 특성 때문에 JSON을 선택했습니다.
+> 💡 **한 줄 요약**: 컬럼 방식은 서비스 추가 때마다 스키마를 바꿔야 하고 NULL 컬럼이 넘칩니다. JSONB는 타입 안전성이 약한 대신 유연하게 확장됩니다. 이 시스템의 "한도 항목이 서비스마다 다르고 늘어난다"는 특성 때문에 JSONB를 선택했습니다.
 
 ---
 

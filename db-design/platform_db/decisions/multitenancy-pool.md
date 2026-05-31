@@ -41,10 +41,12 @@ CREATE DATABASE academy_org_2;
 - 한 학원의 쿼리가 다른 학원 성능에 영향 없음
 
 **문제점**:
-- MySQL에서 schema = database → 학원마다 별도 DB = connection pool 폭발
-  - 학원 500개 → 동시 connection 수 급증 → MySQL max_connections 한계
+- PostgreSQL 스키마는 가볍지만, schema-per-tenant는 학원마다 search_path 전환과 별도 커넥션 관리가 필요 → connection pool 비용 급증
+  - 학원 500개 → 동시 connection 수 급증 → `max_connections` 한계 (PgBouncer 등 풀러로도 학원별 search_path 분리가 어려움)
 - 스키마 마이그레이션이 학원 수만큼 반복 실행
 - 학원 간 집계 쿼리 불가 (어드민 대시보드에서 전체 학원 현황 보기)
+
+> 🐬 **MySQL이라면**: MySQL은 schema = database라 학원마다 별도 DB가 되어, 위 connection pool 폭발 문제가 PostgreSQL보다 더 직접적으로 나타난다.
 
 ---
 
@@ -61,7 +63,7 @@ academy_org_2 DB → 서버 B
 - GDPR/ISMS-P 계약 학원에 전용 인프라 제공 가능
 
 **문제점**:
-- 학원 1개당 MySQL 인스턴스 → 비용 10배+
+- 학원 1개당 Postgres 인스턴스 → 비용 10배+
 - 학원 수가 늘어날수록 운영 오버헤드 선형 증가
 - 현 규모(수십~수백 학원)에서는 비현실적
 
@@ -74,8 +76,8 @@ academy_org_2 DB → 서버 B
 ```sql
 -- 모든 도메인 테이블에 org_pk NOT NULL — 불변식 #3
 CREATE TABLE lecture (
-  pk     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk BIGINT UNSIGNED NOT NULL,  -- 이 컬럼이 테넌트 경계
+  pk     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk BIGINT NOT NULL,  -- 이 컬럼이 테넌트 경계
   ...
 );
 
@@ -87,12 +89,22 @@ WHERE org_pk = ?  -- 이게 없으면 타 학원 데이터 노출
 -- org_pk 없는 쿼리 → 404 반환 (데이터 존재 여부도 숨김)
 ```
 
-**이중 차단 구조**:
-- ① 개발자가 `org_pk` 빼먹으면 → `NOT NULL` constraint로 INSERT 자체 불가
-- ② 클라이언트가 `tenant_id` 위조하면 → JWT 검증 후 server-side에서 orgPk 바인딩 (클라이언트 값 무시)
+**다중 차단 구조**:
+- ① **PostgreSQL RLS로 DB가 테넌트 격리를 강제**: 모든 도메인 테이블에 정책을 걸어, 세션의 `app.org_pk` 설정값과 다른 행은 DB 레벨에서 차단
 
-**솔직한 제약**: MySQL은 PostgreSQL의 RLS(Row Level Security) 같은 DB 네이티브 격리가 없음.
-→ 대신 CI 린트로 보완: `WHERE org_pk` 없는 쿼리를 빌드 시 탐지 (P1 미완)
+```sql
+ALTER TABLE lecture ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON lecture
+  USING (org_pk = current_setting('app.org_pk')::bigint);
+-- 요청 시작 시 SET app.org_pk = '<JWT에서 검증된 org_pk>'
+```
+
+- ② 개발자가 `org_pk` 빼먹으면 → `NOT NULL` constraint로 INSERT 자체 불가
+- ③ 클라이언트가 `tenant_id` 위조하면 → JWT 검증 후 server-side에서 orgPk 바인딩 (클라이언트 값 무시)
+
+**defense-in-depth(보조)**: 앱 레이어의 `org_pk` 강제 + CI 린트(`WHERE org_pk` 없는 쿼리를 빌드 시 탐지)는 RLS를 보완하는 보조 방어선이다. RLS가 1차 경계, 앱·CI가 2차.
+
+> 🐬 **MySQL이라면**: MySQL은 RLS(Row Level Security)가 없어 DB 네이티브 격리가 불가능하다. 그 경우 앱 레이어 `org_pk` 강제 + CI 린트가 유일한 방어선이 되며, defense-in-depth가 아니라 1차 방어선으로 승격된다.
 
 ---
 
@@ -115,11 +127,11 @@ WHERE org_pk = ?  -- 이게 없으면 타 학원 데이터 노출
 
 | 항목 | schema-per-tenant | DB-per-tenant | Pool 모델 (우리) |
 |---|---|---|---|
-| 격리 강도 | DB 레벨 | 물리 서버 | 행 레벨 (앱 레이어) |
+| 격리 강도 | DB 레벨 | 물리 서버 | 행 레벨 (RLS + 앱 레이어) |
 | 운영 비용 | 중간 (connection pool) | 높음 (서버 증가) | **낮음** |
 | 마이그레이션 | 학원수만큼 반복 | 서버마다 | **1번** |
 | 학원 간 집계 | 불가 | 불가 | 가능 (admin 전용 모듈) |
-| RLS 네이티브 | 없음 (MySQL) | 없음 | **없음 → CI 린트로 보완** |
+| RLS 네이티브 | 없음 | 없음 | **있음 (PostgreSQL) → CI 린트는 보조** |
 
 ---
 

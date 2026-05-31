@@ -5,7 +5,7 @@ tags:
   - explainer
   - p2
   - db-ops
-  - mysql
+  - postgres
   - ddl
   - migration
   - drizzle
@@ -69,10 +69,10 @@ Drizzle ORM을 쓸 때 `pnpm drizzle-kit generate`로 생성되는 `.sql` 마이
 3번 단계에서 수천만 건을 복사하면 **수십 분**이 걸릴 수 있습니다. 이 동안 테이블에 잠금이 걸려 있으니, 다른 `INSERT`/`UPDATE` 요청들이 전부 대기 상태로 쌓입니다.
 
 ```
-운영 중 ALTER TABLE 실행 시 타임라인:
+운영 중 ALTER TABLE 실행 시 타임라인 (전체 rewrite를 유발하는 DDL의 경우):
 
-t=0s   ALTER TABLE payment_ledger MODIFY COLUMN pg_provider ENUM(...) 실행
-t=0s   테이블 배타적 잠금 획득 → 이후 모든 INSERT/UPDATE 대기 큐에 쌓임
+t=0s   ALTER TABLE payment_ledger ALTER COLUMN amount TYPE NUMERIC(...) 실행
+t=0s   테이블 배타적 잠금(ACCESS EXCLUSIVE) 획득 → 이후 모든 INSERT/UPDATE/SELECT 대기 큐에 쌓임
 t=0s   ~ t=1800s  수백만 행 복사 중 (30분!)
   ↕  이 동안 결제 API 요청 전부 타임아웃 → 503 응답
 t=1800s  복사 완료, 잠금 해제
@@ -121,36 +121,36 @@ DB 커넥션 풀(예: 최대 10개)이 전부 대기 상태가 되면, 11번째 
 
 ---
 
-## Q4. MySQL 8의 온라인 DDL은 뭐가 다른가요? 항상 안전한가요?
+## Q4. PostgreSQL에서 어떤 DDL이 안전(비차단)하고 어떤 게 위험한가요?
 
-MySQL 8.0부터 많은 DDL 작업이 **온라인 DDL**을 지원합니다. 테이블 복사 없이, 혹은 복사하는 동안에도 DML을 허용하는 방식입니다.
+PostgreSQL의 DDL은 작업마다 잡는 **락 레벨**과 **테이블 rewrite 여부**가 다릅니다. 핵심은 "전체 행을 다시 쓰는가(rewrite)"와 "쓰는 동안 다른 트랜잭션을 막는가"입니다.
+
+특히 인덱스 생성은 `CONCURRENTLY` 옵션으로 **읽기·쓰기를 막지 않고** 만들 수 있습니다 — PostgreSQL의 큰 강점입니다.
 
 ```sql
--- ALGORITHM 힌트를 명시할 수 있음
-ALTER TABLE membership
-  ADD COLUMN display_order INT DEFAULT 0,
-  ALGORITHM=INPLACE,   -- 온라인(in-place) 방식으로 시도
-  LOCK=NONE;           -- 잠금 없이 진행 (불가능하면 오류 반환)
+-- 비차단 인덱스 생성 (트랜잭션 블록 밖에서 단독 실행해야 함)
+CREATE INDEX CONCURRENTLY idx_membership_display ON membership(display_order);
+-- 빌드 동안에도 membership에 대한 INSERT/UPDATE/SELECT가 계속 가능
 ```
 
-`LOCK=NONE`은 "이 작업이 잠금 없이 불가능하면 오류를 내서 알려달라"는 뜻입니다. 안전망 역할을 합니다.
+아래 표를 참고하세요.
 
-하지만 **항상 온라인 DDL이 가능한 건 아닙니다.** 아래 표를 참고하세요.
-
-| DDL 작업 | 온라인 DDL 가능? | 비고 |
+| DDL 작업 | 비차단인가? | 비고 |
 |---|---|---|
-| CHECK 제약 추가/변경 | ✅ 즉시, 잠금 없음 | platform_db에서 자주 씀 |
-| 컬럼 기본값 변경 | ✅ 즉시 |  |
-| [[index-design\|인덱스]] 추가 | ✅ 온라인 (단, 빌드 시간 필요) | DML은 허용 |
-| 컬럼 추가 (`ADD COLUMN`) | 대부분 온라인 | MySQL 8.x 버전마다 다름 |
-| 컬럼 타입 변경 (`MODIFY COLUMN`) | ❌ 테이블 전체 재빌드 | 대형 테이블 위험 |
-| `ENUM` 값 추가/변경 | ❌ 테이블 전체 재빌드 | D6 원칙에서 ENUM 기피 이유 |
-| `VARCHAR` 길이 증가 | ✅ 온라인 (일부 조건부) |  |
-| `VARCHAR` 길이 감소 | ❌ 테이블 전체 재빌드 |  |
+| CHECK 제약 추가 (`NOT VALID` 후 `VALIDATE`) | ✅ 거의 즉시, 검증 락 분리 가능 | platform_db에서 자주 씀 |
+| 컬럼 기본값 변경 (`SET DEFAULT`) | ✅ 카탈로그만 변경 |  |
+| 인덱스 추가 (`CREATE INDEX CONCURRENTLY`) | ✅ 비차단 (DML 허용) | PostgreSQL 강점 |
+| 인덱스 추가 (`CREATE INDEX`, CONCURRENTLY 없이) | ❌ 빌드 동안 쓰기 차단 | 작은 테이블만 |
+| 컬럼 추가 (`ADD COLUMN`, NULL 또는 비휘발성 default) | ✅ 즉시 (메타데이터만, rewrite 없음) | PG 11+ 강점 |
+| `ENUM` 값 추가 (`ALTER TYPE ADD VALUE`) | ✅ 비차단 | 단 트랜잭션 블록 내 실행 불가 |
+| 컬럼 타입 변경 (`ALTER COLUMN ... TYPE`) | ❌ 대개 전체 rewrite + ACCESS EXCLUSIVE | 대형 테이블 위험 |
+| `ENUM` 타입 자체 교체(값 제거/재정렬) | ❌ 타입 교체 → 컬럼 rewrite | [[enum-vs-varchar-check\|D6]]에서 ENUM 기피 이유 |
 
-[[enum-vs-varchar-check|ENUM vs VARCHAR+CHECK]]를 쓰면 `ENUM`은 값을 추가할 때마다 전체 재빌드가 필요합니다. 이게 바로 [[architecture|D6 원칙]] §3.1에서 `service` 컬럼을 `ENUM` 대신 `VARCHAR(50) + CHECK`로 쓰는 이유입니다.
+비휘발성 default를 가진 `ADD COLUMN`이 즉시 끝나는 건, PostgreSQL 11부터 기존 행을 실제로 채우지 않고 "기본값 메타데이터"만 저장하기 때문입니다. 반대로 `ALTER COLUMN ... TYPE`은 거의 항상 전체 행을 다시 써야 해서, 대형 테이블에서는 [[enum-vs-varchar-check|VARCHAR+CHECK]]처럼 rewrite를 피하는 설계가 중요합니다.
 
-> 💡 **한 줄 요약**: MySQL 8의 온라인 DDL은 많은 작업을 잠금 없이 처리하지만, MODIFY COLUMN이나 ENUM 수정은 여전히 전체 테이블 재빌드가 필요해서 위험합니다.
+> 🐬 **MySQL이라면**: 락 회피를 `ALGORITHM=INPLACE, LOCK=NONE` 힌트로 명시합니다(`LOCK=NONE`은 "잠금 없이 못 하면 오류로 알려달라"는 안전망). MySQL 8.0의 인스턴트 `ADD COLUMN`이 PG의 즉시 추가에 대응하지만, `MODIFY COLUMN`이나 ENUM 값 추가는 전체 테이블 재빌드 + 락을 유발할 수 있어 PG보다 위험합니다.
+
+> 💡 **한 줄 요약**: PostgreSQL은 `CREATE INDEX CONCURRENTLY`, 비휘발성 default `ADD COLUMN`, `ALTER TYPE ADD VALUE`를 비차단으로 처리하지만, `ALTER COLUMN ... TYPE`(rewrite)은 ACCESS EXCLUSIVE 락이 걸려 대형 테이블에서 위험합니다.
 
 ---
 
@@ -170,9 +170,8 @@ cat drizzle/migrations/0007_add_column.sql
 
 ```sql
 -- Drizzle이 생성한 migration (위험한 케이스)
-ALTER TABLE `payment_ledger`
-  MODIFY COLUMN `pg_provider`
-  ENUM('TOSS','STRIPE','PAYPAL','MANUAL','KAKAO');  -- ← ENUM 수정! 수백만 행 잠금 위험
+ALTER TABLE "payment_ledger"
+  ALTER COLUMN "amount" TYPE NUMERIC(18,0);  -- ← 타입 변경! 전체 rewrite + ACCESS EXCLUSIVE 락 위험
 ```
 
 **마이그레이션 실행 전 체크리스트:**
@@ -182,19 +181,20 @@ ALTER TABLE `payment_ledger`
    SELECT COUNT(*) FROM payment_ledger;
    → 100만 건 이상이면 반드시 아래 단계 진행
 
-2. ALGORITHM=INPLACE, LOCK=NONE 가능한지 확인
-   ALTER TABLE payment_ledger
-     MODIFY COLUMN pg_provider ...
-     ALGORITHM=INPLACE, LOCK=NONE;
-   → 오류가 나면 "온라인 DDL 불가" 신호
+2. 이 DDL이 테이블 rewrite를 유발하는지 / 어떤 락을 잡는지 확인
+   - ALTER COLUMN ... TYPE 은 대개 전체 rewrite (위험)
+   - 인덱스 추가라면 CREATE INDEX CONCURRENTLY 로 비차단 전환 가능
+   - lock_timeout / statement_timeout 을 짧게 걸어 폭주 방지
 
 3. staging 환경에서 실행 시간 측정
    프로덕션 행 수와 비슷한 데이터로 테스트
 
-4. 실행 시간이 30초 이상이면 pt-online-schema-change 사용 검토
+4. rewrite가 불가피하면 pg_repack 또는 단계적 마이그레이션(Q6) 검토
 
 5. 배포 시간은 트래픽 최저점(새벽)에 맞춤
 ```
+
+> 🐬 **MySQL이라면**: 비차단 가능 여부를 `ALTER TABLE ... ALGORITHM=INPLACE, LOCK=NONE`으로 시도해 보고(불가능하면 오류), 30초 이상 걸릴 위험이 있으면 `pt-online-schema-change`(Percona)로 원본을 유지한 채 그림자 테이블에 복사하는 방식을 씁니다.
 
 > 💡 **한 줄 요약**: Drizzle이 migration SQL을 자동 생성해줘도, 실행 전에 "이 SQL이 대형 테이블에서 잠금을 거는지" 직접 확인하는 습관이 필수입니다.
 
@@ -202,57 +202,62 @@ ALTER TABLE `payment_ledger`
 
 ## Q6. ENUM → VARCHAR+CHECK 마이그레이션을 pg_provider 컬럼에 해야 하는데, 어떻게 안전하게 하나요?
 
-현재 `payment_ledger.pg_provider`는 `ENUM('TOSS','STRIPE','PAYPAL','MANUAL')`입니다. 새로운 PG(결제 대행사)를 추가할 때마다 ENUM을 수정해야 하는데, 이게 대형 테이블에서 위험합니다.
+현재 `payment_ledger.pg_provider`는 네이티브 ENUM 타입(`pg_provider_enum`)입니다. 새 PG(결제 대행사)를 *추가*만 한다면 `ALTER TYPE ADD VALUE`로 비차단 처리되지만, 값을 *빼거나 재정렬*해야 하면 타입 교체 → `ALTER COLUMN ... TYPE` → **전체 행 rewrite**가 일어나 대형 테이블에서 위험합니다.
 
 그래서 D6 원칙에 따라 `VARCHAR(50) + CHECK constraint`로 마이그레이션할 예정입니다.
 
-**왜 ENUM → VARCHAR+CHECK가 안전한가요?**
+**왜 VARCHAR+CHECK가 안전한가요?**
 
 ```sql
--- 위험: ENUM 수정 (테이블 전체 재빌드 → 수십 분 잠금)
+-- 위험: 타입 자체 교체 (전체 rewrite → ACCESS EXCLUSIVE 락 → 수십 분)
 ALTER TABLE payment_ledger
-  MODIFY COLUMN pg_provider ENUM('TOSS','STRIPE','PAYPAL','MANUAL','KAKAO');
+  ALTER COLUMN pg_provider TYPE pg_provider_enum_v2 USING pg_provider::text::pg_provider_enum_v2;
 
--- 안전: CHECK constraint 변경 (즉시 완료, 잠금 없음)
+-- 안전: CHECK constraint 변경 (즉시 완료, rewrite 없음)
 ALTER TABLE payment_ledger
-  DROP CONSTRAINT chk_pg_provider,
+  DROP CONSTRAINT chk_pg_provider;
+ALTER TABLE payment_ledger
   ADD CONSTRAINT chk_pg_provider
     CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL','MANUAL','KAKAO'));
 ```
 
-CHECK constraint의 변경은 MySQL에서 메타데이터만 업데이트하므로 즉시 완료됩니다.
+CHECK constraint의 변경은 카탈로그만 업데이트하므로 즉시 완료됩니다(기존 행 재검증이 필요하면 `NOT VALID` 후 `VALIDATE CONSTRAINT`로 락 시간을 분리).
 
 **ENUM → VARCHAR 마이그레이션 절차 (단계적):**
 
 ```sql
--- Step 1: VARCHAR 컬럼 추가 (online DDL, 잠금 없음)
+-- Step 1: VARCHAR 컬럼 추가 (메타데이터만, rewrite·잠금 없음)
 ALTER TABLE payment_ledger
-  ADD COLUMN pg_provider_new VARCHAR(50) NULL,
-  ALGORITHM=INPLACE, LOCK=NONE;
+  ADD COLUMN pg_provider_new VARCHAR(50);
 
--- Step 2: 데이터 배치 복사 (대량 UPDATE 대신 배치로)
--- 한 번에 1000건씩 업데이트 (잠금 최소화)
+-- Step 2: 데이터 배치 복사 (대량 UPDATE 대신 배치로 — 긴 트랜잭션 락 방지)
+-- 한 번에 1000건씩 업데이트
 UPDATE payment_ledger
-  SET pg_provider_new = pg_provider
-  WHERE pg_provider_new IS NULL
-  LIMIT 1000;
+  SET pg_provider_new = pg_provider::text
+  WHERE pk IN (
+    SELECT pk FROM payment_ledger
+    WHERE pg_provider_new IS NULL
+    LIMIT 1000
+  );
 -- → 이 작업을 반복하는 배치 스크립트로 처리
 
 -- Step 3: 기존 컬럼 사용하는 코드를 새 컬럼으로 전환 후
---         기존 ENUM 컬럼 DROP (online DDL)
+--         기존 ENUM 컬럼 DROP (메타데이터만)
 ALTER TABLE payment_ledger
-  DROP COLUMN pg_provider,
-  ALGORITHM=INPLACE, LOCK=NONE;
+  DROP COLUMN pg_provider;
 
 -- Step 4: 새 컬럼 이름 변경 + NOT NULL + CHECK 추가
 ALTER TABLE payment_ledger
-  RENAME COLUMN pg_provider_new TO pg_provider,
-  MODIFY COLUMN pg_provider VARCHAR(50) NOT NULL,
+  RENAME COLUMN pg_provider_new TO pg_provider;
+ALTER TABLE payment_ledger
+  ALTER COLUMN pg_provider SET NOT NULL,
   ADD CONSTRAINT chk_pg_provider
     CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL','MANUAL'));
 ```
 
-이 방식은 서비스 중단 없이 진행할 수 있습니다.
+이 방식은 서비스 중단 없이 진행할 수 있습니다. PostgreSQL에서는 위 DDL들을 하나의 트랜잭션으로 묶을 수도 있지만, Step 2의 대량 UPDATE는 트랜잭션을 작게 끊어 락 보유 시간을 줄이는 게 좋습니다.
+
+> 🐬 **MySQL이라면**: Step 1·3의 컬럼 추가/삭제에 `ALGORITHM=INPLACE, LOCK=NONE`을, Step 4의 NOT NULL+제약에 `MODIFY COLUMN`을 씁니다. ENUM 컬럼은 PG와 달리 *추가*조차 전체 rebuild를 부를 수 있어 이 단계적 절차가 더 절실합니다.
 
 > 💡 **한 줄 요약**: ENUM → VARCHAR+CHECK 마이그레이션은 컬럼을 한 번에 바꾸지 않고, 새 컬럼 추가 → 데이터 배치 복사 → 코드 전환 → 기존 컬럼 제거 순서로 단계적으로 진행해야 안전합니다.
 
@@ -260,16 +265,21 @@ ALTER TABLE payment_ledger
 
 ## Q7. 마이그레이션을 잘못 실행하면 어떻게 롤백하나요?
 
-불행히도 DDL 롤백은 DML 롤백(`ROLLBACK` 한 줄)처럼 쉽지 않습니다. MySQL의 DDL은 **암묵적으로 커밋**되기 때문에 트랜잭션으로 되돌릴 수 없어요.
+좋은 소식: **PostgreSQL의 DDL은 트랜잭셔널**입니다. 대부분의 DDL을 `BEGIN ... COMMIT` 안에 넣을 수 있고, 중간에 `ROLLBACK`하면 스키마 변경이 깔끔하게 되돌려집니다.
 
 ```sql
--- 이건 작동 안 함 (DDL은 트랜잭션 밖):
+-- PostgreSQL에서는 실제로 롤백됩니다:
 BEGIN;
 ALTER TABLE membership ADD COLUMN new_col INT;
-ROLLBACK;  -- ← new_col이 롤백되지 않음!
+-- 검증 쿼리 등 확인 후 문제가 있으면:
+ROLLBACK;  -- ← new_col이 추가되지 않은 상태로 깔끔히 복귀
 ```
 
-**대신 쓸 수 있는 전략들:**
+여러 DDL을 한 트랜잭션으로 묶어 "전부 성공 아니면 전부 무효"로 적용할 수 있어, 마이그레이션 중간 실패로 스키마가 어정쩡하게 남는 일을 막습니다. 단, 예외가 있습니다 — `CREATE INDEX CONCURRENTLY`, `ALTER TYPE ... ADD VALUE`, `VACUUM` 등 일부는 트랜잭션 블록 안에서 실행할 수 없어 단독으로 돌려야 합니다.
+
+> 🐬 **MySQL이라면**: DDL이 **암묵적으로 커밋**되어 트랜잭션으로 되돌릴 수 없습니다. `BEGIN; ALTER TABLE ...; ROLLBACK;`을 해도 변경이 그대로 남습니다. 그래서 아래 "역방향 migration 준비" 전략이 MySQL에서는 사실상 필수입니다.
+
+그래도 PostgreSQL에서도 **이미 커밋된** 마이그레이션을 되돌리거나, 트랜잭션 밖 DDL(위 예외)을 정리하려면 아래 전략이 유용합니다.
 
 **전략 1: 역방향 migration 파일 준비**
 
@@ -293,9 +303,11 @@ ALTER TABLE membership DROP COLUMN display_order;
   → 문제 시 Step 3 전에 컬럼 DROP으로 되돌리기 가능
 ```
 
-**전략 3: pt-online-schema-change 활용**
+**전략 3: pg_repack 활용**
 
-Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지하면서 변경 작업을 진행해 롤백이 더 쉽습니다.
+rewrite가 불가피한 작업(예: 테이블 팽창 정리, 일부 타입 변경)에서는 `pg_repack` 확장을 쓰면 원본 테이블을 거의 막지 않고 새 물리 저장으로 재구성할 수 있습니다.
+
+> 🐬 **MySQL이라면**: 같은 역할로 Percona의 `pt-online-schema-change`를 써서 원본 테이블을 유지한 채 그림자 테이블로 복사하며 변경합니다.
 
 **Drizzle migration 실패 시:**
 
@@ -305,7 +317,7 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 # 단, 실제 DB 상태와 journal이 불일치하지 않도록 주의
 ```
 
-> 💡 **한 줄 요약**: DDL 롤백은 자동으로 안 되니, 마이그레이션 전에 "무엇을 되돌릴 것인가"를 미리 계획하고 역방향 SQL을 준비해두는 게 최선입니다.
+> 💡 **한 줄 요약**: PostgreSQL DDL은 트랜잭셔널이라 `BEGIN ... ROLLBACK`으로 미커밋 변경을 되돌릴 수 있지만(MySQL은 불가), 이미 커밋됐거나 트랜잭션 밖 DDL을 위해선 역방향 SQL을 미리 준비해두는 게 안전합니다.
 
 ---
 
@@ -315,9 +327,9 @@ Percona의 `pt-online-schema-change` 도구를 쓰면 원본 테이블은 유지
 
 핵심 원칙 세 가지만 기억하세요.
 
-1. **ENUM 쓰지 말 것**: 값 추가 시마다 전체 테이블 재빌드 위험. `VARCHAR(50) + CHECK`를 씁니다.
+1. **변경하기 어려운 ENUM 대신 VARCHAR+CHECK**: 네이티브 ENUM은 값 제거·재정렬 시 타입 교체 → 전체 rewrite 위험. `VARCHAR(50) + CHECK`를 씁니다.
 2. **staging에서 먼저 시간 측정**: 운영과 비슷한 데이터 양으로 테스트합니다.
-3. **배포 전 SQL을 직접 읽을 것**: Drizzle이 생성한 migration이 `MODIFY COLUMN`이면 반드시 확인합니다.
+3. **배포 전 SQL을 직접 읽을 것**: Drizzle이 생성한 migration이 `ALTER COLUMN ... TYPE`처럼 rewrite를 부르는지 반드시 확인합니다.
 
 관련 아키텍처 결정은 [[architecture]] §3.1 D6 원칙과 [[schema-reference]] §K 서비스 확장 방법을 참고하세요.
 

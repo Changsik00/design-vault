@@ -84,7 +84,7 @@ OAuth refresh_token처럼 *나중에 원본을 다시 써야 하는* 비밀에 �
 | 비밀번호 | bcrypt 해시 | **Firebase Auth** | ❌ 저장 안 함 |
 | OAuth refresh_token | AWS KMS envelope encryption | 우리 (KMS 위임) | ✅ 암호문으로 |
 | api_key secret | bcrypt 해시 | 우리 | ✅ 해시로만 (평문은 발급 시 1회) |
-| IP 주소 | VARBINARY(16) raw | 우리 | ✅ 원본 (PIPA 감사) |
+| IP 주소 | BYTEA raw | 우리 | ✅ 원본 (PIPA 감사) |
 | 결제 카드 정보 | PCI-DSS | **PG사(Toss 등)** | ❌ 저장 안 함 |
 
 여기서 가장 중요한 통찰: **"우리가 저장하지 않는다"도 하나의 보안 전략**입니다.
@@ -101,7 +101,7 @@ OAuth refresh_token처럼 *나중에 원본을 다시 써야 하는* 비밀에 �
 - **비밀번호 → Firebase(bcrypt)**: 인증은 Firebase가 SSOT([[requirements]] AUTHN-1). 우리는 `identity_user.firebase_uid`로 *연결*만 합니다 — 비밀번호 자체를 모릅니다.
 - **refresh_token → KMS 암호화**: 다시 써야 하므로 양방향(Q3). `youtube_channel.oauth_refresh_token_kms` 컬럼에 *암호문*으로 저장.
 - **api_key secret → bcrypt 해시**: 검증만 하면 되므로 단방향. 평문은 발급 응답 1회만(§J, [[machine-identity-apikey]]).
-- **IP 주소 → raw 저장**: 이건 비밀이 아니라 *감사 증거*입니다. PIPA 처리방침상 누가 언제 어디서 접근했는지 기록해야 하므로 `VARBINARY(16)`에 원본 그대로(IPv4 4byte / IPv6 16byte).
+- **IP 주소 → raw 저장**: 이건 비밀이 아니라 *감사 증거*입니다. PIPA 처리방침상 누가 언제 어디서 접근했는지 기록해야 하므로 `BYTEA`에 원본 그대로(IPv4 4byte / IPv6 16byte). (PG는 `inet` 타입도 있으나 raw byte 보존을 위해 `BYTEA` 사용)
 - **카드정보 → PG(PCI-DSS)**: 카드 데이터를 직접 다루면 PCI-DSS 인증 부담이 막대합니다. PG에 위임하고 우리는 `pg_payment_id`만 참조.
 
 > 💡 **한 줄 요약**: 우리는 데이터마다 다르게 보호합니다 — 비밀번호·카드는 *아예 저장 안 함*(Firebase·PG에 위임), refresh_token은 KMS로 암호화, api_key secret은 bcrypt 해시, IP는 감사 목적의 원본 저장. "안 가지는 것"도 전략입니다.

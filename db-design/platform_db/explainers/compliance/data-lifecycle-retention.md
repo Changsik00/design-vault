@@ -59,7 +59,7 @@ soft-delete의 세 패턴(status / deleted_at / append-only) 자체는 [[delete-
 ```
 ① 생성       INSERT → status='ACTIVE', deleted_at=NULL
 ② 활성        평소 사용 중. 모든 컬럼 정상
-③ soft-delete 탈퇴 요청 → status='DELETED', deleted_at=NOW()
+③ soft-delete 탈퇴 요청 → status='DELETED', deleted_at=now()
                 ↑ 행은 그대로 있고 "지워진 것으로 표시"만 함 ([[delete-patterns]])
 ④ hard anonymize  탈퇴 30일 뒤 배치 → email/phone/firebase_uid = NULL
                 ↑ 행은 남기되 "개인 식별 컬럼만 NULL"로 만듦
@@ -104,12 +104,13 @@ purge     = 데이터를 지운다 (행 자체를 물리 삭제)
 -- anonymize: 행은 남기고 사람만 지움 (30일 배치)
 UPDATE identity_user
 SET email=NULL, phone_e164=NULL, firebase_uid=NULL, email_verified=FALSE
-WHERE status='DELETED' AND deleted_at < NOW() - INTERVAL 30 DAY;
+WHERE status='DELETED' AND deleted_at < now() - INTERVAL '30 days';
 -- pk=10 행은 여전히 존재 → audit_log.actor_pk=10 join 가능
 -- 그러나 "pk=10이 누구인지"는 영영 알 수 없음
 
--- purge: 행 자체를 제거 (파티션 DROP — Q5에서 상세)
-ALTER TABLE audit_log DROP PARTITION p202101;  -- 5년 지난 월 통째로 삭제
+-- purge: 행 자체를 제거 (파티션 분리 후 DROP — Q5에서 상세)
+ALTER TABLE audit_log DETACH PARTITION audit_log_p202101;  -- 5년 지난 월을 분리
+DROP TABLE audit_log_p202101;                              -- 분리한 파티션 통째로 삭제
 ```
 
 > 💡 **한 줄 요약**: retain은 의도적으로 남기는 것, anonymize는 행은 남기고 사람만 지우는 것(더는 개인정보 아님), purge는 행 자체를 물리 삭제하는 것입니다.
@@ -161,20 +162,22 @@ ALTER TABLE audit_log DROP PARTITION p202101;  -- 5년 지난 월 통째로 삭�
 그래서 **파티션 DROP**을 씁니다. `audit_log`는 월별 RANGE 파티셔닝되어 있습니다([[partitioning]], schema-reference §D.8):
 
 ```sql
-CREATE TABLE audit_log (...)
-PARTITION BY RANGE COLUMNS(created_at) (
-  PARTITION p202601 VALUES LESS THAN ('2026-02-01 00:00:00'),
-  PARTITION p202602 VALUES LESS THAN ('2026-03-01 00:00:00'),
-  ...
-  PARTITION p_future VALUES LESS THAN (MAXVALUE)
-);
+-- PG 선언적 파티셔닝 (declarative partitioning)
+CREATE TABLE audit_log (...) PARTITION BY RANGE (created_at);
+
+CREATE TABLE audit_log_p202601 PARTITION OF audit_log
+  FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE audit_log_p202602 PARTITION OF audit_log
+  FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+-- ...
 ```
 
-5년 지난 달을 통째로 떨어내는 건 **메타데이터 한 줄 조작**입니다 — 거의 즉시 끝나고 락도 없습니다.
+5년 지난 달을 통째로 떨어내는 건 **메타데이터 조작**입니다 — 거의 즉시 끝나고 (DETACH는 락이 가볍습니다).
 
 ```sql
--- ✅ 2021년 1월 파티션 통째 DROP — 즉시, 락 없음
-ALTER TABLE audit_log DROP PARTITION p202101;
+-- ✅ 2021년 1월 파티션을 분리 후 DROP — 즉시, 행 단위 락 없음
+ALTER TABLE audit_log DETACH PARTITION audit_log_p202101;
+DROP TABLE audit_log_p202101;
 
 -- ❌ 같은 일을 DELETE로 하면 — 권한 없음 + 수백만 행 락
 DELETE FROM audit_log WHERE created_at < '2021-02-01';
@@ -206,11 +209,11 @@ DELETE FROM audit_log WHERE created_at < '2021-02-01';
 
 -- outbox: SENT/PROCESSED 된 지 30일 지난 것만 DELETE
 DELETE FROM outbox_event
-WHERE status = 'SENT' AND sent_at < NOW() - INTERVAL 30 DAY;
+WHERE status = 'SENT' AND sent_at < now() - INTERVAL '30 days';
 
 -- webhook: PROCESSED 된 지 90일 지난 것만 DELETE
 DELETE FROM pg_webhook_event
-WHERE status = 'PROCESSED' AND created_at < NOW() - INTERVAL 90 DAY;
+WHERE status = 'PROCESSED' AND created_at < now() - INTERVAL '90 days';
 ```
 
 sweeper의 두 가지 핵심 안전 규칙:
@@ -249,7 +252,7 @@ sweeper의 두 가지 핵심 안전 규칙:
 ```sql
 -- 탈퇴 fan-out: 전체 동의 일괄 철회 마커 INSERT (감사 마커, schema-reference §I.2)
 INSERT INTO user_consent_event (user_pk, consent_type, action, version, created_at)
-VALUES (10, 'ALL', 'REVOKED', '2026-05-01', NOW());
+VALUES (10, 'ALL', 'REVOKED', '2026-05-01', now());
 -- ↑ 기존 GRANTED 행은 그대로 남음 (증거). 철회 사실만 새 행으로 추가
 
 -- 그런데 user_pk=10이 누구인지는?
@@ -280,7 +283,7 @@ VALUES (10, 'ALL', 'REVOKED', '2026-05-01', NOW());
 | **hard delete** | 행을 진짜로 삭제 (`DELETE FROM`) | append-only 테이블엔 권한 없음([[least-privilege-grant]]) |
 | **hard anonymize** | soft-delete 후 식별 컬럼을 영구 NULL 처리 | 탈퇴 30일 경과 배치 (복구 불가) |
 | **sweeper** | 처리 끝난 운영 데이터를 주기 청소하는 배치 | outbox/webhook PROCESSED 30/90일 후 DELETE(미구현) |
-| **파티션 DROP** | 월별 파티션을 통째로 떨어내 파기 | `ALTER TABLE ... DROP PARTITION`(즉시, 락 없음) |
+| **파티션 DROP** | 월별 파티션을 통째로 떨어내 파기 | `DETACH PARTITION` 후 `DROP TABLE`(즉시, 행 단위 락 없음) |
 | **WORM** | Write Once Read Many — 한 번 쓰면 못 고침 | append-only 4종(audit·consent·payment·billing) |
 | **PIPA 보존 의무** | 일정 기간 *반드시 남겨야* 함 | consent 5년(동의 증거) |
 | **PIPA 파기 의무** | 목적 종료 시 *반드시 지워야* 함(§21) | 탈퇴 시 식별정보 익명화 |
@@ -299,7 +302,7 @@ VALUES (10, 'ALL', 'REVOKED', '2026-05-01', NOW());
 -- given: 31일 전 탈퇴한 회원
 INSERT INTO identity_user (firebase_uid, email, phone_e164, status, deleted_at, ...)
 VALUES ('uid-x', 'gone@test.com', '+821011112222', 'DELETED',
-        NOW() - INTERVAL 31 DAY, ...);
+        now() - INTERVAL '31 days', ...);
 
 -- when: anonymize 배치 실행
 
@@ -313,7 +316,7 @@ FROM identity_user WHERE pk = @pk;
 
 ```sql
 -- given: 29일 전 탈퇴 (아직 30일 안 됨)
-INSERT INTO identity_user (..., status='DELETED', deleted_at=NOW() - INTERVAL 29 DAY);
+INSERT INTO identity_user (..., status='DELETED', deleted_at=now() - INTERVAL '29 days');
 
 -- when: anonymize 배치 실행
 
@@ -327,9 +330,9 @@ SELECT email FROM identity_user WHERE pk = @pk;
 ```sql
 -- given: 세 가지 상태의 오래된 outbox 행
 INSERT INTO outbox_event (status, sent_at, created_at) VALUES
-  ('SENT',    NOW() - INTERVAL 40 DAY, NOW() - INTERVAL 40 DAY),  -- 청소 대상
-  ('PENDING', NULL,                    NOW() - INTERVAL 40 DAY),  -- 남아야 함
-  ('FAILED',  NULL,                    NOW() - INTERVAL 40 DAY);  -- 남아야 함
+  ('SENT',    now() - INTERVAL '40 days', now() - INTERVAL '40 days'),  -- 청소 대상
+  ('PENDING', NULL,                       now() - INTERVAL '40 days'),  -- 남아야 함
+  ('FAILED',  NULL,                       now() - INTERVAL '40 days');  -- 남아야 함
 
 -- when: sweeper 실행 (SENT + 30일 경과만)
 
@@ -346,7 +349,8 @@ SELECT status, COUNT(*) FROM outbox_event GROUP BY status;
 SELECT COUNT(*) FROM audit_log WHERE created_at < '2021-02-01';  -- > 0
 
 -- when:
-ALTER TABLE audit_log DROP PARTITION p202101;
+ALTER TABLE audit_log DETACH PARTITION audit_log_p202101;
+DROP TABLE audit_log_p202101;
 
 -- then: 해당 기간 조회 시 0건, 그러나 최신 데이터는 정상
 SELECT COUNT(*) FROM audit_log WHERE created_at < '2021-02-01';  -- 기대: 0

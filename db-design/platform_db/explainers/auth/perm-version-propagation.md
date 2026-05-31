@@ -89,12 +89,14 @@ sensitive write (publish·delete·결제·역할변경 — 위험 높음)
 
 ## Q3. perm_version은 어떻게 동작하나요? bump하면 무슨 일이 일어나나요?
 
-`perm_version`은 **권한 변경 카운터**입니다. `organization.perm_version`과 `identity_user.perm_version` 두 컬럼에 `BIGINT UNSIGNED NOT NULL DEFAULT 1`로 박혀 있습니다.
+`perm_version`은 **권한 변경 카운터**입니다. `organization.perm_version`과 `identity_user.perm_version` 두 컬럼에 `BIGINT NOT NULL DEFAULT 1`로 박혀 있습니다. (PostgreSQL엔 `UNSIGNED`가 없지만, signed `BIGINT`의 양수 범위만으로도 카운터가 고갈될 일은 없습니다.)
 
 ```sql
 -- schema-reference.md §D.1, §D.3
-organization.perm_version  BIGINT UNSIGNED NOT NULL DEFAULT 1
-identity_user.perm_version BIGINT UNSIGNED NOT NULL DEFAULT 1
+organization.perm_version  BIGINT NOT NULL DEFAULT 1
+                           CHECK (perm_version >= 0)
+identity_user.perm_version BIGINT NOT NULL DEFAULT 1
+                           CHECK (perm_version >= 0)
 ```
 
 원리는 단순합니다. **권한이 바뀔 때마다 이 숫자를 +1(bump)하고, 클라이언트가 자기가 아는 숫자를 매 요청에 들고 오게 해서, 서버 숫자와 다르면 "너 토큰 낡았어"라고 알려줍니다.**

@@ -27,7 +27,7 @@ tags:
 회사의 여러 SaaS(academy / agent / market / store / fitness)를 받치는 **공통 플랫폼 코어 DB**.
 
 ```
-                  ┌──────────────── platform_db (공통 코어, 단일 InnoDB) ──────────────┐
+                  ┌──────────────── platform_db (공통 코어, 단일 PostgreSQL) ──────────────┐
                   │  identity · authZ(membership/role/capability) · entitlement        │
    academy-api ──▶│  product · billing · consent · audit · api_key                    │◀── @aiagent/db-platform 패키지로만 접근
    agent-api   ──▶│  = "누구 / 어디 소속 / 무엇을 할 수 있나 / 무엇을 구독 / 무엇에 동의"의 SSOT │
@@ -38,7 +38,7 @@ tags:
 
 **한 줄 철학**: *공통은 묶고(strong consistency), 도메인은 뗀다(독립 확장)* — **비대칭 분리**([[design-asymmetry]]).
 
-> **🛢️ MySQL 제약(배경)**: MySQL 8은 회사 표준 인프라 규약에 따른 선택이며 기술적 선호가 아니다. 자유 선택이라면 **PostgreSQL 권장**(RLS·JSONB GIN·파티셔닝·pgcrypto·`FOR UPDATE SKIP LOCKED`). "MySQL은 RLS 없음"은 PostgreSQL이라면 없었을 **구조적 제약**임을 명시한다. 현재는 전환보다 최적화를 선택.
+> **🐘 DB 권장: PostgreSQL (1순위)**: 이 설계는 PostgreSQL을 1순위로 권장한다. RLS 네이티브(`CREATE POLICY`)·JSONB GIN·선언적 파티셔닝(TIMESTAMPTZ 그대로)·`pgcrypto`·`FOR UPDATE SKIP LOCKED`·트랜잭셔널 DDL을 그대로 활용한다. **회사 인프라가 MySQL이면 각 절의 "🐬 MySQL이라면" 노트를 따른다** — 그 경우 RLS 부재는 앱 레이어 `org_pk` 강제 + CI 린트로, TIMESTAMP 파티셔닝 버그는 DATETIME 우회로 보강한다.
 
 ### 1.2 권한 모델 — 3-gate
 
@@ -84,7 +84,7 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(
 ```
 
 - **왜 분리하나**: billing 복잡도(provider/invoice/retry)를 auth에서 격리 → auth 단일 테이블 조회, billing 장애 격리, 캐시 단순. ([[auth-projection]])
-- **결제 단일 트랜잭션**: `payment_ledger INSERT(CHARGE) + org_subscription UPDATE + org_entitlement UPSERT + perm_version bump + outbox INSERT`를 한 InnoDB 트랜잭션으로 → **"결제됐는데 권한 미반영" 창 0**(2PC·Kafka 불필요). ([[payment-atomicity]])
+- **결제 단일 트랜잭션**: `payment_ledger INSERT(CHARGE) + org_subscription UPDATE + org_entitlement UPSERT + perm_version bump + outbox INSERT`를 한 Postgres 트랜잭션으로 → **"결제됐는데 권한 미반영" 창 0**(2PC·Kafka 불필요). ([[payment-atomicity]])
 - 멱등 2중: webhook `event_id` UNIQUE + payment `idempotency_key` UNIQUE([[idempotency-key]]). 환불은 append-only. async 부수효과만 outbox([[outbox-pattern]]).
 - eventual consistency 수용: webhook→투영 수 초 지연 허용(SaaS 표준). 배치 실패 안전망은 Gate B `validUntil` 복합체크([[decisions/gate-b-billing-grace|gate-b-billing-grace]]).
 
@@ -96,7 +96,7 @@ Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(
 
 | 저장소 | 격리 방법 | 상태 |
 |---|---|---|
-| MySQL | `org_pk NOT NULL` + 모든 조회 `WHERE org_pk` 필수 | ✅ 스키마 강제 · 🟡 CI 린트 미완 |
+| PostgreSQL | RLS(`CREATE POLICY … USING(org_pk=current_setting('app.org_pk')::bigint)`)로 DB가 격리 강제 + `org_pk NOT NULL`·앱 레이어 `WHERE org_pk`(defense-in-depth) | ✅ RLS + 스키마 강제 · 🟡 CI 린트 보조 미완 |
 | Qdrant | `org_id` payload 필터 강제 | ✅ · 🟡 `is_tenant` 마커 미추가 ([[rag-multitenancy]]) |
 | Neo4j | `orgId` 노드 속성 + Cypher 강제 | ✅ · 🟡 APOC 쓰기측 차단 P1 |
 | Redis | key prefix `org:{org_pk}:...` | ✅ |
@@ -158,7 +158,7 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 - **G1. role 2단 분리** (D1) — ✅ **설계 확정**: `platform_role`(OWNER/MEMBER/SERVICE, ⚠️ ADMIN 미채택) + `service_membership.role_code`([[role-capability]]).
 - **G2. capability 네임스페이스** (D2) — ✅ **설계 확정**: `ACADEMY.<action>`. ⚠️ CHECK 하드코딩은 [[service-extensibility]]에서 의도적 수용.
-- **G3. `organization.org_kind`** (D5) — 🟡 **부분 구현**: `type ENUM('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거). `org_kind VARCHAR+CHECK` 전환은 미완(저빈도라 ENUM 유지).
+- **G3. `organization.org_kind`** (D5) — 🟡 **설계 부분**: `type VARCHAR(10)+CHECK('COMPANY','TEAM','PERSONAL')`(ACADEMY 제거 ✅). 완전 service-agnostic한 `org_kind VARCHAR(30)+CHECK`로의 의미 일반화는 미완(저빈도 변경이라 비용 낮음).
 
 ### 2.4 비목표 (Non-Goals)
 
@@ -201,11 +201,11 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 | D3  | role→action = **코드 상수**(DB 레지스트리 거부)            | ✅ · [[role-as-code]]                         |
 | D4  | 서비스 계정 = `platform_role='SERVICE'` + api_key    | 🟡 SERVICE 확정 / api_key 코드 트랙 별도              |
 | D5  | `org_kind` generic + 서비스는 entitlement           | 🟡 부분 구현                                   |
-| D6  | service 식별자 `VARCHAR(50)+CHECK`(온라인 DDL)        | ✅ · [[service-extensibility]]                |
+| D6  | service 식별자 `VARCHAR(50)+CHECK`(전역 타입 결합 회피)  | ✅ · [[service-extensibility]]                |
 | D7  | `user_consent_event` append-only                | ✅ 설계 확정 · [[pipa-consent]]               |
 | D8  | `api_key` 하드닝                                   | ✅ 설계 확정                                  |
 | D9  | `permission_snapshot`은 프론트 read-model만          | 🟡 P1                                        |
-| D10 | 멀티테넌시: RLS 없음→CI 린트                             | 🟡 · [[multitenancy-pool]]                   |
+| D10 | 멀티테넌시: PG RLS로 격리 강제 + 앱 org_pk·CI 린트(보조) | ✅ RLS · 🟡 린트 · [[multitenancy-pool]]      |
 | D11 | 표준보안: BOLA / NIST / 해시→WORM                     | 🟡 BOLA ✅, 해시·WORM P1 · [[audit-hash-chain]] |
 | D12 | 운영보강: 논리 소유권·break-glass·키 cadence              | 🟡 · [[operability]]                         |
 

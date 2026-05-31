@@ -20,7 +20,7 @@ aliases:
 > **대상**: "테스트는 짜야 하는데 *어디서 어떻게* 돌리지?"가 막막한 개발자 (공부용)
 > **연관 문서**: [[bdd-scenarios]] · [[e2e-journeys]] · [[orm-testing-drizzle]] · [[operability|operability.md]]
 
-각 설계 문서의 **테스트 방법** 절은 "*무엇을* 단언하나"를 알려줍니다. 이 문서는 그 한 단계 위 — "*어디서* 그 테스트를 돌리나, 그리고 **운영 중인 DB**는 어떻게 건드리나"를 다룹니다. platform_db는 MySQL 특화(파티션·GRANT·CHECK·FK·트랜잭션)라 *진짜 DB*에서만 검증되는 게 많고, 동시에 **모든 서비스가 의존하는 공유 코어**라 운영 DB를 잘못 건드리면 전 서비스가 흔들립니다. 그 둘을 어떻게 다루는지가 핵심입니다.
+각 설계 문서의 **테스트 방법** 절은 "*무엇을* 단언하나"를 알려줍니다. 이 문서는 그 한 단계 위 — "*어디서* 그 테스트를 돌리나, 그리고 **운영 중인 DB**는 어떻게 건드리나"를 다룹니다. platform_db는 PG 특화(파티션·GRANT·CHECK·BYTEA·RLS·JSONB GIN·FK·트랜잭션)라 *진짜 DB*에서만 검증되는 게 많고, 동시에 **모든 서비스가 의존하는 공유 코어**라 운영 DB를 잘못 건드리면 전 서비스가 흔들립니다. 그 둘을 어떻게 다루는지가 핵심입니다.
 
 ---
 
@@ -32,8 +32,8 @@ mock으로는 못 잡는 것들:
 
 ```
 ❌ mock DB가 통과시키는 진짜 버그들
-- org_pk 빠진 쿼리 → BOLA (mock은 WHERE 절을 평가 안 함)
-- CHECK 제약 위반 (service='academy' 소문자) → mock은 ENUM/CHECK를 모름
+- org_pk 빠진 쿼리 → BOLA (mock은 WHERE 절·RLS 정책을 평가 안 함)
+- CHECK 제약 위반 (service='academy' 소문자) → mock은 CHECK를 모름
 - append-only GRANT 위반 (UPDATE payment_ledger) → mock엔 권한 개념 없음
 - 트랜잭션 롤백 (중간 실패 시 전부 취소) → mock은 진짜 트랜잭션이 아님
 - FK·UNIQUE·파티션 프루닝 → 전부 엔진 기능
@@ -45,41 +45,44 @@ mock으로는 못 잡는 것들:
 
 ```
 순수 로직 (CASL 규칙 조합, 금액 계산 …)  → mock/단위 (빠름, 수천 개)
-DB가 강제하는 것 (격리·제약·트랜잭션·권한) → 진짜 MySQL (Testcontainers, 수백 개)
+DB가 강제하는 것 (격리·제약·트랜잭션·권한) → 진짜 Postgres (Testcontainers, 수백 개)
 사용자 여정                                → e2e ([[e2e-journeys]])
 ```
 
-> 💡 **한 줄 요약**: org_pk 격리·CHECK·GRANT·트랜잭션 같은 핵심 보장은 *DB 엔진*이 강제하므로, mock이 아니라 진짜 MySQL로만 검증됩니다. 순수 로직만 mock으로 빠르게 합니다.
+> 💡 **한 줄 요약**: org_pk 격리(RLS)·CHECK·GRANT·트랜잭션 같은 핵심 보장은 *DB 엔진*이 강제하므로, mock이 아니라 진짜 Postgres로만 검증됩니다. 순수 로직만 mock으로 빠르게 합니다.
 
 ---
 
 ## Q2. 테스트용 "진짜 DB"는 어떻게 띄우나요? (Testcontainers)
 
-매번 테스트마다 공용 DB를 쓰면 서로 데이터를 오염시킵니다. 해법은 **테스트가 시작할 때 일회용(ephemeral) MySQL을 띄우고 끝나면 버리는 것** — **Testcontainers**입니다.
+매번 테스트마다 공용 DB를 쓰면 서로 데이터를 오염시킵니다. 해법은 **테스트가 시작할 때 일회용(ephemeral) Postgres를 띄우고 끝나면 버리는 것** — **Testcontainers**입니다.
 
 ```typescript
-// 테스트 시작 시 일회용 MySQL 8 컨테이너 기동
-import { MySqlContainer } from "@testcontainers/mysql";
-import { migrate } from "drizzle-orm/mysql2/migrator";
+// 테스트 시작 시 일회용 PostgreSQL 16 컨테이너 기동
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
 
-let container, db;
+let container, pool, db;
 beforeAll(async () => {
-  container = await new MySqlContainer("mysql:8.0").start();   // 깨끗한 MySQL 1개
-  db = drizzle(await mysql.createConnection(container.getConnectionUri()));
-  await migrate(db, { migrationsFolder: "./drizzle" });         // 실제 마이그레이션 적용
+  container = await new PostgreSqlContainer("postgres:16").start();   // 깨끗한 Postgres 1개
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool);
+  await migrate(db, { migrationsFolder: "./drizzle" });               // 실제 마이그레이션 적용
 });
-afterAll(async () => { await container.stop(); });               // 끝나면 폐기
+afterAll(async () => { await pool.end(); await container.stop(); });  // 끝나면 폐기
 ```
 
 핵심: 스키마를 손으로 만들지 말고 **실제 마이그레이션(drizzle-kit)으로 적용**합니다. 그래야 "테스트 DB = 운영 DB와 같은 스키마"가 보장됩니다(스키마 drift 방지 — [[orm-testing-drizzle]]).
 
 ```
 로컬 SQLite로 대체하면 안 되나요? → ❌
-  MySQL 특화(파티션·CHECK·VARBINARY·ENUM·GRANT)를 SQLite는 다르게/안 지원.
-  "테스트는 운영과 같은 엔진(MySQL 8)으로." 안 그러면 테스트 거짓 통과.
+  PG 특화(파티션·CHECK·BYTEA·RLS·JSONB GIN·GRANT)를 SQLite는 다르게/안 지원.
+  "테스트는 운영과 같은 엔진(postgres:16)으로." 안 그러면 테스트 거짓 통과.
 ```
 
-> 💡 **한 줄 요약**: Testcontainers로 테스트마다 일회용 MySQL 8을 띄우고, 스키마는 실제 마이그레이션으로 적용합니다. SQLite 대체는 MySQL 특화 기능을 못 살려 거짓 통과를 부릅니다.
+> 💡 **한 줄 요약**: Testcontainers로 테스트마다 일회용 Postgres 16을 띄우고, 스키마는 실제 마이그레이션으로 적용합니다. SQLite 대체는 PG 특화 기능을 못 살려 거짓 통과를 부릅니다.
 
 ---
 
@@ -189,7 +192,7 @@ SELECT COUNT(*) FROM org_entitlement WHERE org_pk IS NULL;  -- 0이어야 함
 
 원칙: **"이 보장을 *DB가* 강제하나?" → 예면 real DB, 아니면 mock.** 그리고 *경계 거동*(403/404/402 전환)은 e2e로 한 번 더.
 
-> 💡 **한 줄 요약**: 순수 로직은 단위(mock), DB가 강제하는 것(격리·제약·GRANT·트랜잭션)은 통합(real MySQL), 사용자 여정은 e2e. 보장의 *강제 주체*가 레이어를 정합니다.
+> 💡 **한 줄 요약**: 순수 로직은 단위(mock), DB가 강제하는 것(격리·제약·GRANT·트랜잭션)은 통합(real Postgres), 사용자 여정은 e2e. 보장의 *강제 주체*가 레이어를 정합니다.
 
 ---
 
@@ -239,19 +242,19 @@ SELECT COUNT(*) FROM org_entitlement WHERE org_pk IS NULL;  -- 0이어야 함
 
 ```yaml
 # CI 단계 (개념)
-1) 단위(mock)        : vitest, DB 없음 — 빠른 피드백 (수초)
-2) 통합(real MySQL)  : Testcontainers MySQL 8 기동 → drizzle-kit migrate
-                       → org_pk 격리·CHECK·GRANT·트랜잭션·BOLA 테스트
-3) e2e(블랙박스)     : 서비스 기동 + 합성 org → 가치흐름·거부 매트릭스
-4) (배포 후) 스모크  : 운영 + 합성 org로 핵심 경로 1회전, 실패 시 자동 롤백
+1) 단위(mock)          : vitest, DB 없음 — 빠른 피드백 (수초)
+2) 통합(real Postgres) : Testcontainers postgres:16 기동 → drizzle-kit migrate
+                         → org_pk 격리(RLS)·CHECK·GRANT·트랜잭션·BOLA 테스트
+3) e2e(블랙박스)       : 서비스 기동 + 합성 org → 가치흐름·거부 매트릭스
+4) (배포 후) 스모크    : 운영 + 합성 org로 핵심 경로 1회전, 실패 시 자동 롤백
 ```
 
 ```typescript
-// 통합 테스트 부트스트랩 (Testcontainers + 마이그레이션 + 계정별 커넥션)
+// 통합 테스트 부트스트랩 (Testcontainers + 마이그레이션 + 롤별 커넥션)
 beforeAll(async () => {
-  container = await new MySqlContainer("mysql:8.0").start();
+  container = await new PostgreSqlContainer("postgres:16").start();
   await migrate(adminDb, { migrationsFolder: "./drizzle" });   // 스키마 = 운영과 동일
-  await applyGrants(adminDb);                                   // §M 계정·GRANT 재현
+  await applyGrants(adminDb);                                   // §M 롤·GRANT 재현
   platformRw   = connectAs("platform_rw");                      // append-only 거부 테스트용
   ledgerAppend = connectAs("ledger_append");                    // INSERT-only 검증용
 });
@@ -259,7 +262,7 @@ beforeAll(async () => {
 
 **무엇을 점검하나 (전략 체크리스트)**
 
-- [ ] DB가 강제하는 보장은 **mock이 아니라 real MySQL**로 테스트하는가 (격리·CHECK·GRANT·트랜잭션)
+- [ ] DB가 강제하는 보장은 **mock이 아니라 real Postgres**로 테스트하는가 (격리·CHECK·GRANT·트랜잭션)
 - [ ] 테스트 DB 스키마를 **실제 마이그레이션**으로 적용하는가 (drift 0 — [[orm-testing-drizzle]])
 - [ ] 테스트 격리(트랜잭션 롤백 / truncate / DB-per-worker)가 걸려 있는가
 - [ ] **운영 DB에 쓰기-테스트가 없는가** — 합성 org·staging·replica만 쓰는가
@@ -273,7 +276,7 @@ beforeAll(async () => {
 
 테스트 전략은 두 질문으로 압축됩니다.
 
-1. **"이 보장을 누가 강제하나?"** — DB 엔진이면 진짜 MySQL(Testcontainers), 순수 로직이면 mock. platform_db는 격리·제약·GRANT·트랜잭션을 *DB가* 강제하므로 real DB 통합 테스트가 1급 시민입니다.
+1. **"이 보장을 누가 강제하나?"** — DB 엔진이면 진짜 Postgres(Testcontainers), 순수 로직이면 mock. platform_db는 격리(RLS)·제약·GRANT·트랜잭션을 *DB가* 강제하므로 real DB 통합 테스트가 1급 시민입니다.
 2. **"운영 DB를 직접 쓰나?"** — 절대 아니요. 운영의 현실은 마스킹 staging·read-replica·**합성 테넌트(org_pk 격리 재사용)**·shadow/canary·마이그레이션 리허설로 안전하게 재현합니다.
 
 가장 멋진 점은, 우리가 인가를 위해 만든 **org_pk 격리가 테스트 안전장치로도 그대로 쓰인다**는 것입니다 — 합성 org는 실고객과 격리된 또 하나의 테넌트일 뿐입니다. 새 기능을 만들 때 "이 테스트를 어디서 돌리지?"가 막막하면, 이 문서의 피라미드 매핑(Q5)과 운영 안전 철칙(Q4)을 떠올리세요.

@@ -7,7 +7,7 @@ tags:
   - consistency
   - transaction
   - acid
-  - mysql
+  - postgres
 aliases:
   - 일관성 모델
   - strong consistency
@@ -125,7 +125,7 @@ D - Durability (지속성)  : COMMIT되면 서버가 죽어도 데이터 유지 
 BEGIN;
   INSERT INTO payment_ledger (...) VALUES (..., 'SUCCEEDED');  -- 결제 기록
   UPDATE org_subscription SET status='ACTIVE' WHERE pk=?;       -- 구독 활성
-  INSERT INTO org_entitlement (...) ON DUPLICATE KEY UPDATE ...; -- 권한 활성
+  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, product_code) DO UPDATE SET ...; -- 권한 활성
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?; -- 전파
 COMMIT;
 -- COMMIT 성공 = 네 줄 모두 확정. 중간 크래시 = 네 줄 모두 rollback
@@ -163,7 +163,7 @@ await db.insert(orgEntitlement)...;          // 영영 실행 안 됨 → 결제
 ```
 결제 이벤트가 들어오면...
 
-[강한 일관성 — 단일 InnoDB 트랜잭션] (§F.1)
+[강한 일관성 — 단일 Postgres 트랜잭션] (§F.1)
   ├─ payment_ledger INSERT  (결제 원장, append-only)
   ├─ org_subscription UPDATE (구독 → ACTIVE)
   ├─ org_entitlement UPSERT  (권한 활성화) ← 사용자가 즉시 봐야 함
@@ -183,7 +183,7 @@ BEGIN;
   -- 강한 일관성 영역: 사용자가 즉시 봐야 하는 것
   INSERT INTO payment_ledger (...) VALUES (..., 'SUCCEEDED');
   UPDATE org_subscription SET status='ACTIVE' WHERE pk=?;
-  INSERT INTO org_entitlement (...) ON DUPLICATE KEY UPDATE status='ACTIVE', ...;
+  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, product_code) DO UPDATE SET status='ACTIVE', ...;
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;
 
   -- "부수효과를 해야 함"이라는 기록도 강하게 남김 (발송은 나중)
@@ -203,7 +203,7 @@ COMMIT;
 
 핵심: **권한(동기)과 알림(비동기)을 같은 결제 트랜잭션에서 갈라낸다**는 것. 권한은 칠판처럼 즉시, 알림은 채팅 알림처럼 곧. outbox 워커의 상세 동작(폴링, at-least-once, FOR UPDATE SKIP LOCKED)은 [[outbox-pattern]]에서 다룹니다.
 
-> 💡 **한 줄 요약**: 결제→권한→perm_version은 단일 InnoDB 트랜잭션으로 강하게(즉시 일치), 알림·영수증은 같은 트랜잭션에 outbox_event로 기록만 해두고 워커가 비동기로(결과적으로) 처리합니다.
+> 💡 **한 줄 요약**: 결제→권한→perm_version은 단일 Postgres 트랜잭션으로 강하게(즉시 일치), 알림·영수증은 같은 트랜잭션에 outbox_event로 기록만 해두고 워커가 비동기로(결과적으로) 처리합니다.
 
 ---
 
@@ -229,7 +229,7 @@ PG webhook → Kafka topic → 결제 워커 → org_subscription 갱신
   - 운영 부담: 분산 트랜잭션 매니저(XA) 구성·디버깅이 복잡
 ```
 
-**그런데 — 우리에겐 애초에 묶을 "여러 시스템"이 없습니다.** identity(사용자·조직)도 billing(결제·구독·권한)도 **같은 `platform_db`(단일 MySQL 인스턴스)**에 있습니다([[identity-billing-access]]).
+**그런데 — 우리에겐 애초에 묶을 "여러 시스템"이 없습니다.** identity(사용자·조직)도 billing(결제·구독·권한)도 **같은 `platform_db`(단일 Postgres 인스턴스)**에 있습니다([[identity-billing-access]]).
 
 ```
 일반적 상황 (2PC/Kafka가 필요한 이유)
@@ -238,7 +238,7 @@ PG webhook → Kafka topic → 결제 워커 → org_subscription 갱신
   권한 DB ─────┘
 
 우리 상황
-  ┌─────────────── platform_db (단일 InnoDB) ───────────────┐
+  ┌─────────────── platform_db (단일 Postgres) ───────────────┐
   │  payment_ledger · org_subscription · org_entitlement     │
   │  → 같은 인스턴스 → 그냥 BEGIN; ... COMMIT; 한 방이면 끝   │
   └──────────────────────────────────────────────────────────┘
@@ -249,7 +249,7 @@ PG webhook → Kafka topic → 결제 워커 → org_subscription 갱신
 | 항목 | Kafka + eventual | 2PC (분산 트랜잭션) | 단일 트랜잭션 (우리) |
 |---|---|---|---|
 | 결제↔권한 일관성 | 보장 안 됨(워커 지연) | 보장되나 느림 | **항상 보장, 빠름** |
-| 인프라 복잡도 | 높음(브로커 운영) | 높음(XA 매니저) | 낮음(MySQL만) |
+| 인프라 복잡도 | 높음(브로커 운영) | 높음(XA 매니저) | 낮음(Postgres만) |
 | 장애 전파 | MQ 장애 = 전체 장애 | 코디네이터 죽으면 blocking | **없음** |
 | 현 규모 적합성 | 과도 | 과도 | 적합 |
 
@@ -307,7 +307,7 @@ C와 A 중 하나를 포기해야 한다:
 | 강한 일관성 | strong consistency | 쓴 즉시 모두가 최신 값을 봄 (read-after-write) | 결제→권한→perm_version |
 | 결과적 일관성 | eventual consistency | 잠깐 불일치해도 결국 수렴 | 알림·영수증·분석 (outbox) |
 | read-after-write | — | 쓴 직후 읽으면 반드시 그 값이 나옴 | 결제 후 새로고침 시 ACTIVE 보장 |
-| ACID | — | DB 트랜잭션의 4대 보장 | 단일 InnoDB 트랜잭션의 근거 |
+| ACID | — | DB 트랜잭션의 4대 보장 | 단일 Postgres 트랜잭션의 근거 |
 | 원자성 | Atomicity | 전부 성공 아니면 전부 실패 (중간 없음) | 결제+권한 한 덩어리(§F.1) |
 | 일관성(ACID) | Consistency | 제약(NOT NULL/UNIQUE/FK)이 항상 유효 | 스키마 불변식 유지 |
 | 고립성 | Isolation | 동시 트랜잭션이 서로 중간 상태를 안 봄 | 동시 결제 처리 안전 |
@@ -419,7 +419,7 @@ describe("결제↔권한 강한 일관성 (단일 트랜잭션)", () => {
 
 일관성 모델은 결국 하나의 질문으로 귀결됩니다: **"이 데이터가 잠깐 옛 값이면 사용자가 손해를 보는가?"**
 
-- **예** → 강한 일관성. 핵심 트랜잭션 안에서 동기로 처리합니다(결제·권한·잔액). 무기는 ACID 원자성, 매개는 단일 InnoDB 트랜잭션(§F.1).
+- **예** → 강한 일관성. 핵심 트랜잭션 안에서 동기로 처리합니다(결제·권한·잔액). 무기는 ACID 원자성, 매개는 단일 Postgres 트랜잭션(§F.1).
 - **아니오** → 결과적 일관성으로 충분합니다(알림·영수증·분석). 매개는 outbox, 발송은 워커가 비동기로.
 
 `platform_db`가 2PC도 Kafka도 쓰지 않는 이유는 단순합니다. identity와 billing이 같은 DB에 있으니 로컬 트랜잭션 하나면 강한 일관성이 거저 따라오고, CAP 트레이드오프도 회피됩니다. 분산은 "할 수 있어서" 하는 게 아니라 "꼭 필요할 때" 트리거에 맞춰 들이는 것입니다. 그때가 오면 outbox가 이미 깔아둔 토대(`outbox_event → CDC → Kafka`) 위로 자연스럽게 확장하면 됩니다.
@@ -439,6 +439,6 @@ describe("결제↔권한 강한 일관성 (단일 트랜잭션)", () => {
 > 소스 문서
 - [[architecture]] — §1.3 데이터 일관성(billing→projection→auth), §2.1 불변식 #7 (strong consistency = 단일 서버 트랜잭션, async = outbox)
 - [[schema-reference]] — §F.1 결제→권한 단일 트랜잭션 SQL 전문
-- [[payment-atomicity]] — Kafka/2PC 대신 단일 InnoDB 트랜잭션을 택한 결정과 트레이드오프
+- [[payment-atomicity]] — Kafka/2PC 대신 단일 Postgres 트랜잭션을 택한 결정과 트레이드오프
 - [[requirements]] — 결제↔권한 원자성 요구사항(ARCH-2)
 - [[e2e-journeys]] — 결제 성공 후 권한 즉시 반영 사용자 여정

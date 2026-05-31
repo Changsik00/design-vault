@@ -9,7 +9,7 @@ aliases: [ORM 테스트, Drizzle 테스트, orm-testing-drizzle]
 > **대상**: ORM은 써봤지만 ORM 코드를 *어떻게 테스트하는지*는 막막한 개발자 (공부용)
 > **연관 문서**: [[testing-strategy|테스트 전략]] · [[architecture|architecture.md §1 토폴로지]] · [[schema-reference|schema-reference.md §A.2 접근 계층]] · [[bola-object-authz|BOLA 객체 인가]] · [[multitenancy-rls|멀티테넌시 격리]]
 
-이 프로젝트는 **MySQL 8 + Drizzle ORM** 스택입니다. 그리고 DB 접근은 오직 `@aiagent/db-platform` 패키지 함수로만 합니다 — Drizzle 스키마를 직접 참조하는 것은 금지입니다([[schema-reference|§A.2]]). ORM은 SQL을 손으로 안 써도 되게 해주는 편한 도구지만, 바로 그 "편함" 때문에 **테스트에서 잘못된 안도감**을 주기 쉽습니다. 타입 체크는 초록불인데 운영에서 터지는 일이 ORM 코드에서 자주 납니다. 이 문서는 Drizzle 코드를 어디까지 mock하고 어디부터 진짜 DB로 검증해야 하는지, 그리고 그걸 실제로 어떻게 짜는지 공부하는 노트입니다.
+이 프로젝트는 **PostgreSQL 16 + Drizzle ORM** 스택입니다. 그리고 DB 접근은 오직 `@aiagent/db-platform` 패키지 함수로만 합니다 — Drizzle 스키마를 직접 참조하는 것은 금지입니다([[schema-reference|§A.2]]). ORM은 SQL을 손으로 안 써도 되게 해주는 편한 도구지만, 바로 그 "편함" 때문에 **테스트에서 잘못된 안도감**을 주기 쉽습니다. 타입 체크는 초록불인데 운영에서 터지는 일이 ORM 코드에서 자주 납니다. 이 문서는 Drizzle 코드를 어디까지 mock하고 어디부터 진짜 DB로 검증해야 하는지, 그리고 그걸 실제로 어떻게 짜는지 공부하는 노트입니다.
 
 핵심 비유 하나를 먼저 깔고 갑니다. **ORM = 통역사**입니다. 내가 한국어(타입 안전한 메서드 체인)로 말하면 통역사가 현지어(SQL)로 옮겨줍니다. 편하죠. 그런데 *통역된 말이 현지에서 진짜 통하는지*는 현지에 가서 대화해 봐야 압니다. 타입 체크는 "내 한국어 문법이 맞나" 검사일 뿐이고, real DB 테스트가 "현지에서 실제로 대화"하는 것입니다.
 
@@ -45,7 +45,7 @@ const fakeDb = { query: { lecture: { findFirst: vi.fn().mockResolvedValue({ pk: 
 // → org_pk 조건이 빠졌든, FK가 깨졌든, 인덱스를 안 타든 이 테스트는 늘 초록불
 
 // ✅ 진짜 DB에 같은 쿼리를 던져 — 제약·SQL·격리가 실제로 검증됨
-const found = await lectureRepo.findById(orgPk, lectureId); // 실제 MySQL에 SELECT 발사
+const found = await lectureRepo.findById(orgPk, lectureId); // 실제 Postgres에 SELECT 발사
 ```
 
 원칙으로 압축하면: **"ORM을 믿되 SQL은 검증하라."** 타입을 믿고 코드를 짜되, 그 코드가 만든 SQL은 진짜 DB로 한 번 더 확인해야 합니다.
@@ -59,7 +59,7 @@ const found = await lectureRepo.findById(orgPk, lectureId); // 실제 MySQL에 S
 Drizzle에는 두 종류의 "진실"이 있습니다.
 
 1. **스키마 정의**(TypeScript): `schema.ts`에 적힌 테이블·컬럼·인덱스 선언. 타입의 원천.
-2. **실제 테이블**(MySQL): `CREATE TABLE`로 진짜 만들어진 물리 테이블. 데이터의 원천.
+2. **실제 테이블**(PostgreSQL): `CREATE TABLE`로 진짜 만들어진 물리 테이블. 데이터의 원천.
 
 이 둘이 어긋난 상태가 **migration drift(마이그레이션 표류)**입니다. 예를 들어 `schema.ts`에는 `status` 컬럼을 추가했는데 테스트 DB에는 아직 그 컬럼이 없는 상태죠. drift가 위험한 이유는 **테스트를 *거짓 통과*시키기 때문**입니다.
 
@@ -80,7 +80,7 @@ drift 시나리오:
 
 ```ts
 // 테스트 셋업: 운영과 "같은 마이그레이션"을 테스트 DB에 적용
-import { migrate } from "drizzle-orm/mysql2/migrator";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 await migrate(db, { migrationsFolder: "./drizzle" });
 // ↑ 운영에서 돌리는 그 폴더 그대로. 테스트 DB = 운영 스키마의 복제본이 됨
@@ -113,13 +113,13 @@ await migrate(db, { migrationsFolder: "./drizzle" });
 │     → mock (repo를 mock). 수십 ms. 수백 개 돌려도 빠름
 │
 ├─ "SQL/제약/격리/트랜잭션이 실제로 동작하는가"
-│     → real DB (Testcontainers MySQL). [[testing-strategy]] 정책 따름
+│     → real DB (Testcontainers Postgres). [[testing-strategy]] 정책 따름
 │
 └─ "외부(PG·이메일)와의 연동이 맞는가"
       → 외부는 sandbox 또는 계약(contract) mock. 외부 자체를 띄우지 않음
 ```
 
-여기서 **Testcontainers**는 테스트 시작 시 도커로 진짜 MySQL 8 컨테이너를 띄우고 끝나면 버리는 도구입니다. "진짜 MySQL인데 일회용"이라, real DB의 신뢰성과 테스트의 격리성을 동시에 얻습니다. 프로젝트의 테스트 정책([[testing-strategy]])은 "쿼리·제약·격리는 real DB로"를 기본선으로 잡습니다.
+여기서 **Testcontainers**는 테스트 시작 시 도커로 진짜 PostgreSQL 16 컨테이너를 띄우고 끝나면 버리는 도구입니다. "진짜 Postgres인데 일회용"이라, real DB의 신뢰성과 테스트의 격리성을 동시에 얻습니다. 프로젝트의 테스트 정책([[testing-strategy]])은 "쿼리·제약·격리는 real DB로"를 기본선으로 잡습니다.
 
 주의할 함정: **`@aiagent/db-platform` 패키지 함수를 테스트할 때는 패키지를 mock하지 마세요.** 그 패키지 함수의 *존재 이유*가 "org_pk를 강제하고 올바른 SQL을 만드는 것"이므로, 그걸 mock하면 검증 대상 자체가 사라집니다. 반대로 그 패키지를 *소비하는 서비스 로직*을 단위 테스트할 때는 패키지 함수를 mock해도 됩니다(Q4).
 
@@ -138,7 +138,7 @@ await migrate(db, { migrationsFolder: "./drizzle" });
 이건 "통역사가 정말 모든 문장에 테넌트 경계를 붙이는가"를 현지(real DB)에서 확인하는 일입니다. 두 org를 만들고, B 토큰으로 A의 객체를 조회했을 때 *진짜로 안 나오는지* 봅니다.
 
 ```ts
-// repo.tenant-isolation.spec.ts — Testcontainers MySQL 사용
+// repo.tenant-isolation.spec.ts — Testcontainers Postgres 사용
 it("base repo는 타 org row를 절대 반환하지 않는다", async () => {
   const orgA = await seedOrg("한울학원");
   const orgB = await seedOrg("B학원");
@@ -213,7 +213,7 @@ beforeEach(async () => { tx = await beginTestTx(db); });  // BEGIN
 afterEach(async () => { await tx.rollback(); });          // 무조건 되돌림 → 다음 테스트 깨끗
 ```
 
-> ⚠️ 주의: 이 패턴은 **테스트 대상 코드가 자체적으로 `transaction()`을 또 열면**(중첩 트랜잭션) MySQL에서는 진짜 중첩이 아니라 SAVEPOINT로 처리되어 동작이 미묘해집니다. 결제처럼 *코드가 트랜잭션을 직접 여는* 경우엔, per-test rollback 대신 **테스트 후 명시적 cleanup**(TRUNCATE/삭제)이 더 안전합니다. "원자성 자체를 보는 테스트"(①)는 절대 바깥 트랜잭션으로 감싸지 마세요 — rollback 동작을 검증하는데 바깥에서 또 감싸면 의미가 사라집니다.
+> ⚠️ 주의: 이 패턴은 **테스트 대상 코드가 자체적으로 `transaction()`을 또 열면**(중첩 트랜잭션) PostgreSQL에서는 진짜 중첩이 아니라 SAVEPOINT로 처리되어 동작이 미묘해집니다(PG도 트랜잭션 중첩은 SAVEPOINT로 구현). 결제처럼 *코드가 트랜잭션을 직접 여는* 경우엔, per-test rollback 대신 **테스트 후 명시적 cleanup**(TRUNCATE/삭제)이 더 안전합니다. "원자성 자체를 보는 테스트"(①)는 절대 바깥 트랜잭션으로 감싸지 마세요 — rollback 동작을 검증하는데 바깥에서 또 감싸면 의미가 사라집니다.
 
 > 💡 **한 줄 요약**: 원자성은 "중간 실패 시 전체 rollback"을 real DB로 단언하고(결제 ledger가 안 남는지), 테스트 격리는 per-test rollback 헬퍼로 — 단 트랜잭션을 직접 여는 코드엔 명시적 cleanup을 씁니다.
 
@@ -283,7 +283,7 @@ await db.insert(paymentLedger).values({ orgPk, amount, status: "WHATEVER" });
 | **base repo** | 모든 repo의 부모. `org_pk`를 자동 주입해 BOLA 방어를 프레임워크화 |
 | **N+1** | 부모 1개 + 자식 N개를 각각 따로 조회해 쿼리가 N+1번 나가는 성능 함정 |
 | **raw SQL escape hatch** | ORM으로 표현 못 하는 SQL을 `sql\`...\`` 템플릿으로 직접 쓰는 탈출구 |
-| **Testcontainers** | 테스트 때 도커로 진짜 MySQL을 띄우고 끝나면 버리는 도구. real DB + 격리 |
+| **Testcontainers** | 테스트 때 도커로 진짜 Postgres를 띄우고 끝나면 버리는 도구. real DB + 격리 |
 | **타입↔런타임 갭** | 타입은 컴파일에만 검사됨 — DB CHECK/UNIQUE/FK 위반은 런타임에만 드러나는 간극 |
 | **per-test rollback** | 각 테스트를 트랜잭션으로 감싸 끝에 rollback해 DB를 깨끗이 유지하는 격리 기법 |
 
@@ -293,26 +293,27 @@ await db.insert(paymentLedger).values({ orgPk, amount, status: "WHATEVER" });
 
 ORM 테스트의 핵심은 **"타입이 못 보는 것을 real DB가 보게 하기"**입니다. 세 가지를 실제로 짜 봅니다. (실제 DB를 띄우는 방법·운영 안전은 [[testing-strategy]] 참고.)
 
-**① Drizzle repo를 Testcontainers MySQL로 테스트 (vitest)**
+**① Drizzle repo를 Testcontainers Postgres로 테스트 (vitest)**
 
 ```ts
 // repo.it.spec.ts
-import { MySqlContainer } from "@testcontainers/mysql";
-import { drizzle } from "drizzle-orm/mysql2";
-import { migrate } from "drizzle-orm/mysql2/migrator";
-import mysql from "mysql2/promise";
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { Pool } from "pg";
 
-let container: Awaited<ReturnType<MySqlContainer["start"]>>;
+let container: Awaited<ReturnType<PostgreSqlContainer["start"]>>;
+let pool: Pool;
 let db: ReturnType<typeof drizzle>;
 
 beforeAll(async () => {
-  container = await new MySqlContainer("mysql:8").start(); // 진짜 MySQL 8, 일회용
-  const conn = await mysql.createConnection(container.getConnectionUri());
-  db = drizzle(conn);
+  container = await new PostgreSqlContainer("postgres:16").start(); // 진짜 Postgres 16, 일회용
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool);
   await migrate(db, { migrationsFolder: "./drizzle" }); // 운영과 같은 마이그레이션
 }, 120_000); // 컨테이너 기동 시간 고려해 타임아웃 넉넉히
 
-afterAll(async () => { await container.stop(); });
+afterAll(async () => { await pool.end(); await container.stop(); });
 
 it("org_pk 격리 + UNIQUE 제약이 진짜로 동작한다", async () => {
   const a = await seedOrg("한울학원");
@@ -320,7 +321,7 @@ it("org_pk 격리 + UNIQUE 제약이 진짜로 동작한다", async () => {
 
   // 같은 org + 같은 code → UNIQUE 위반 (타입엔 없는 제약 → 런타임에만 드러남)
   await expect(lectureRepo.create(a.pk, { code: "MATH-1", title: "중복" }))
-    .rejects.toThrow(/duplicate|ER_DUP_ENTRY/i);
+    .rejects.toThrow(/duplicate key|23505/i);   // PG unique_violation = SQLSTATE 23505
 });
 ```
 
@@ -355,7 +356,7 @@ it("강의 목록 조회는 쿼리 1번이어야 한다 (N+1 금지)", async () 
 □ mock 경계: @aiagent/db-platform 패키지 자체는 mock하지 않는다 (검증 대상이므로)
 ```
 
-> 💡 **테스트 한 줄 요약**: 쿼리·제약·격리·트랜잭션은 Testcontainers MySQL로 real 검증하고, drift는 `drizzle-kit generate` 빈-diff로, N+1은 쿼리 수 단언으로 잡으세요 — 타입이 못 보는 것을 DB가 보게 하는 게 전부입니다.
+> 💡 **테스트 한 줄 요약**: 쿼리·제약·격리·트랜잭션은 Testcontainers Postgres로 real 검증하고, drift는 `drizzle-kit generate`(PG 방언) 빈-diff로, N+1은 쿼리 수 단언으로 잡으세요 — 타입이 못 보는 것을 DB가 보게 하는 게 전부입니다.
 
 ---
 
@@ -380,7 +381,7 @@ ORM은 좋은 통역사지만, 통역된 말이 현지에서 통하는지는 현
 
 - [[testing-strategy|테스트 전략]] — 실제 DB(Testcontainers)·운영 DB에서 *어디서* 돌리나(이 문서는 *ORM 레이어*를 어떻게)
 - [[bola-object-authz|BOLA 객체 수준 인가]] — base repo의 org_pk 강제가 BOLA 방어이며, real DB 교차 테넌트 테스트로 검증
-- [[multitenancy-rls|Pool 모델 멀티테넌시와 RLS]] — MySQL엔 RLS가 없어 격리를 앱·테스트로 보장해야 하는 배경
+- [[multitenancy-rls|Pool 모델 멀티테넌시와 RLS]] — PG RLS로 격리를 DB에서 1차 강제하고 앱·테스트로 보강하는 배경
 - [[consistency-model|일관성 모델]] — `db.transaction()` 원자성 검증이 결제 일관성의 토대
 - [[online-ddl-migration|온라인 DDL 마이그레이션]] — 테스트 DB에 같은 마이그레이션을 적용해 drift를 없애는 이유
 - [[least-privilege-grant|최소 권한 GRANT]] — ORM이 표현 못 하는 DCL(GRANT/REVOKE)의 영역

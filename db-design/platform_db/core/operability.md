@@ -158,7 +158,7 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 
 | 죽으면 | 영향 | 계약 (버티는 법) |
 |---|---|---|
-| **MySQL(platform_db)** | 전 서비스 auth 불가 (SPOF) | read replica로 read 지속(NFR-3 트리거 T2). RTO/RPO·백업은 ops 소관이나 **단일 인스턴스=SPOF임을 명시**. |
+| **PostgreSQL(platform_db)** | 전 서비스 auth 불가 (SPOF) | read replica로 read 지속(NFR-3 트리거 T2). RTO/RPO·백업은 ops 소관이나 **단일 인스턴스=SPOF임을 명시**. |
 | **Redis** (권한 캐시) | 캐시 미스 → DB 직격(느려짐) | **fail-open 아님** — 캐시는 가속용, 권위 아님. 없으면 DB 조회로 *느려도 정상 동작*. |
 | **Firebase** | 신규 로그인 불가 | 기존 JWT(TTL 1h)는 유효 → 진행 세션 영향 적음. `firebase_uid`는 조회 키라 vendor 교체 가능([[firebase-boundary]]). |
 | **PG webhook 유실/지연** | entitlement 갱신 지연 | Gate B `validUntil` 복합체크가 2차 방어([[decisions/gate-b-billing-grace|gate-b-billing-grace]]). + reconciliation 폴링(🟡 배치 미작성) + Webhook Replay(O2). |
@@ -166,7 +166,7 @@ usage_snapshot (org_pk, service, metric, period, used, limit, source_ts)
 
 - **entitlement 가용성(AVAIL-1)**: entitlement는 billing 장애와 **구조적으로 격리**됨([[auth-projection]]) — billing/PG가 죽어도 *기존 entitlement read는 영향 없음*. "결제 시스템 장애 시 기존 권한 최소 N시간 유지"의 근거가 이미 설계에 있다(명문화만 필요).
 
-**현재**: 🟡 (auth-projection·validUntil ✅; reconciliation 폴링은 배치 미작성, 단일 MySQL SPOF는 트리거 시 분리).
+**현재**: 🟡 (auth-projection·validUntil ✅; reconciliation 폴링은 배치 미작성, 단일 PostgreSQL SPOF는 트리거 시 분리).
 
 ---
 

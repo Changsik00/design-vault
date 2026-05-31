@@ -58,7 +58,7 @@ EXPIRED   — 완전히 끝남. 더 이상 서비스 접근 불가.
 무료 체험이 끝나면 등록된 카드로 자동 결제가 시도됩니다. 이 과정은 PG(결제사 — Toss, Stripe 등)와 `platform_db` 사이의 협력으로 일어납니다:
 
 ```
-1. 체험 만료 시점 도달 (trial_ends_at < NOW())
+1. 체험 만료 시점 도달 (trial_ends_at < now())
 
 2. PG가 등록된 카드로 자동 결제 시도
 
@@ -94,12 +94,12 @@ BEGIN;
   WHERE pk = ?;
 
   -- 권한 활성화 (upsert)
-  INSERT INTO org_entitlement (org_pk, service, status, valid_until, feature_limits)
-  VALUES (?, 'ACADEMY', 'ACTIVE', ?, ?)
-  ON DUPLICATE KEY UPDATE
+  INSERT INTO org_entitlement (org_pk, product_code, service, status, valid_until, feature_limits)
+  VALUES (?, ?, 'ACADEMY', 'ACTIVE', ?, ?)
+  ON CONFLICT (org_pk, product_code) DO UPDATE SET
     status = 'ACTIVE',
-    valid_until = VALUES(valid_until),
-    feature_limits = VALUES(feature_limits);
+    valid_until = EXCLUDED.valid_until,
+    feature_limits = EXCLUDED.feature_limits;
 
   -- 클라이언트 캐시 무효화 신호
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
@@ -186,7 +186,7 @@ org_subscription.current_period_end → 2026-05-31T... (이미 정해져 있음)
 -- 매일 실행되는 배치 (architecture.md §4)
 UPDATE org_entitlement
 SET status = 'EXPIRED'
-WHERE valid_until < NOW()
+WHERE valid_until < now()
   AND status IN ('ACTIVE', 'GRACE');
 ```
 
@@ -237,7 +237,7 @@ org_entitlement = 실제로 넷플릭스를 켰을 때 "재생 가능" 여부
 ```sql
 -- 결제 없이 수동으로 30일 무료 이용권 부여 가능
 INSERT INTO org_entitlement (org_pk, service, status, source, valid_until)
-VALUES (?, 'ACADEMY', 'ACTIVE', 'PROMO', DATE_ADD(NOW(), INTERVAL 30 DAY));
+VALUES (?, 'ACADEMY', 'ACTIVE', 'PROMO', now() + INTERVAL '30 days');
 -- org_subscription 없이도 가능
 ```
 
@@ -283,13 +283,13 @@ WHERE org_pk = ? AND service = ?;
 -- 3. 즉시 복구가 필요하다면 수동 처리
 UPDATE org_entitlement
 SET status = 'EXPIRED'
-WHERE org_pk = ? AND valid_until < NOW() AND status = 'ACTIVE';
+WHERE org_pk = ? AND valid_until < now() AND status = 'ACTIVE';
 
 -- 4. perm_version 갱신 (클라이언트 캐시 무효화)
 UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
 ```
 
-배치 실패 모니터링도 중요합니다. `valid_until < NOW() AND status = 'ACTIVE'`인 row가 있다면 배치가 실패한 것입니다.
+배치 실패 모니터링도 중요합니다. `valid_until < now() AND status = 'ACTIVE'`인 row가 있다면 배치가 실패한 것입니다.
 
 > 💡 **한 줄 요약**: 배치가 실패해도 Gate B가 `valid_until`을 이중으로 체크해서 차단합니다. status만 보는 코드는 "배치 실패 = 무한 무료"라는 심각한 버그를 유발합니다.
 

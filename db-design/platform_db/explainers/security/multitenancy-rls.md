@@ -7,7 +7,7 @@ tags:
   - multitenancy
   - security
   - rls
-  - mysql
+  - postgres
 aliases:
   - 멀티테넌시
   - RLS
@@ -38,7 +38,7 @@ aliases:
 
 학원 100개 → DB 100개 → 커넥션 풀 100개 × 최소 5 = 500개 커넥션
 학원 1000개 → DB 1000개 → 커넥션 풀 1000개 × 5 = 5000개 커넥션
-                                                      └─ MySQL 서버 폭발
+                                                      └─ Postgres 서버 폭발
 ```
 
 - 운영 비용: DB 인스턴스 100개를 각각 백업·모니터링·패치해야 합니다
@@ -77,29 +77,30 @@ PostgreSQL에서 RLS가 어떻게 동작하는지 보면 이해가 쉽습니다:
 
 ```sql
 -- PostgreSQL에서는 DB 자체가 정책 강제
-CREATE POLICY tenant_isolation_policy ON org_entitlement
+ALTER TABLE org_entitlement ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON org_entitlement
   USING (org_pk = current_setting('app.org_pk')::bigint);
 -- 이 정책이 있으면, 아무리 앱이 실수해도 다른 org 데이터가 나오지 않음
 
--- 관리자 오버라이드 정책
-CREATE POLICY admin_override ON org_entitlement
-  USING (current_setting('app.role') = 'SUPER_ADMIN');
--- SUPER_ADMIN은 모든 org 접근 가능
+-- 앱은 트랜잭션마다 현재 org를 세션 변수로 주입한다
+SET LOCAL app.org_pk = '1';   -- ← 서버가 JWT에서 해석해 넣음. 클라이언트 입력 금지
 ```
 
-PostgreSQL의 RLS는 강력한 안전망입니다. 개발자가 쿼리에서 `WHERE org_pk = ?`를 빠뜨려도, DB가 현재 세션의 `app.org_pk` 설정값으로 자동 필터를 추가합니다. "사서가 책을 주려 해도 잠금 장치가 막는" 구조입니다.
+PostgreSQL의 RLS는 강력한 안전망이자 **1차 강제 메커니즘**입니다. 개발자가 쿼리에서 `WHERE org_pk = ?`를 빠뜨려도, DB가 현재 세션의 `app.org_pk` 설정값으로 자동 필터를 추가합니다. "사서가 책을 주려 해도 잠금 장치가 막는" 구조입니다.
+
+여기서 핵심은 `app.org_pk`를 **누가 채우느냐**입니다. 클라이언트가 보낸 값을 그대로 넣으면 위조될 수 있으므로, 서버가 JWT를 검증한 뒤 그 안의 org를 `SET LOCAL app.org_pk = $orgPk`로 트랜잭션마다 주입합니다. 클라이언트 입력은 절대 이 값에 닿지 않습니다.
 
 > 💡 **한 줄 요약**: RLS는 앱 코드 실수와 상관없이 DB 자체가 "당신은 이 행만 볼 수 있어요"를 강제하는 DB 레벨 보안 기능입니다.
 
 ---
 
-## Q3. PostgreSQL은 RLS가 있는데 우리가 쓰는 MySQL은 없다고요? 그러면 어떻게 막나요?
+## Q3. org 격리는 무엇이 강제하나요? RLS 하나로 충분한가요?
 
-맞습니다. MySQL 8은 RLS를 지원하지 않습니다. 이것은 이 설계의 가장 큰 구조적 제약 중 하나로, `architecture.md`에도 솔직하게 명시되어 있습니다:
+PostgreSQL은 RLS로 **DB에서 직접** 테넌트 격리를 강제합니다(Q2). 이게 1차 메커니즘입니다. 그렇다고 앱 레이어를 손 놓는다는 뜻은 아닙니다 — RLS와 **함께** 앱 레이어 강제를 두는 것이 정석(defense-in-depth)입니다.
 
-> **D10**: 멀티테넌시: RLS 없음 → CI 린트 보강. MySQL은 RLS 없음 (정직한 자인).
+> 🐬 **MySQL이라면**: MySQL 8은 RLS를 지원하지 않습니다. MySQL 인프라를 써야 한다면 RLS 자리를 아래 앱 레이어 3 방어선이 **대체**합니다(Gate 함수 파라미터 강제 + NOT NULL 스키마 + CI 린트). PG에서는 이 3 방어선이 RLS를 *대체*하는 게 아니라 *보강*합니다.
 
-그래서 현재는 **앱 레이어에서 강제**합니다. 세 가지 방어선을 씁니다.
+그래서 PG에서도 다음 세 가지를 RLS 위에 함께 둡니다. RLS가 DB의 마지막 방어선이라면, 이들은 그 앞단에서 앱 버그를 봉쇄하고 의도를 코드로 명시하는 **defense-in-depth** 층입니다.
 
 **방어선 1: [[gate-abc-flow|Gate A]] 함수에 orgPk 파라미터 필수화**
 
@@ -127,7 +128,7 @@ async function getEntitlementByService(
 ```sql
 -- 모든 도메인 테이블의 org_pk는 NOT NULL
 CREATE TABLE org_entitlement (
-  org_pk [[pk-ulid-strategy|BIGINT pk]] UNSIGNED NOT NULL,  -- ← NULL이면 INSERT 자체 실패
+  org_pk [[pk-ulid-strategy|BIGINT pk]] NOT NULL,  -- ← NULL이면 INSERT 자체 실패
   ...
 );
 ```
@@ -140,19 +141,20 @@ CREATE TABLE org_entitlement (
 SELECT * FROM org_entitlement WHERE service = 'ACADEMY'; -- org_pk 누락!
 ```
 
-세 방어선의 효과:
+RLS + 세 방어선의 효과:
 
 ```
 방어선         │ 막는 것
 ───────────────┼──────────────────────────────────
+RLS 정책        │ 앱이 WHERE org_pk를 빠뜨려도 DB가 자동 필터 (1차 강제)
 NOT NULL       │ 삽입 시 org_pk 누락 → DB 오류
 Gate 함수 시그니처 │ 함수 호출 시 orgPk 빠뜨리면 → 타입 오류
 CI 린트 (P1)  │ 리뷰 전에 빌드 단계에서 → 차단
 ```
 
-PostgreSQL RLS와 비교하면 분명 약합니다. 하지만 MySQL이 회사 표준이라 어쩔 수 없는 선택이고, 이 세 방어선으로 최대한 보완합니다.
+RLS 하나로도 격리는 강제되지만, 그 앞단에 앱 강제를 겹쳐 둡니다 — 앱 버그를 더 일찍(컴파일·빌드 단계) 잡고, "이 쿼리는 테넌트 경계를 의식한다"는 의도를 코드에 명시하기 위해서입니다.
 
-> 💡 **한 줄 요약**: MySQL에는 RLS가 없어서, Gate 함수 파라미터 강제 + NOT NULL 스키마 + CI 린트 세 겹으로 대신 막습니다.
+> 💡 **한 줄 요약**: PG는 RLS로 DB에서 격리를 1차 강제하고, 그 위에 Gate 함수 파라미터 강제 + NOT NULL 스키마 + CI 린트를 defense-in-depth로 겹칩니다. (🐬 MySQL 인프라라면 RLS 자리를 이 3 방어선이 대체)
 
 ---
 
@@ -196,15 +198,19 @@ Admin role이 있으면:
 
 코드 위치로 분리하면 cross-tenant 조회가 어디에 있는지 grep 한 줄로 찾을 수 있고, 접근 권한도 별도로 제어할 수 있습니다.
 
+(PG라면 `CREATE POLICY admin_override ... USING (current_setting('app.role') = 'SUPER_ADMIN')` 같은 RLS 우회 정책으로 처리할 수도 있으나, 우리는 우회 권한을 정책에 심는 대신 **코드 위치 분리**를 택합니다 — 보안 우회 경로를 정책이 아니라 grep 가능한 모듈 경계로 드러내기 위해서입니다.)
+
 > 💡 **한 줄 요약**: SUPER_ADMIN role은 없습니다. cross-tenant 조회는 `internal/` 모듈이나 별도 admin 서비스에서만 가능하고, 코드 위치 자체가 접근 통제선입니다.
 
 ---
 
 ## Q5. 실수로 쿼리에서 `org_pk` 조건을 빠뜨리면 어떻게 되나요? 막을 방법이 있나요?
 
-`org_pk` 조건을 빠뜨리면 **다른 학원 데이터가 그대로 나옵니다**. MySQL에는 RLS가 없어서 DB가 자동으로 막아주지 않습니다.
+PG에서는 `org_pk` 조건을 빠뜨려도 **RLS 정책이 DB에서 자동으로 필터**를 겁니다(Q2) — 현재 세션의 `app.org_pk`에 해당하는 행만 보입니다. 즉 1차 안전망은 DB가 이미 들고 있습니다.
 
-어떻게 이 실수를 막나요?
+그런데 왜 그래도 앱 레이어 강제를 유지할까요? **defense-in-depth** 때문입니다. RLS는 "세션 변수가 올바르게 세팅됐다"를 전제로 동작하므로, `SET LOCAL app.org_pk`를 빠뜨린 코드 경로가 있으면 격리가 무너질 수 있습니다. 앱 강제(아래)는 그런 빈틈을 컴파일·빌드 단계에서 미리 막고, "이 쿼리는 테넌트 경계를 의식한다"는 의도를 코드에 남깁니다.
+
+> 🐬 **MySQL이라면**: RLS가 없으므로 자동 필터도 없습니다. `org_pk` 누락 = 다른 학원 데이터 노출이라, 아래 앱 강제가 *유일한* 방어선이 됩니다.
 
 **현재 구현된 방어:**
 
@@ -265,7 +271,7 @@ const membership = await getActiveMembership(user.pk, orgPk);
 // membership이 없으면 403 — 다른 org에 접근 불가
 ```
 
-> 💡 **한 줄 요약**: 현재는 TypeScript 타입 강제 + NOT NULL 스키마로 막고, P1에서 CI 린트까지 추가하면 세 겹 방어가 완성됩니다.
+> 💡 **한 줄 요약**: PG는 RLS가 DB에서 자동 필터를 걸어 1차로 막고, 그 위에 TypeScript 타입 강제 + NOT NULL 스키마(+P1 CI 린트)를 defense-in-depth로 겹칩니다.
 
 ---
 
@@ -275,11 +281,11 @@ const membership = await getActiveMembership(user.pk, orgPk);
 
 | 방식 | 설명 | 장점 | 단점 |
 |---|---|---|---|
-| Pool 모델 (현재) | 공유 DB + org_pk 행 격리 | 단순, 저비용, 쉬운 마이그레이션 | RLS 없으면 앱 책임 |
-| Schema-per-tenant | org마다 별도 스키마 | 격리 명확 | MySQL에서 db=schema라 커넥션 풀 폭발 |
+| Pool 모델 (현재) | 공유 DB + org_pk 행 격리 + RLS | 단순, 저비용, 쉬운 마이그레이션, RLS로 DB 강제 | 세션 변수 주입을 앱이 책임 |
+| Schema-per-tenant | org마다 별도 스키마 | 격리 명확 | search_path 관리·커넥션 풀 부담, 마이그레이션 N배 |
 | DB-per-tenant | org마다 별도 DB | 완전 격리 | 운영비↑, 마이그레이션 지옥, 과도한 현재 규모 |
 
-MySQL에서 "schema-per-tenant"는 실질적으로 "DB-per-tenant"와 같습니다. 테넌트 100개면 DB 100개, 커넥션 풀 100개가 되어 메모리와 운영 비용이 선형으로 올라갑니다.
+PostgreSQL은 "schema-per-tenant"가 한 DB 안의 여러 스키마로 가능하긴 하지만, 테넌트 100개면 스키마 100개에 각각 마이그레이션을 돌려야 하고 커넥션마다 `search_path`를 갈아끼우는 부담이 생깁니다. 결국 운영 비용이 테넌트 수에 비례해 올라갑니다.
 
 **나중에 전환할 수 있나요?**
 
@@ -322,11 +328,11 @@ T4: ISMS-P/GDPR 계약 체결
 
 이 질문에 "예"라고 답하려면:
 
-1. 모든 쿼리에 `WHERE org_pk = ?` 조건이 있어야 합니다
+1. 트랜잭션마다 `SET LOCAL app.org_pk`가 세팅돼 RLS가 동작해야 합니다 (DB 1차 강제)
 2. Gate 함수를 통해서만 데이터에 접근해야 합니다 (`getEntitlementByService`, `getActiveMembership` 등)
 3. cross-tenant 집계가 필요하면 `internal/` 모듈에서만 해야 합니다
 
-새 기능을 만들 때 DB 쿼리를 작성한다면 "이 쿼리에 org_pk 조건이 있나?"를 반드시 확인하세요. CI 린트가 아직 완성되지 않았기 때문에, 지금은 코드 리뷰에서 서로 체크해주는 것이 중요합니다.
+새 기능을 만들 때 DB 쿼리를 작성한다면 "이 쿼리가 RLS 컨텍스트(`app.org_pk`) 안에서 도나, 그리고 org_pk 조건이 있나?"를 확인하세요. RLS가 마지막 방어선을 받쳐주지만, 그 앞단의 앱 강제와 코드 리뷰가 함께 있어야 빈틈이 없습니다.
 
 ---
 
@@ -337,5 +343,5 @@ T4: ISMS-P/GDPR 계약 체결
 - [[index-design|인덱스 설계]] — org_pk가 모든 복합 인덱스 첫 컬럼인 이유
 - [[pipa-consent|PIPA 동의]] — 테넌트별 동의 데이터 격리의 법적 맥락
 > 소스 문서
-- [[architecture]] — §1.4 멀티테넌시 & 격리, §3.1 D10 (RLS 없음 → CI 린트 보강)
+- [[architecture]] — §1.4 멀티테넌시 & 격리, §3.1 D10 (RLS 1차 강제 + 앱 레이어 defense-in-depth)
 - [[schema-reference]] — G.1-G.2 멀티테넌시 격리 현황

@@ -36,13 +36,15 @@ aliases:
 
 ```sql
 CREATE TABLE identity_user (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,  -- DB 내부 전용
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,  -- DB 내부 전용
   public_id   CHAR(26) NOT NULL,  -- 외부 노출 전용 (ULID)
   firebase_uid VARCHAR(128),
   email       VARCHAR(255),
   ...
 );
 ```
+
+> 💡 PostgreSQL엔 `UNSIGNED`가 없지만, 서명(signed) `BIGINT`의 양수 범위(약 922경)만으로도 어떤 서비스든 PK가 고갈될 일은 없습니다. 즉 UNSIGNED 부재는 ULID 도입 근거를 바꾸지 않습니다 — 외부 노출용 식별자를 따로 두는 이유는 범위가 아니라 보안이기 때문입니다.
 
 코드로 표현하면 이런 구분입니다:
 
@@ -104,7 +106,7 @@ import { ulid } from 'ulid';
 const newUser = await db.insert(identityUser).values({
   publicId: ulid(),       // 예: "01HXYZ3NDEKTSV4RRFFQ69G5"
   email: 'user@example.com',
-  // pk는 AUTO_INCREMENT라 명시하지 않음
+  // pk는 GENERATED ALWAYS AS IDENTITY라 명시하지 않음
 });
 ```
 
@@ -159,7 +161,7 @@ GET /orgs/1/lectures/43  → 타 학원 강의? (org_pk 검증이 없으면 노�
 
 **단일 PK vs BIGINT + ULID 트레이드오프**
 
-| 항목 | 단일 AUTO_INCREMENT | BIGINT + ULID (우리) |
+| 항목 | 단일 IDENTITY | BIGINT + ULID (우리) |
 |---|---|---|
 | 구현 단순성 | 컬럼 1개 | 컬럼 2개 |
 | 노출 안전성 | 위험 | 안전 |
@@ -249,7 +251,7 @@ identity_user 테이블
 
 | 필드 | 역할 | 누가 만드나 | PK/FK? |
 |---|---|---|---|
-| `pk` | DB 내부 조인 기준 | MySQL AUTO_INCREMENT | PK ✅ |
+| `pk` | DB 내부 조인 기준 | PG IDENTITY | PK ✅ |
 | `public_id` | API/URL 외부 식별 | 앱 서버 (`ulid()`) | 고유키 ✅ |
 | `firebase_uid` | Firebase Auth 연결 키 | Firebase | PK/FK ❌ (조회 키만) |
 

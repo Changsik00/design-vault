@@ -108,8 +108,8 @@ BEGIN;
   UPDATE org_subscription SET status='ACTIVE', current_period_end=? WHERE pk=?;
   INSERT INTO org_entitlement (org_pk, service, status, valid_until, ...)
     VALUES (?, 'ACADEMY', 'ACTIVE', '2026-06-30', ...)
-    ON DUPLICATE KEY UPDATE
-      status='ACTIVE', valid_until=VALUES(valid_until);
+    ON CONFLICT (org_pk, service) DO UPDATE SET
+      status='ACTIVE', valid_until=EXCLUDED.valid_until;
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;
   INSERT INTO outbox_event (...); -- 알림 등 비동기 처리
 COMMIT;
@@ -125,14 +125,14 @@ COMMIT;
 -- 매일 실행하는 만료 처리
 UPDATE org_entitlement
   SET status = 'EXPIRED'
-WHERE valid_until < NOW()
+WHERE valid_until < now()
   AND status IN ('ACTIVE', 'TRIALING');
 
 -- GRACE 전환: 결제 실패 후 유예기간 처리
 UPDATE org_entitlement
   SET status = 'GRACE'
-WHERE valid_until < NOW()
-  AND grace_until > NOW()
+WHERE valid_until < now()
+  AND grace_until > now()
   AND status = 'ACTIVE';
 ```
 
@@ -162,9 +162,9 @@ ACTIVE  → (관리자 정지) → SUSPENDED
 
 ---
 
-## Q4. [[feature-limits|feature_limits]]가 뭔가요? JSON으로 저장한다고요?
+## Q4. [[feature-limits|feature_limits]]가 뭔가요? JSONB로 저장한다고요?
 
-`feature_limits`는 이 조직이 사용할 수 있는 기능의 **상한선**을 저장하는 JSON 컬럼입니다.
+`feature_limits`는 이 조직이 사용할 수 있는 기능의 **상한선**을 저장하는 JSONB 컬럼입니다.
 
 ```json
 {
@@ -177,7 +177,7 @@ ACTIVE  → (관리자 정지) → SUSPENDED
 
 이 값으로 "오늘 업로드를 10개 이상 했으면 더 못한다"는 식의 한도 체크를 합니다.
 
-**왜 JSON으로 저장하나요?** 기능 한도의 종류가 서비스마다, 요금제마다 다르기 때문입니다. 컬럼으로 뽑으면 `daily_uploads INT, members INT, storage_gb INT, ai_queries_per_month INT...` 식으로 끝도 없이 늘어납니다. 새 요금제를 추가할 때마다 DDL을 변경해야 합니다.
+**왜 JSONB로 저장하나요?** 기능 한도의 종류가 서비스마다, 요금제마다 다르기 때문입니다. 컬럼으로 뽑으면 `daily_uploads INT, members INT, storage_gb INT, ai_queries_per_month INT...` 식으로 끝도 없이 늘어납니다. 새 요금제를 추가할 때마다 DDL을 변경해야 합니다.
 
 **주의: 한도 체크는 항상 `org_entitlement.feature_limits`만 읽어야 합니다.**
 
@@ -193,7 +193,7 @@ const limit = product.features.daily_uploads; // product_feature 직접 조회 �
 
 왜 이 규칙이 있을까요? 요금제가 중간에 바뀌거나 관리자가 특정 조직에 한도를 특별히 늘려줬을 때, `product_feature`는 기본값이라 반영이 안 됩니다. `org_entitlement.feature_limits`가 "이 조직의 현재 실제 한도"의 최종 진실이기 때문입니다.
 
-> 💡 **한 줄 요약**: feature_limits는 이 조직에 적용된 기능 한도의 최종 진실이며, JSON으로 저장해 요금제 변경 없이 유연하게 관리합니다.
+> 💡 **한 줄 요약**: feature_limits는 이 조직에 적용된 기능 한도의 최종 진실이며, JSONB로 저장해 요금제 변경 없이 유연하게 관리합니다.
 
 ---
 

@@ -21,7 +21,7 @@ tags:
 
 RAG 벡터는 **단일 `academy_lectures` collection을 모든 org가 공유**하되, 각 point의 payload에 `org_id`·`teacher_pk`를 저장하고 **검색 시 payload 필터로 격리**한다. collection을 테넌트마다 쪼개지 않는다.
 
-> [[multitenancy-pool|MySQL Pool 모델]]과 같은 철학 — "물리 분리"가 아니라 "공유 + 행/payload 단위 격리".
+> [[multitenancy-pool|Postgres Pool 모델]]과 같은 철학 — "물리 분리"가 아니라 "공유 + 행/payload 단위 격리".
 
 ---
 
@@ -76,7 +76,7 @@ RAG는 세 격리 요건을 동시에 만족해야 한다: ① org 간 격리(A�
 
 ## 왜 B인가
 
-학원 수가 수십~수천으로 늘어도 운영 복잡도가 일정하고, 원장 cross-강사 분석을 막지 않는다. 격리 실패 위험(필터 누락)은 "물리 분리"가 아니라 "필수 타입 + 코드 리뷰 + 통합 테스트"로 막는다 — MySQL Pool 모델에서 `org_pk NOT NULL`로 막는 것과 동일한 접근.
+학원 수가 수십~수천으로 늘어도 운영 복잡도가 일정하고, 원장 cross-강사 분석을 막지 않는다. 격리 실패 위험(필터 누락)은 "물리 분리"가 아니라 "필수 타입 + 코드 리뷰 + 통합 테스트"로 막는다 — Postgres Pool 모델에서 RLS + `org_pk NOT NULL`로 막는 것과 동일한 접근.
 
 필수 안전장치:
 - `org_id`·`teacher_pk` **payload index 생성**(없으면 필터 시 전체 스캔).
@@ -101,7 +101,7 @@ RAG는 세 격리 요건을 동시에 만족해야 한다: ① org 간 격리(A�
 
 ## 관련 문서
 
-- [[multitenancy-pool]] — MySQL 행 격리(같은 "공유+격리" 철학)
+- [[multitenancy-pool]] — Postgres 행 격리(같은 "공유+격리" 철학)
 - [[cross-tenant-separation]] — 필터를 의도적으로 벗어나는 cross-org 집계 처리
 > 소스 문서
 - [[schema-reference]] — §G 저장소별 격리 구현 현황
