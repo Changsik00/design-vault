@@ -50,7 +50,7 @@ flowchart LR
     D2["Qdrant(벡터) · Neo4j(그래프) · Redis(캐시) · S3(자산)"]
   end
 
-  APIS -->|"@aiagent/db-platform 패키지로만 접근"| CORE
+  APIS -->|"@db-platform 패키지로만 접근"| CORE
   APIS --> DOMAIN
 ```
 

@@ -72,7 +72,7 @@ PostgreSQL 16 (단일 인스턴스)
 ```
 소비 앱 (academy-api, agent-api, …)
   ↓ 유일한 경로
-@aiagent/db-platform 패키지
+@db-platform 패키지
   ├── identity/index.ts   (getOrganization, getMembership, …)
   ├── billing/index.ts    (getEntitlement, getFeatureLimit, …)
   └── gates.ts            (getPermissionContext, checkGateA/B)
@@ -934,7 +934,7 @@ ACTIVE   ──취소 요청──▶ CANCELED
 |---|---|---|
 | 도메인 테이블 `org_pk NOT NULL`(예외 3부류) | ✅ 설계 확정 | `packages/db-platform/src/*/schema.ts` 검증 완료 |
 | Gate 함수 전체 `orgPk` 파라미터 필수 | ✅ 설계 확정 | `getActiveMembership(userPk, orgPk)` 등 |
-| cross-tenant 쿼리 CI 린트 | 🟡 미도입 (P1) | `@aiagent/db-platform` 패키지 내 쿼리 정적 분석 미완 |
+| cross-tenant 쿼리 CI 린트 | 🟡 미도입 (P1) | `@db-platform` 패키지 내 쿼리 정적 분석 미완 |
 
 ```sql
 -- 올바른 패턴: 모든 쿼리에 org_pk 필터

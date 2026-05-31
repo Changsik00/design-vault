@@ -63,7 +63,7 @@ explainPermission(userPk, orgPk, service, action, resource) → {
 ```
 
 - 입력 = 권한 판정 입력 그대로, 출력 = **gate별 통과/사유 trace**.
-- UI는 ops 제품 소관. 그러나 **이 trace 계약은 platform_db가 제공**한다(`@aiagent/db-platform`의 함수로).
+- UI는 ops 제품 소관. 그러나 **이 trace 계약은 platform_db가 제공**한다(`@db-platform`의 함수로).
 
 ### Entitlement Debugger
 
