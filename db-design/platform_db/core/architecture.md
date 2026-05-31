@@ -103,14 +103,15 @@ flowchart TD
 
 ### 1.3 데이터 일관성 — billing → projection → auth
 
-```
-PG Webhook (Stripe/Toss 이벤트 스트림)
-    ↓
-org_subscription  ← Billing Canonical Truth (provider, invoice, retry, grace, refund, trial, ...)
-    ↓ [이벤트 투영 — 단일 트랜잭션]
-org_entitlement   ← Authorization Projection (status, valid_until, grace_until, feature_limits)
-    ↓
-Gate B            ← can_access? 만 판단. subscription 직접 조회 금지(불변식 #4)
+```mermaid
+flowchart TD
+  W["PG(결제대행사) Webhook<br/>Stripe / Toss 이벤트 스트림"]
+  S["org_subscription — Billing Canonical Truth<br/>provider · invoice · retry · grace · refund · trial …"]
+  E["org_entitlement — Authorization Projection<br/>status · valid_until · grace_until · feature_limits"]
+  G["Gate B — can_access? 만 판단<br/>subscription 직접 조회 금지 (불변식 #4)"]
+  W --> S
+  S -->|"이벤트 투영 · 단일 Postgres 트랜잭션"| E
+  E --> G
 ```
 
 - **왜 분리하나**: billing 복잡도(provider/invoice/retry)를 auth에서 격리 → auth 단일 테이블 조회, billing 장애 격리, 캐시 단순. ([[auth-projection]])
