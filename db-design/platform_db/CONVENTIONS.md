@@ -57,7 +57,23 @@ aliases: [ ... ]
 ```
 
 - **난이도는 `초 · 중 · 고`** 세 단계만. (이전 표기 기초/중급/고급은 폐기.)
-- 모든 문서 태그에 `platform-db` 루트 태그 + 타입 태그(`core`/`decision`/`explainer`) 포함.
+- 모든 문서 태그에 `platform-db` 루트 태그 + 타입 태그(`core`/`decision`/`explainer`/`index`) 포함.
+
+---
+
+## 🏷️ 태그 택소노미
+
+태그는 4계층으로 답니다. Obsidian 태그 패널·그래프에서 일관되게 걸리도록 아래 어휘를 씁니다.
+
+| 계층 | 예 | 규칙 |
+|---|---|---|
+| 루트 | `platform-db` | 모든 문서 필수 |
+| 타입 | `core` · `decision` · `explainer` · `index` | 문서 종류 하나 |
+| 도메인 | `auth` · `authz` · `billing` · `security` · `compliance` · `operations` · `data-modeling` | 주제(디렉토리와 일치) |
+| 개념·우선순위 | `rbac` · `abac` · `rebac` · `rls` · `multitenancy` · `transaction` · `pii` · `p0`~`p2` … | 0개 이상, 검색 가속용 |
+
+- 새 개념 태그는 기존 어휘를 먼저 찾아 재사용합니다(동의어 난립 금지).
+- 우선순위(`p0`~`p2`)는 explainer에서 선택적으로.
 
 ---
 
