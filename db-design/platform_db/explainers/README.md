@@ -39,7 +39,7 @@ tags: [platform-db, explainer, index]
 | 🟡 중 | [[webhook-processing]] | PG 웹훅 수신·처리 흐름 |
 | 🔴 고 | [[consistency-model]] | 강한 일관성 vs 결과적 일관성 (왜 단일 트랜잭션 + outbox) |
 
-## 🗄️ 데이터 모델링 (Data Modeling)  ·  8편
+## 🗄️ 데이터 모델링 (Data Modeling)  ·  9편
 
 | 난이도 | 문서 | 한 줄 |
 |---|---|---|
@@ -51,6 +51,7 @@ tags: [platform-db, explainer, index]
 | 🟡 중 | [[index-design]] | 인덱스 설계 원리 |
 | 🟡 중 | [[partitioning]] | DB 파티셔닝 (audit_log 파티션 예시) |
 | 🔴 고 | [[online-ddl-migration]] | 온라인 DDL과 대형 테이블 마이그레이션 위험 |
+| 🔴 고 | [[concurrency-control]] | 동시성 제어 — race condition과 락·조건부 UPDATE |
 
 ## 🛡️ 보안·격리 (Security)  ·  3편
 
@@ -80,4 +81,4 @@ tags: [platform-db, explainer, index]
 | 🔴 고 | [[testing-strategy]] | 실제 DB에서, 그리고 운영 DB에서 안전하게 테스트하기 |
 
 ---
-> 총 37편. 새 문서는 해당 주제 디렉토리에 두고 frontmatter에 `difficulty: 초|중|고`를 넣으면 이 인덱스 분류에 들어갑니다.
+> 총 38편. 새 문서는 해당 주제 디렉토리에 두고 frontmatter에 `difficulty: 초|중|고`를 넣으면 이 인덱스 분류에 들어갑니다.

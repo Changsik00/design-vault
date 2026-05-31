@@ -36,7 +36,7 @@
 | [core/operability.md](./db-design/platform_db/core/operability.md) | 운영 가능성(O1~O6) |
 | [core/bdd-scenarios.md](./db-design/platform_db/core/bdd-scenarios.md) · [e2e-journeys.md](./db-design/platform_db/core/e2e-journeys.md) | 행위 검증(화이트박스 · 블랙박스) |
 | [decisions/](./db-design/platform_db/decisions/) | 의사결정 13편 — "왜 이렇게 했나"(비교+결정) |
-| [explainers/](./db-design/platform_db/explainers/) | **학습 문서 37편** — Q&A + 용어 + 테스트, 난이도별 |
+| [explainers/](./db-design/platform_db/explainers/) | **학습 문서 38편** — Q&A + 용어 + 테스트, 난이도별 |
 
 ## 📚 학습 경로
 

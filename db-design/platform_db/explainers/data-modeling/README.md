@@ -21,5 +21,6 @@ tags:
 | 🟡 중 | [[index-design]] | 인덱스 설계 원리 |
 | 🟡 중 | [[partitioning]] | 선언적 파티셔닝 (audit_log) |
 | 🔴 고 | [[online-ddl-migration]] | 온라인 DDL과 대형 테이블 마이그레이션 |
+| 🔴 고 | [[concurrency-control]] | 동시성 제어 — race condition과 락·조건부 UPDATE |
 
 > 전체 주제 인덱스: [explainers 마스터 인덱스](../README.md) · 작성 규약: [CONVENTIONS](../../CONVENTIONS.md)
