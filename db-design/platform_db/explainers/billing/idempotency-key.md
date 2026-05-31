@@ -108,15 +108,15 @@ aliases:
 
 ```sql
 CREATE TABLE payment_ledger (
-  pk              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk          BIGINT UNSIGNED NOT NULL,
+  pk              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk          BIGINT NOT NULL,
   idempotency_key VARCHAR(255) NOT NULL,    -- 중복 방지 키
-  type            ENUM('CHARGE','REFUND','CHARGEBACK','CREDIT') NOT NULL,
-  amount_minor    BIGINT NOT NULL,
-  status          ENUM('PENDING','SUCCEEDED','FAILED') NOT NULL,
+  type            VARCHAR(16) NOT NULL CHECK (type IN ('CHARGE','REFUND','CHARGEBACK','CREDIT')),
+  amount_minor    BIGINT NOT NULL,          -- 환불은 음수 가능 → CHECK 없음
+  status          VARCHAR(16) NOT NULL CHECK (status IN ('PENDING','SUCCEEDED','FAILED')),
   -- ...
 
-  UNIQUE KEY uq_idempotency_key (idempotency_key)  -- ← 이게 핵심
+  CONSTRAINT uq_idempotency_key UNIQUE (idempotency_key)  -- ← 이게 핵심
 );
 ```
 
@@ -131,7 +131,7 @@ CREATE TABLE payment_ledger (
 두 번째 동일 요청 (재시도):
   idempotency_key = "pay_org42_sub7_20260528_abc123"  ← 똑같은 키
   → INSERT INTO payment_ledger ... 
-  → ERROR: Duplicate entry for key 'uq_idempotency_key'
+  → ERROR: duplicate key value violates unique constraint "uq_idempotency_key" (SQLSTATE 23505)
   → 앱이 에러를 잡아서 → "이미 처리됨"으로 인식 → 기존 결제 결과 반환
 ```
 
@@ -271,12 +271,12 @@ const charge = await stripe.paymentIntents.create({
 
 ```sql
 CREATE TABLE pg_webhook_event (
-  pg_provider  ENUM('TOSS','STRIPE','PAYPAL') NOT NULL,
+  pg_provider  VARCHAR(16) NOT NULL CHECK (pg_provider IN ('TOSS','STRIPE','PAYPAL')),
   event_id     VARCHAR(255) NOT NULL,          -- PG가 준 고유 이벤트 ID
-  status       ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED') NOT NULL,
+  status       VARCHAR(16) NOT NULL CHECK (status IN ('RECEIVED','PROCESSED','SKIPPED','FAILED')),
   -- ...
 
-  UNIQUE KEY uq_provider_event (pg_provider, event_id)  -- 중복 방지
+  CONSTRAINT uq_provider_event UNIQUE (pg_provider, event_id)  -- 중복 방지
 );
 ```
 

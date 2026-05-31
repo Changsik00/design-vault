@@ -86,7 +86,8 @@ UPDATE org_entitlement SET status = 'ACTIVE';  -- WHERE 빠짐!
 ```sql
 -- audit_log 테이블의 break_glass 컬럼
 break_glass BOOLEAN NOT NULL DEFAULT FALSE,
-INDEX idx_audit_break_glass (break_glass, created_at)
+-- 인덱스는 테이블 밖에서 별도 생성 (PG)
+CREATE INDEX idx_audit_break_glass ON audit_log (break_glass, created_at);
 ```
 
 대부분의 감사 로그는 `break_glass=FALSE`입니다. `TRUE`인 로그만 빠르게 조회할 수 있도록 전용 인덱스를 만들었습니다.
@@ -247,10 +248,10 @@ SELECT
   COUNT(*) AS action_count,
   MIN(created_at) AS first_action,
   MAX(created_at) AS last_action,
-  JSON_ARRAYAGG(DISTINCT action) AS actions
+  jsonb_agg(DISTINCT action) AS actions
 FROM audit_log
 WHERE break_glass = TRUE
-  AND created_at >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
+  AND created_at >= now() - INTERVAL '1 month'
 GROUP BY actor_pk
 ORDER BY action_count DESC;
 ```

@@ -226,7 +226,7 @@ BEGIN;
   -- 3. 권한 활성화
   INSERT INTO org_entitlement (org_pk, service, status, valid_until, feature_limits)
   VALUES (?, 'ACADEMY', 'ACTIVE', ?, ?)
-  ON DUPLICATE KEY UPDATE status = 'ACTIVE', ...;
+  ON CONFLICT (org_pk, product_code) DO UPDATE SET status = 'ACTIVE', ...;
 
   -- 4. perm_version 갱신
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
@@ -310,7 +310,7 @@ setInterval(processOutboxEvents, 30_000);
 같은 이벤트를 두 워커가 동시에 처리하면 이메일이 두 번 발송될 수 있습니다. 이를 막으려면 잠금이 필요합니다:
 
 ```typescript
-// FOR UPDATE SKIP LOCKED 패턴 (MySQL 지원)
+// FOR UPDATE SKIP LOCKED 패턴 (Postgres 네이티브)
 const events = await db.execute(sql`
   SELECT * FROM outbox_event
   WHERE status = 'PENDING'
@@ -322,7 +322,7 @@ const events = await db.execute(sql`
 // → 같은 이벤트를 두 워커가 동시에 가져가지 않음
 ```
 
-architecture.md에서 `FOR UPDATE SKIP LOCKED`는 PostgreSQL 네이티브 지원이지만 MySQL 8에서도 동작한다고 명시되어 있습니다.
+architecture.md에서 `FOR UPDATE SKIP LOCKED`는 PostgreSQL 네이티브 기능으로, 워커가 PENDING row를 경합 없이 나눠 가져가는 표준 방식이라고 명시되어 있습니다.
 
 **실패 시 재시도:**
 
@@ -392,7 +392,7 @@ billing_event   → "이미 일어난 일 기록" (감사 로그)
 
 ```sql
 CREATE TABLE billing_event (
-  event_type ENUM('SUBSCRIPTION_START','SUBSCRIPTION_END','PLAN_CHANGE','INVOICE_PAID','INVOICE_FAILED'),
+  event_type VARCHAR(32) NOT NULL CHECK (event_type IN ('SUBSCRIPTION_START','SUBSCRIPTION_END','PLAN_CHANGE','INVOICE_PAID','INVOICE_FAILED')),
   -- ...
 );
 ```
@@ -407,8 +407,8 @@ CREATE TABLE billing_event (
 ```sql
 CREATE TABLE outbox_event (
   event_type VARCHAR(80),  -- 'subscription.activated', 'user.deleted', ...
-  status     ENUM('PENDING','SENT','FAILED'),  -- 작업 상태
-  sent_at    TIMESTAMP,                         -- 처리 완료 시각
+  status     VARCHAR(16) NOT NULL CHECK (status IN ('PENDING','SENT','FAILED')),  -- 작업 상태
+  sent_at    TIMESTAMPTZ,                       -- 처리 완료 시각
   -- ...
 );
 ```

@@ -124,9 +124,9 @@ INSERT INTO user_consent_event (
   'platform.marketing_email',
   'REVOKED',              -- ← 새 이벤트: 철회
   '2025-06',
-  X'7F000001',
+  '127.0.0.1',            -- INET (PG 네이티브 IP 타입)
   'Mozilla/5.0...',
-  NOW()
+  now()
 );
 -- 기존 GRANTED 행은 그대로 남아있음
 ```
@@ -229,13 +229,13 @@ INSERT INTO user_consent_event (
   'pg.toss_third_party',
   'GRANTED',
   '2025-06',
-  JSON_OBJECT(
+  jsonb_build_object(
     'recipient', 'Toss Payments 주식회사',
     'purpose', '결제 처리, 사기 방지, 전자금융거래법 준수',
-    'items', JSON_ARRAY('이름', '이메일', '결제금액', '결제수단'),
+    'items', jsonb_build_array('이름', '이메일', '결제금액', '결제수단'),
     'retention', '결제 완료 후 5년 (전자금융거래법 §22)'
   ),
-  NOW()
+  now()
 );
 ```
 

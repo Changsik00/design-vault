@@ -77,7 +77,7 @@ aliases:
     UPDATE organization SET perm_version = perm_version + 1
     INSERT outbox_event     (알림·영수증 발송 요청)
   COMMIT;
-  UPDATE pg_webhook_event SET status='PROCESSED', processed_at=NOW()
+  UPDATE pg_webhook_event SET status='PROCESSED', processed_at=now()
 ```
 
 1단계에서 200 OK를 빨리 반환하는 이유가 있습니다. PG는 정해진 시간(보통 5~10초) 안에 응답이 없으면 "실패"로 보고 재전송합니다. 처리가 오래 걸리더라도 "잘 받았어"를 먼저 알리는 것입니다.
@@ -103,7 +103,7 @@ Toss ──웹훅 3차 전송──▶ 우리 서버 (이미 처리됨)
 `pg_webhook_event` 테이블의 이 [[index-design|인덱스]]가 핵심입니다:
 
 ```sql
-UNIQUE KEY uq_provider_event (pg_provider, event_id)
+CONSTRAINT uq_provider_event UNIQUE (pg_provider, event_id)
 -- pg_provider: 'TOSS', 'STRIPE', 'PAYPAL'
 -- event_id: PG가 이벤트마다 부여한 고유 ID (예: 'evt_1abc2def3...')
 ```
@@ -199,7 +199,7 @@ function verifyTossSignature(
 
 ```sql
 INDEX idx_pg_webhook_status (status, created_at)
--- 워커 쿼리: WHERE status='FAILED' AND created_at < NOW() - INTERVAL 1 HOUR
+-- 워커 쿼리: WHERE status='FAILED' AND created_at < now() - INTERVAL '1 hour'
 -- 인덱스가 없으면 전체 테이블을 뒤지는 풀스캔 발생
 ```
 
@@ -261,7 +261,7 @@ SELECT
   COUNT(*) AS cnt,
   MIN(created_at) AS oldest
 FROM pg_webhook_event
-WHERE created_at > NOW() - INTERVAL 24 HOUR
+WHERE created_at > now() - INTERVAL '24 hours'
 GROUP BY status;
 ```
 

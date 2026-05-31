@@ -63,13 +63,13 @@ aliases:
 ```sql
 -- usage_snapshot: 집계된 결과만 (O4)
 CREATE TABLE usage_snapshot (
-  org_pk      BIGINT UNSIGNED NOT NULL,
-  service     VARCHAR(32)     NOT NULL,  -- 'ACADEMY' 등
-  metric      VARCHAR(64)     NOT NULL,  -- 'members', 'daily_uploads' ...
-  period      VARCHAR(16)     NOT NULL,  -- '2026-05', '2026-05-30' (집계 단위)
-  used        BIGINT          NOT NULL,  -- 분자: 지금까지 쓴 양
-  `limit`     BIGINT          NULL,      -- 분모: feature_limits 대비 (NULL=무제한)
-  source_ts   DATETIME        NOT NULL,  -- 이 집계가 어느 시점 기준인지
+  org_pk      BIGINT      NOT NULL,
+  service     VARCHAR(32) NOT NULL,  -- 'ACADEMY' 등
+  metric      VARCHAR(64) NOT NULL,  -- 'members', 'daily_uploads' ...
+  period      VARCHAR(16) NOT NULL,  -- '2026-05', '2026-05-30' (집계 단위)
+  used        BIGINT      NOT NULL CHECK (used >= 0),  -- 분자: 지금까지 쓴 양
+  "limit"     BIGINT      NULL CHECK ("limit" >= 0),   -- 분모: feature_limits 대비 (NULL=무제한)
+  source_ts   TIMESTAMPTZ NOT NULL,  -- 이 집계가 어느 시점 기준인지
   PRIMARY KEY (org_pk, service, metric, period)
 );
 ```
@@ -200,7 +200,7 @@ if (current > limit) throw new LimitExceeded();   // 즉각·정확
 
 ```
 정합성 검증: |snapshot.used - Σ(서비스 raw 이벤트)| ≤ 허용오차
-신선도 검증: NOW() - snapshot.source_ts ≤ 집계주기 + 여유
+신선도 검증: now() - snapshot.source_ts ≤ 집계주기 + 여유
 ```
 
 > 💡 **한 줄 요약**: 결과적 일관성이라도 스냅샷은 서비스 raw 합과 허용 오차 내에서 맞아야 합니다. `source_ts`로 "언제 기준 집계인지"를 추적해 정합성과 신선도를 모두 검증합니다.
@@ -258,11 +258,17 @@ expect(snap.limit).toBeDefined();
 
 ```typescript
 // platform_db에는 raw 이벤트 테이블이 없어야 함 (O4 분리 원칙)
-const tables = await platformDb.query(`SHOW TABLES LIKE '%upload_event%'`);
+const tables = await platformDb.query(`
+  SELECT tablename FROM pg_catalog.pg_tables
+  WHERE schemaname = 'public' AND tablename LIKE '%upload_event%'
+`);
 expect(tables.length).toBe(0);   // raw는 서비스 DB 소관
 
 // platform에는 집계 스냅샷만
-const snapExists = await platformDb.query(`SHOW TABLES LIKE 'usage_snapshot'`);
+const snapExists = await platformDb.query(`
+  SELECT tablename FROM pg_catalog.pg_tables
+  WHERE schemaname = 'public' AND tablename = 'usage_snapshot'
+`);
 expect(snapExists.length).toBe(1);
 ```
 

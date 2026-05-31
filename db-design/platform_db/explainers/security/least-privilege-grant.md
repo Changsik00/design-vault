@@ -105,22 +105,24 @@ DB도 똑같습니다. 흔한 실수는 모든 앱이 `root`나 전권 계정 �
 
 **(1) 이 4종에는 전용 INSERT-only 계정으로만 write.** `audit_log`는 `audit_append` 계정으로만, `payment_ledger`·`billing_event`는 `ledger_append`로만, `user_consent_event`는 `consent_append`로만 INSERT합니다. 이 계정들은 **INSERT 권한 외에는 아무것도 없습니다.** UPDATE도 DELETE도 GRANT되지 않았습니다.
 
-**(2) `platform_rw`에서 이 4종에 대한 UPDATE를 테이블 단위로 미부여.** `platform_rw`는 `platform_db`의 다른 테이블에는 UPDATE를 할 수 있지만, **append-only 4종 테이블에 대해서만은 UPDATE GRANT를 받지 못합니다.** MySQL의 GRANT는 테이블 단위로 줄 수 있어서, "DB 전체에 UPDATE를 주되 이 4개 테이블만 빼고"가 가능합니다.
+**(2) `platform_rw`에서 이 4종에 대한 UPDATE를 테이블 단위로 미부여.** `platform_rw`는 `platform_db`의 다른 테이블에는 UPDATE를 할 수 있지만, **append-only 4종 테이블에 대해서만은 UPDATE GRANT를 받지 못합니다.** PostgreSQL의 GRANT는 테이블 단위로 줄 수 있어서, "DB 전체에 UPDATE를 주되 이 4개 테이블만 빼고"가 가능합니다.
 
 ```sql
 -- platform_rw 에게 DB의 (append-only 4종을 제외한) 테이블에만 UPDATE 부여
 -- → audit_log·payment_ledger·billing_event·user_consent_event 에는 UPDATE를 주지 않음
 
--- INSERT 전용 계정 예시
-GRANT INSERT ON platform_db.payment_ledger TO 'ledger_append'@'%';
-GRANT INSERT ON platform_db.billing_event  TO 'ledger_append'@'%';
+-- INSERT 전용 계정(롤) 예시
+GRANT INSERT ON payment_ledger TO ledger_append;
+GRANT INSERT ON billing_event  TO ledger_append;
 -- ledger_append 에게 부여된 권한은 INSERT 뿐. UPDATE·DELETE 없음.
 
 -- 결과: 앱이 버그로 이런 쿼리를 던져도...
 UPDATE payment_ledger SET amount_minor = 0 WHERE pk = 42;
--- → ERROR 1142 (42000): UPDATE command denied to user 'ledger_append'@'...'
+-- → ERROR: permission denied for table payment_ledger (SQLSTATE 42501)
 --   권한이 없어서 거부됨. 데이터는 안전.
 ```
+
+PostgreSQL은 여기서 한 발 더 나아가 **컬럼 단위 GRANT/REVOKE**도 지원합니다(`GRANT UPDATE (status) ON ...`) — 필요하면 특정 컬럼만 쓰기 허용/차단할 수 있습니다.
 
 즉 **"UPDATE 금지"가 코드 규약이 아니라 DB 권한이 됩니다.** 앱이 아무리 버그가 있어도, 누가 악의로 UPDATE를 시도해도, **권한이 없으니 DB가 거부**합니다.
 
@@ -165,13 +167,18 @@ DB가 강제하는 것의 강점은 *"앱이 무엇을 하든 상관없다"*는 
 
 ## Q5. 그냥 트리거(BEFORE UPDATE)로 막으면 안 되나요? 왜 GRANT인가요?
 
-좋은 질문입니다. MySQL에는 트리거라는 기능이 있어서, "이 테이블에 UPDATE가 들어오면 에러를 던져라"를 선언할 수도 있습니다.
+좋은 질문입니다. PostgreSQL에는 트리거라는 기능이 있어서, "이 테이블에 UPDATE가 들어오면 에러를 던져라"를 선언할 수도 있습니다.
 
 ```sql
 -- 이렇게 막을 수도 있어 보입니다...
+CREATE FUNCTION block_ledger_update() RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'payment_ledger is append-only';
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER block_ledger_update BEFORE UPDATE ON payment_ledger
-FOR EACH ROW SIGNAL SQLSTATE '45000'
-  SET MESSAGE_TEXT = 'payment_ledger is append-only';
+FOR EACH ROW EXECUTE FUNCTION block_ledger_update();
 ```
 
 `platform_db`는 이 방식을 **의도적으로 거부**했습니다. `architecture.md §2.4 비목표`에 명시돼 있습니다:
@@ -197,6 +204,8 @@ Level 3: 외부 WORM     → root의 물리적 변조까지 차단 (P2/T4)
 
 이 문서가 다루는 GRANT는 Level 1 — 일상에서 가장 많이 발생하는 위협(앱 버그, 일반 계정 탈취, injection)을 막는 1차 방어선입니다.
 
+**왜 append-only를 RLS로 하지 않고 GRANT로 하나요?** RLS와 GRANT는 막는 축이 다릅니다. RLS는 *어느 행이 보이는가*(행 가시성)를 제어하지, "UPDATE 문장을 거부"하지는 못합니다. append-only는 "이 테이블에 UPDATE/DELETE라는 *문장 자체*를 못 쓰게" 하는 것이라 **문장 단위 권한(GRANT)**의 일입니다. 그래서 테넌트 격리는 RLS([[multitenancy-rls]]), 불변성은 GRANT로 — 서로 다른 도구입니다.
+
 > 💡 **한 줄 요약**: 트리거는 root가 `DROP TRIGGER`로 지울 수 있어 채택 안 했습니다. GRANT는 권한 변경을 파이프라인으로 묶고 CI로 회귀를 감시할 수 있어 더 견고합니다. root 위협은 위층(해시 체인·WORM)이 담당합니다.
 
 ---
@@ -207,17 +216,20 @@ GRANT로 막아도 한 가지 위험이 남습니다: **나중에 누군가 실�
 
 이걸 막는 게 **GRANT 점검 CI(least-privilege regression test)**입니다. 핵심 아이디어: *DB에 실제 부여된 권한을 조회해서, append-only 4종에 위험한 권한이 없는지 CI가 매번 단언한다.*
 
-권한 조회는 MySQL의 표준 메타데이터 뷰인 **`information_schema.table_privileges`**(또는 `schema_privileges`)로 합니다. 이 뷰에는 "어느 계정(GRANTEE)이 어느 테이블에 어떤 권한(PRIVILEGE_TYPE)을 가졌는지"가 행으로 들어 있습니다.
+권한 조회는 PostgreSQL의 표준 메타데이터 뷰인 **`information_schema.table_privileges`**(또는 `has_table_privilege()` 함수)로 합니다. PG에서는 grantee가 호스트 없는 **롤명**(`platform_rw`)으로 들어갑니다. 이 뷰에는 "어느 롤(grantee)이 어느 테이블에 어떤 권한(privilege_type)을 가졌는지"가 행으로 들어 있습니다.
 
 ```sql
 -- platform_rw 가 append-only 4종에 UPDATE를 가졌는지 조회
 -- 결과가 한 행이라도 나오면 회귀 = CI 실패여야 함
 SELECT grantee, table_schema, table_name, privilege_type
 FROM information_schema.table_privileges
-WHERE grantee LIKE "'platform_rw'@%"
+WHERE grantee = 'platform_rw'
   AND privilege_type = 'UPDATE'
   AND table_name IN ('audit_log','payment_ledger','billing_event','user_consent_event');
 -- 기대 결과: 0 행 (UPDATE 권한이 없어야 정상)
+
+-- 또는 함수로 직접 단언:
+-- SELECT has_table_privilege('platform_rw', 'payment_ledger', 'UPDATE');  -- false 여야 정상
 ```
 
 이 검사가 막는 위협의 본질은 **권한의 분리(separation of duties)**입니다. "기록을 추가하는 권한(append 계정)"과 "기록을 수정하는 권한"이 같은 계정에 모이면 안 된다는 원칙이고, CI가 그 분리가 무너지지 않았는지 매 배포마다 확인합니다.
@@ -236,7 +248,7 @@ WHERE grantee LIKE "'platform_rw'@%"
 | WORM (Write Once, Read Many) | "한 번 쓰면 못 고침" — append-only의 스토리지 용어. |
 | INSERT-only 계정 | INSERT 권한만 가진 전용 계정. 우리 설계의 `audit_append`·`ledger_append`·`consent_append`. |
 | 테이블 단위 GRANT | "DB 전체에 UPDATE를 주되 이 테이블만 제외" 식으로 테이블별로 권한을 다르게 주는 것. |
-| `information_schema.table_privileges` | 어떤 계정이 어떤 테이블에 어떤 권한을 가졌는지 담은 MySQL 표준 메타데이터 뷰. |
+| `information_schema.table_privileges` | 어떤 롤이 어떤 테이블에 어떤 권한을 가졌는지 담은 PostgreSQL 표준 메타데이터 뷰(`has_table_privilege()` 함수도 동일 용도). |
 | least-privilege regression test | 권한이 의도치 않게 늘어났는지(회귀) CI에서 자동 검사하는 테스트. |
 | separation of duties(직무 분리) | "기록 추가"와 "기록 수정" 같은 상충 권한을 한 계정에 몰지 않는 원칙. |
 | blast radius(폭발 반경) | 한 계정이 탈취됐을 때 피해가 미치는 범위. 최소권한이 이걸 줄인다. |
@@ -259,7 +271,7 @@ WHERE grantee LIKE "'platform_rw'@%"
 -- 검사 A: platform_rw 는 append-only 4종에 UPDATE 권한이 없어야 한다
 SELECT grantee, table_name, privilege_type
 FROM information_schema.table_privileges
-WHERE grantee LIKE "'platform_rw'@%"
+WHERE grantee = 'platform_rw'
   AND privilege_type = 'UPDATE'
   AND table_name IN ('audit_log','payment_ledger','billing_event','user_consent_event');
 -- ✅ PASS 조건: 결과가 0행
@@ -267,21 +279,20 @@ WHERE grantee LIKE "'platform_rw'@%"
 ```
 
 ```sql
--- 검사 B: append 계정은 INSERT 외의 권한을 갖지 않아야 한다
+-- 검사 B: append 계정(롤)은 INSERT 외의 권한을 갖지 않아야 한다
 SELECT grantee, table_name, privilege_type
 FROM information_schema.table_privileges
-WHERE grantee IN ("'ledger_append'@'%'","'audit_append'@'%'","'consent_append'@'%'")
+WHERE grantee IN ('ledger_append','audit_append','consent_append')
   AND privilege_type <> 'INSERT';
 -- ✅ PASS 조건: 결과가 0행 (INSERT 외 권한이 없어야 함)
 ```
 
 ```sql
--- 검사 C: DELETE 권한은 전 계정에서 0이어야 한다 (논리삭제만, §M)
+-- 검사 C: DELETE 권한은 전 계정(롤)에서 0이어야 한다 (논리삭제만, §M)
 SELECT grantee, table_schema, table_name
 FROM information_schema.table_privileges
 WHERE privilege_type = 'DELETE';
 -- ✅ PASS 조건: 결과가 0행
--- (스키마 권한 레벨도 함께 보려면 information_schema.schema_privileges 도 동일 검사)
 ```
 
 CI에서의 의사코드:
@@ -290,7 +301,7 @@ CI에서의 의사코드:
 // least-privilege regression test (CI에서 마이그레이션 직후 실행)
 const updateLeaks = await db.execute(sql`
   SELECT table_name FROM information_schema.table_privileges
-  WHERE grantee LIKE "'platform_rw'@%"
+  WHERE grantee = 'platform_rw'
     AND privilege_type = 'UPDATE'
     AND table_name IN ('audit_log','payment_ledger','billing_event','user_consent_event')
 `);
@@ -305,20 +316,20 @@ expect(deleteAnywhere.rows).toHaveLength(0); // 전 계정 DELETE 0
 
 ### 2. 실제 거부 검증 — append 계정으로 UPDATE를 시도하면 권한 거부
 
-권한 조회뿐 아니라, *실제로 막히는지*도 확인합니다. `ledger_append` 계정으로 접속해 UPDATE를 던져 권한 오류가 나는지 단언합니다.
+권한 조회뿐 아니라, *실제로 막히는지*도 확인합니다. `ledger_append` 롤로 접속해 UPDATE를 던져 권한 오류가 나는지 단언합니다.
 
 ```typescript
-// ledger_append 커넥션으로 UPDATE 시도 → 권한 거부(ER_TABLEACCESS_DENIED_ERROR)여야 함
+// ledger_append 커넥션으로 UPDATE 시도 → 권한 거부(SQLSTATE 42501)여야 함
 await expect(
-  ledgerAppendConn.execute(
-    sql`UPDATE payment_ledger SET amount_minor = 0 WHERE pk = 1`
+  ledgerAppendConn.query(
+    `UPDATE payment_ledger SET amount_minor = 0 WHERE pk = 1`
   )
-).rejects.toThrow(/command denied|ER_TABLEACCESS_DENIED/i);
+).rejects.toThrow(/permission denied for table|42501/i);
 
 // INSERT 는 정상 동작해야 함 (append 은 허용)
 await expect(
-  ledgerAppendConn.execute(
-    sql`INSERT INTO payment_ledger (org_pk, type, amount_minor, currency, idempotency_key)
+  ledgerAppendConn.query(
+    `INSERT INTO payment_ledger (org_pk, type, amount_minor, currency, idempotency_key)
         VALUES (1, 'CHARGE', 10000, 'KRW', 'test-key-1')`
   )
 ).resolves.toBeDefined();

@@ -292,7 +292,7 @@ P2/T4: ISMS-P/GDPR 계약 체결 시 S3 Object Lock 적재 (Level 3)
 CREATE TABLE audit_log (
   -- ... 다른 컬럼들 ...
   break_glass BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at  DATETIME NOT NULL DEFAULT (NOW()),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- prev_hash CHAR(64),  ← 아직 없음 (미구현 예정)
   -- row_hash  CHAR(64),  ← 아직 없음 (미구현 예정)
   PRIMARY KEY (pk, created_at)
@@ -302,12 +302,12 @@ CREATE TABLE audit_log (
 **현재 방어 수단: app 계정 최소 권한**
 
 ```sql
--- DB 계정별 권한 (schema-reference.md §M)
-GRANT SELECT, INSERT ON platform_db.audit_log TO 'platform_rw'@'%';
+-- DB 롤별 권한 (schema-reference.md §M)
+GRANT SELECT, INSERT ON audit_log TO platform_rw;
 -- UPDATE, DELETE 권한 없음 → app이 실수로도 수정 불가
 
--- audit 전용 계정은 INSERT만
-GRANT INSERT ON platform_db.audit_log TO 'audit_append'@'%';
+-- audit 전용 롤은 INSERT만
+GRANT INSERT ON audit_log TO audit_append;
 ```
 
 이 방어의 한계는 DB 자체에 접근할 수 있는 DBA나 root 계정은 막을 수 없다는 점입니다.
@@ -316,8 +316,8 @@ GRANT INSERT ON platform_db.audit_log TO 'audit_append'@'%';
 
 ```
 1. audit_log에 prev_hash, row_hash 컬럼 추가
-2. INSERT 시 앱 레이어에서 SHA-256 계산 후 저장
-   (PostgreSQL이었다면 pgcrypto로 DB 내에서 처리 가능)
+2. INSERT 시 SHA-256 계산 후 저장
+   (PG `pgcrypto.digest(..., 'sha256')`로 DB 네이티브 처리 가능 — 선택적으로 생성 컬럼/트리거로 자동화. 앱 레이어 계산도 가능)
 3. 월 1회 배치 검증:
    audit_log 전체를 순서대로 읽어 해시 체인 재계산
    불일치 row 발견 시 → 보안 알림 발송
