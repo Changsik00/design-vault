@@ -28,6 +28,7 @@ tags:
 
 - **[index](./index.md)** — 카테고리별 카탈로그(core·decisions·explainers·entities). 무엇이 어디 있는지의 **단일 정본**. 디렉토리마다 README를 두지 않는다(중복·드리프트 방지).
 - **[log](./log.md)** — append-only 시간순 기록(Ingest/Query/Lint). 새 항목은 **맨 위에** 추가, 기존 항목 수정 금지.
+- **[[glossary]]** — 약어·용어 사전(A–Z 빠른 찾기 + 카테고리별, 정본 문서 링크). 새 용어 정의 시 여기에 등재.
 - **[README](./README.md)** — 사람용 소개·강의·배포 랜딩(GitHub 진입점).
 
 ## 🔄 3 연산
