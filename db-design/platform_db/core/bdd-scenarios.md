@@ -21,6 +21,7 @@ tags:
 > **현행 스키마 반영**: `membership.platform_role` + `service_membership.role_code` 2-layer 구조 적용  
 > **현행 스키마**: `organization.type`에서 `ACADEMY` 제거 → `COMPANY/TEAM/PERSONAL`  
 > **현행 스키마**: `delegation_grant.capability` 네임스페이스 `ACADEMY.*` 적용  
+> **엔진 전제**: **PostgreSQL 우선**. 타입은 `BIGINT GENERATED ALWAYS AS IDENTITY`·`TIMESTAMPTZ`·`JSONB`·`BYTEA`·`VARCHAR+CHECK`, 격리는 MVCC 트랜잭션, 에러는 SQLSTATE(중복 23505·CHECK 23514·FK 23503·권한 42501)로 표기한다. MySQL 등가물이 유용한 곳에만 `🐬 **MySQL이라면**` 콜아웃으로 병기한다. (주의: `pg_provider`·`pg_webhook_event`·"PG webhook"의 PG는 결제대행사(payment gateway)이며 DB Postgres와 무관하다.)  
 > Gherkin 형식 (English keywords, Korean content). 통합 테스트: vitest + supertest
 
 >
@@ -173,13 +174,13 @@ Scenario: 허용된 capability로 delegation_grant INSERT
 Scenario: 허용되지 않은 capability 거부
   When delegation_grant INSERT: capability='ADMIN_ALL'
 
-  Then MySQL CHECK constraint 위반으로 INSERT 실패
+  Then CHECK constraint 위반(SQLSTATE 23514)으로 INSERT 실패
   And delegation_grant row가 생성되지 않는다
 
 Scenario: 구 네임스페이스(prefix 없음) 거부
   When delegation_grant INSERT: capability='PUBLISH_VIDEO'
 
-  Then MySQL CHECK constraint 위반으로 INSERT 실패 (ACADEMY. prefix 필수)
+  Then CHECK constraint 위반(SQLSTATE 23514)으로 INSERT 실패 (ACADEMY. prefix 필수)
 ```
 
 ### P3-02: 위임 회수 → DB 재검증에서 차단
@@ -205,7 +206,7 @@ Scenario: 만료 기간 지난 delegation_grant
 
   When getDelegationGrants(granteePk=20, orgPk=1)가 호출된다
 
-  Then expires_at < NOW() 인 grant는 결과에서 제외된다
+  Then expires_at < now() 인 grant는 결과에서 제외된다
   And 비즈니스 로직에서 해당 capability가 없는 것으로 평가된다
 ```
 
@@ -240,7 +241,7 @@ Scenario: 동일 webhook event_id 재수신
 
   When 동일 event_id의 webhook이 다시 수신된다
 
-  Then pg_webhook_event INSERT가 UNIQUE constraint 위반으로 실패 (또는 SKIPPED 처리)
+  Then pg_webhook_event INSERT가 UNIQUE 제약 위반(SQLSTATE 23505)으로 실패 (또는 ON CONFLICT DO NOTHING으로 SKIPPED 처리)
   And payment_ledger에 중복 INSERT 없음
   And org_entitlement 중복 변경 없음
 ```
@@ -312,7 +313,7 @@ Scenario: audit_log row UPDATE 시도
 
   When UPDATE audit_log SET result='ALLOW' WHERE pk=9999 실행
 
-  Then 앱 레이어에서 UPDATE 차단 (DB 계정 권한 없음)
+  Then DB 계정에 audit_log UPDATE 미부여로 "permission denied"(SQLSTATE 42501) 반환 (GRANT 강제, 앱 레이어 우회 불가)
   And row가 변경되지 않는다
 ```
 
@@ -324,9 +325,11 @@ Scenario: 특정 월 감사 로그 조회
 
   When SELECT * FROM audit_log WHERE org_pk=1 AND created_at BETWEEN '2026-05-01' AND '2026-05-31'
 
-  Then p202605 파티션만 스캔 (Explain: partitions=p202605)
+  Then 선언적 파티션 가지치기(partition pruning)로 audit_log_2026_05 파티션만 스캔 (EXPLAIN에 다른 월 파티션 미등장)
   And 전체 테이블 스캔 없음
 ```
+
+> 🐬 **MySQL이라면**: `EXPLAIN ... PARTITIONS`의 `partitions=p202605` 컬럼으로 가지치기를 확인한다. Postgres는 `EXPLAIN` 계획 트리에서 제외된 파티션이 아예 등장하지 않는 방식으로 prune된다.
 
 ---
 
@@ -572,7 +575,7 @@ Scenario: 회원 탈퇴 요청 → 즉시 처리 + 30일 배치
 
   When 탈퇴 API가 호출된다 (단일 트랜잭션)
 
-  Then identity_user.status='DELETED', deleted_at=NOW()
+  Then identity_user.status='DELETED', deleted_at=now()
   And membership(user_pk=10) 전체 status='SUSPENDED'
   And service_membership(user_pk=10) 전체 status='SUSPENDED'
   And delegation_grant(grantee_pk=10 또는 grantor_pk=10) 전체 status='REVOKED'
@@ -596,7 +599,7 @@ Scenario: 탈퇴한 이메일로 재가입
 
   When 동일 email='kim@example.com'으로 신규 가입 시도
 
-  Then UNIQUE KEY uq_identity_user_email이 email=NULL이라 충돌 없음
+  Then UNIQUE 제약 uq_identity_user_email이 email=NULL이라 충돌 없음 (Postgres: NULL은 서로 distinct로 취급)
   And 신규 identity_user row INSERT 성공 (새 pk, 새 firebase_uid)
   And 이전 user_pk=10과 연관 없음
 ```
@@ -638,7 +641,7 @@ Scenario: 사용자가 Firebase 인증 이메일 링크 클릭 후 API 재호출
   When 사용자가 다음 API를 호출한다 (FirebaseJwtGuard 통과)
 
   Then FirebaseJwtGuard가 JWT의 email_verified=true를 감지한다
-  And identity_user.email_verified=true, email_verified_at=NOW() UPDATE
+  And identity_user.email_verified=true, email_verified_at=now() UPDATE
   And 이후 이메일 인증 필요 기능 접근 허용
 ```
 
@@ -651,7 +654,7 @@ Scenario: 전화번호 OTP 인증 성공
 
   When 사용자가 올바른 OTP를 입력한다
 
-  Then identity_user.phone_verified=true, phone_verified_at=NOW() UPDATE
+  Then identity_user.phone_verified=true, phone_verified_at=now() UPDATE
   And audit_log에 (action='phone_verified', result='ALLOW') INSERT
 
 Scenario: 전화번호 OTP 만료 후 시도
@@ -841,7 +844,7 @@ Scenario: 이상 로그인(평소와 다른 국가 IP) 감사 기록
   When 로그인 후처리 훅이 실행된다
 
   Then audit_log에 (actor_type='HUMAN', actor_pk=50, action='anomalous_login', result='ALLOW', ip=<해외 IP raw>) INSERT
-  And ip는 VARBINARY(16) raw로 저장된다 (PIPA 감사 요건)
+  And ip는 INET(PG 네이티브 IP 타입)로 저장된다 (PIPA 감사 요건)
 
   Note: 차단/추가인증 정책은 Firebase·Gateway 레이어. platform_db는 감사 기록만 소유.
 ```
@@ -914,7 +917,7 @@ Scenario: 본사-지점 및 지주-자회사 org 계층 등록
 
   Then 3건 모두 INSERT 성공
   And getChildOrgs(parentOrgPk=1)는 child_org_pk=2, child_org_pk=3을 반환한다 (idx_org_relation_child 활용)
-  And relation_type은 ENUM('HQ_BRANCH','HOLDING') 두 값만 허용된다
+  And relation_type은 VARCHAR+CHECK(relation_type IN ('HQ_BRANCH','HOLDING'))로 두 값만 허용된다
 ```
 
 > org_relation은 HQ_BRANCH/HOLDING 2단만. 깊은 다단계 그래프는 범위 밖(requirements §7.2 ORGGRAPH-1).
@@ -1030,7 +1033,7 @@ Scenario: daily_uploads 한도 도달 시 거부, 미만이면 허용
   Note: limit_value/feature_limits 값이 NULL이면 무제한으로 평가(product_feature.limit_value NULL 규약)
 ```
 
-> ABAC-3: org_entitlement.feature_limits(JSON)가 한도 SSOT(불변식 #10, D.12 설계포인트). product_feature/plan_definition.default_limits는 초기값 복사용일 뿐 런타임 조회 금지. 실시간 사용량 카운터·차단은 서비스 DB.
+> ABAC-3: org_entitlement.feature_limits(JSONB)가 한도 SSOT(불변식 #10, D.12 설계포인트). product_feature/plan_definition.default_limits는 초기값 복사용일 뿐 런타임 조회 금지. 실시간 사용량 카운터·차단은 서비스 DB.
 
 **커버**: ABAC-3
 
@@ -1049,7 +1052,7 @@ Scenario: visibility=PRIVATE 리소스는 소유자만, PUBLISHED는 org 멤버 
   And org_pk 경계(ABAC-2)는 두 강의 모두 충족하나 visibility 속성에서 추가 필터링된다
 ```
 
-> ABAC-5: visibility 속성은 리소스(서비스 DB)에 있고 Gate C(CASL)가 read 평가에 결합. org 경계(ABAC-2) 통과 후에도 visibility로 추가 필터. [검증주의] platform_db 문서의 academy_db.lecture 템플릿(L.1)에는 visibility 컬럼이 명시돼 있지 않다(status ENUM('DRAFT','PUBLISHED','ARCHIVED')만 존재). visibility는 academy_db 실제 스키마의 도메인 속성으로 전제하며, platform_db DDL 정합 대상 아님(서비스 DB 소유 — A.1 cross-DB 규칙).
+> ABAC-5: visibility 속성은 리소스(서비스 DB)에 있고 Gate C(CASL)가 read 평가에 결합. org 경계(ABAC-2) 통과 후에도 visibility로 추가 필터. [검증주의] platform_db 문서의 academy_db.lecture 템플릿(L.1)에는 visibility 컬럼이 명시돼 있지 않다(status VARCHAR+CHECK('DRAFT','PUBLISHED','ARCHIVED')만 존재). visibility는 academy_db 실제 스키마의 도메인 속성으로 전제하며, platform_db DDL 정합 대상 아님(서비스 DB 소유 — A.1 cross-DB 규칙).
 
 **커버**: ABAC-5
 
@@ -1114,14 +1117,14 @@ Scenario: 한 구독에 ACADEMY PRO SKU + 추가 좌석 SKU를 묶어 번들 구
 
   When 번들 구독 생성이 단일 트랜잭션으로 실행된다
 
-  Then org_subscription에 INSERT: (pk=500, org_pk=1, payer_user_pk=10, status='ACTIVE', pg_provider='TOSS', current_period_start=NOW(), current_period_end=+30일)
+  Then org_subscription에 INSERT: (pk=500, org_pk=1, payer_user_pk=10, status='ACTIVE', pg_provider='TOSS', current_period_start=now(), current_period_end=+30일)
   And org_subscription 행에는 sku_pk 컬럼이 존재하지 않는다 (불변식 #11 — 진실 원천은 subscription_item)
   And subscription_item에 INSERT: (subscription_pk=500, sku_pk=100, quantity=1, status='ACTIVE')
   And subscription_item에 INSERT: (subscription_pk=500, sku_pk=101, quantity=5, status='ACTIVE')
   And subscription_item의 UNIQUE KEY uq_sub_sku (subscription_pk, sku_pk)에 의해 동일 (500,100) 중복 INSERT는 거부된다
 ```
 
-> §D.13 org_subscription에 sku_pk 없음(불변식 #11) 확인. payer_user_pk·status·pg_provider·current_period_start/end 모두 실재 컬럼. §D.14 subscription_item UNIQUE uq_sub_sku(subscription_pk, sku_pk) 정확. product_sku.status ENUM('ACTIVE','RETIRED')에 'ACTIVE' 유효.
+> §D.13 org_subscription에 sku_pk 없음(불변식 #11) 확인. payer_user_pk·status·pg_provider·current_period_start/end 모두 실재 컬럼. §D.14 subscription_item UNIQUE uq_sub_sku(subscription_pk, sku_pk) 정확. product_sku.status VARCHAR+CHECK('ACTIVE','RETIRED')에 'ACTIVE' 유효.
 
 **커버**: BILL-1 · BILL-3
 
@@ -1165,7 +1168,7 @@ Scenario: BASIC → PRO 플랜 업그레이드 즉시 적용
   And 변경은 current_period_end를 기다리지 않고 즉시 유효하다
 ```
 
-> payment_ledger.type='CHARGE'/status='SUCCEEDED'(§D.17), subscription_item.status='CANCELED'(§D.14 ENUM에 존재), org_entitlement.plan_code/feature_limits(§D.12), billing_event.event_type='PLAN_CHANGE'/plan_code(§D.16) 모두 실재. plan_definition.default_limits→entitlement.feature_limits 복사·perm_version bump는 §F.1 단일 트랜잭션 패턴과 일치.
+> payment_ledger.type='CHARGE'/status='SUCCEEDED'(§D.17), subscription_item.status='CANCELED'(§D.14 CHECK 어휘에 존재), org_entitlement.plan_code/feature_limits(§D.12), billing_event.event_type='PLAN_CHANGE'/plan_code(§D.16) 모두 실재. plan_definition.default_limits→entitlement.feature_limits 복사·perm_version bump는 §F.1 단일 트랜잭션 패턴과 일치.
 
 **커버**: BILL-7  ·  ⚠️ 구현 후 활성화
 
@@ -1219,7 +1222,7 @@ Scenario: ±5분 이내 webhook은 정상 처리
   And pg_webhook_event.status가 최종 'PROCESSED'로 기록된다
 ```
 
-> pg_webhook_event.signature_ok·status ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED')·payload_json·pg_provider ENUM('TOSS','STRIPE','PAYPAL')(§D.18) 모두 실재. audit_log.actor_type='SYSTEM'/action(VARCHAR100)/result='DENY'(§D.8) 유효. replay tolerance는 §F.4 외 핸들러 코드 규약으로 schema와 모순 없음.
+> pg_webhook_event.signature_ok·status VARCHAR+CHECK('RECEIVED','PROCESSED','SKIPPED','FAILED')·payload_json(JSONB)·pg_provider VARCHAR+CHECK('TOSS','STRIPE','PAYPAL')(§D.18) 모두 실재. audit_log.actor_type='SYSTEM'/action(VARCHAR100)/result='DENY'(§D.8) 유효. replay tolerance는 §F.4 외 핸들러 코드 규약으로 schema와 모순 없음.
 
 **커버**: BILL-9 · BILL-4  ·  ⚠️ 구현 후 활성화
 
@@ -1240,11 +1243,11 @@ Scenario: PROMO source — 프로모션 무료 체험 access
 
   When checkGateB(orgPk=2, service='ACADEMY')가 호출된다
 
-  Then true 반환 (source 무관, status='ACTIVE' AND valid_until > NOW())
+  Then true 반환 (source 무관, status='ACTIVE' AND valid_until > now())
   And valid_until 경과 후 배치가 status='EXPIRED'로 전환하면 Gate B는 402를 반환한다
 ```
 
-> org_entitlement.source ENUM('SUBSCRIPTION','PROMO','MANUAL','FREE')(§D.12) 정확. Gate B 판정 status IN('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until>NOW())(§E.2·불변식 #9)와 일치. source 무관 entitlement 권위(불변식 #4)·EXPIRED 전환 시 402(§F.3) 정합.
+> org_entitlement.source VARCHAR+CHECK('SUBSCRIPTION','PROMO','MANUAL','FREE')(§D.12) 정확. Gate B 판정 status IN('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until>now())(§E.2·불변식 #9)와 일치. source 무관 entitlement 권위(불변식 #4)·EXPIRED 전환 시 402(§F.3) 정합.
 
 **커버**: BILL-10
 
@@ -1298,7 +1301,7 @@ Scenario: 런타임 한도 판단은 org_entitlement.feature_limits만 읽는다
   And plan_definition.default_limits(30)는 런타임에 조회되지 않는다 (불변식 #10 — 복사 후 권위는 entitlement)
 ```
 
-> plan_definition.default_limits JSON NOT NULL/plan_code/is_active(§D.15), org_entitlement.feature_limits/plan_code/source='SUBSCRIPTION'(§D.12), product_sku.plan_code(§D.11) 모두 실재. 불변식 #10(최초 복사 후 entitlement가 SSOT, plan_definition 런타임 직접 조회 금지)과 정확히 일치.
+> plan_definition.default_limits JSONB NOT NULL/plan_code/is_active(§D.15), org_entitlement.feature_limits/plan_code/source='SUBSCRIPTION'(§D.12), product_sku.plan_code(§D.11) 모두 실재. 불변식 #10(최초 복사 후 entitlement가 SSOT, plan_definition 런타임 직접 조회 금지)과 정확히 일치.
 
 **커버**: BILL-1 · BILL-3
 
@@ -1361,7 +1364,7 @@ Scenario: 권한 판정 중 DB 재검증 오류는 ERROR로 audit_log에 기록
   And ERROR는 텔레메트리가 아니라 보안유의 lane(audit_log)으로 기록된다 (관측성 O6 DENY/ERROR 급증 감시 근거)
 ```
 
-> 기존 P5-01이 다루지 않은 result ENUM 세 번째 값 ERROR. 관측성 O6(DENY/ERROR 급증 감시) 근거.
+> 기존 P5-01이 다루지 않은 result CHECK 어휘 세 번째 값 ERROR. 관측성 O6(DENY/ERROR 급증 감시) 근거.
 
 **커버**: AUD-2 · SEC-3
 
@@ -1379,10 +1382,10 @@ Scenario: 운영자 read는 샘플링 대상이 아니라 전건 audit_log
     meta_json={who:..., when:..., why:'CS 문의 대응'}
   And 운영자 행위는 컴플라이언스 audit 100%로 보존된다
 
-  Note: operator plane·Support Action 미구현(OPER-1/SUPP-1 🔴). actor_type='OPERATOR' ENUM 값은 §D.8 DDL에 존재.
+  Note: operator plane·Support Action 미구현(OPER-1/SUPP-1 🔴). actor_type='OPERATOR' CHECK 어휘 값은 §D.8 DDL에 존재.
 ```
 
-> operator plane·Support Action 미구현(OPER-1/SUPP-1 🔴). actor_type='OPERATOR' ENUM 값은 §D.8 DDL에 실재.
+> operator plane·Support Action 미구현(OPER-1/SUPP-1 🔴). actor_type='OPERATOR' CHECK 어휘 값은 §D.8 DDL에 실재.
 
 **커버**: AUD-2 · OPER-1 · SUPP-1  ·  ⚠️ 구현 후 활성화
 
@@ -1401,10 +1404,10 @@ Scenario: 거부 이벤트를 분산추적 trace와 상관
   And trace_id로 분산추적 시스템의 스팬과 audit row가 1:1로 상관된다
   And audit_event_id로 동일 요청의 여러 audit row(Gate별)가 묶인다
 
-  Note: trace_id·audit_event_id 전용 컬럼은 §D.8에 미구현(AUD-3 🟡). 현행은 meta_json JSON 경유.
+  Note: trace_id·audit_event_id 전용 컬럼은 §D.8에 미구현(AUD-3 🟡). 현행은 meta_json(JSONB) 경유.
 ```
 
-> trace_id·audit_event_id 전용 컬럼은 §D.8 DDL에 없음(AUD-3 🟡 P1). meta_json JSON 경유가 유일 경로 — 환각 아닌 의도적 우회.
+> trace_id·audit_event_id 전용 컬럼은 §D.8 DDL에 없음(AUD-3 🟡 P1). meta_json(JSONB) 경유가 유일 경로 — 환각 아닌 의도적 우회.
 
 **커버**: AUD-3  ·  ⚠️ 구현 후 활성화
 
@@ -1439,7 +1442,7 @@ Scenario: platform_rw 계정이 payment_ledger row를 UPDATE 시도
 
   When platform_rw가 UPDATE payment_ledger SET status='FAILED' WHERE pk=500 을 실행한다
 
-  Then MySQL이 권한 거부 오류를 반환한다 (platform_rw에 payment_ledger UPDATE 미부여, §M)
+  Then Postgres가 권한 거부 오류 "permission denied for table payment_ledger"(SQLSTATE 42501)를 반환한다 (platform_rw에 payment_ledger UPDATE 미부여, §M)
   And row가 변경되지 않는다
   And 정정이 필요하면 ledger_append(INSERT only)로 REFUND/CHARGEBACK 신규 row를 추가해야 한다 (append-only)
 
@@ -1459,7 +1462,7 @@ Scenario: platform_rw 계정이 billing_event를 사후 수정 시도
 
   When platform_rw가 UPDATE billing_event SET event_type='INVOICE_PAID' WHERE pk=700 을 실행한다
 
-  Then MySQL이 권한 거부 오류를 반환한다 (platform_rw에 billing_event UPDATE 미부여, §M)
+  Then Postgres가 권한 거부 오류 "permission denied for table billing_event"(SQLSTATE 42501)를 반환한다 (platform_rw에 billing_event UPDATE 미부여, §M)
   And row가 변경되지 않는다
   And billing_event write는 ledger_append(INSERT only) 계정으로만 가능하다
   And lifecycle 정정은 신규 event_type row INSERT로만 표현된다 (append-only)
@@ -1478,7 +1481,7 @@ Scenario: platform_rw 계정이 consent row를 UPDATE/DELETE 시도
 
   When platform_rw가 UPDATE user_consent_event SET action='REVOKED' WHERE user_pk=10 을 실행한다
 
-  Then MySQL이 권한 거부 오류를 반환한다 (platform_rw에 user_consent_event UPDATE 미부여, §M)
+  Then Postgres가 권한 거부 오류 "permission denied for table user_consent_event"(SQLSTATE 42501)를 반환한다 (platform_rw에 user_consent_event UPDATE 미부여, §M)
   And DELETE도 어떤 계정에서도 거부된다 (전 계정 DELETE 0, §M)
   And 철회는 consent_append로 (consent_type='platform.marketing_email', action='REVOKED') 신규 row를 INSERT해 표현한다
   And 최신 created_at의 action이 현재 동의 상태(PIPA §37 철회권 증거)다
@@ -1490,28 +1493,28 @@ Scenario: platform_rw 계정이 consent row를 UPDATE/DELETE 시도
 
 **커버**: CON-1 · SEC-3  ·  ⚠️ 구현 후 활성화
 
-### 14-10: ⚠️ 월 파티션 자동추가 배치 — p_future REORGANIZE
+### 14-10: ⚠️ 월 파티션 자동추가 배치 — 다음 달 PARTITION OF 선제 생성
 
 ```gherkin
 Scenario: 월초 배치가 audit_log에 다음 달 파티션을 추가
-  Given audit_log의 마지막 명시 파티션이 p202606 (VALUES LESS THAN '2026-07-01 00:00:00')이고
-  And 그 뒤에 p_future (VALUES LESS THAN MAXVALUE) 단일 파티션만 존재한다
+  Given audit_log가 created_at 기준 선언적 RANGE 파티션(PARTITION BY RANGE)이고
+  And 마지막 명시 파티션이 audit_log_2026_06 (FROM '2026-06-01' TO '2026-07-01')이다
   And 현재 2026-06-01 월초 배치가 트리거된다
 
   When 파티션 자동추가 배치가 실행된다:
-    ALTER TABLE audit_log REORGANIZE PARTITION p_future INTO (
-      PARTITION p202607 VALUES LESS THAN ('2026-08-01 00:00:00'),
-      PARTITION p_future VALUES LESS THAN (MAXVALUE)
-    )
+    CREATE TABLE audit_log_2026_07 PARTITION OF audit_log
+      FOR VALUES FROM ('2026-07-01 00:00:00+09') TO ('2026-08-01 00:00:00+09');
 
-  Then p202607 파티션이 신설되고 p_future가 MAXVALUE로 재생성된다
-  And 기존 p202601~p202606 데이터는 이동·손실 없이 유지된다 (p_future가 비어 있어 REORGANIZE 비용 최소)
-  And 2026-07 데이터가 p_future 단독 흡수되지 않아 INSERT 성능 저하가 방지된다
+  Then audit_log_2026_07 파티션이 선제적으로 신설된다
+  And 기존 audit_log_2026_01~_06 데이터는 이동·손실 없이 유지된다 (선언적 파티션은 자식 테이블 ATTACH라 기존 데이터 재배치 없음)
+  And 2026-07 데이터가 들어올 때 대응 파티션이 없어 INSERT가 실패하는 사태가 방지된다
 
-  Note: 파티션 자동추가 미구현(§D.8 ⚠️, §N.2). p_future가 비기 전에 선제 실행해야 비용이 작다.
+  Note: 파티션 자동추가 미구현(§D.8 ⚠️, §N.2). 다음 달이 시작되기 전 선제 실행해야 INSERT 누락이 없다.
 ```
 
-> §D.8: p_future 단독 파티션, 월별 자동생성 배치 미구현(약 3개월 뒤 p_future 단독 흡수→INSERT 성능 저하). operability O3·§N.2: 월초 REORGANIZE PARTITION p_future 배치.
+> 🐬 **MySQL이라면**: `p_future(VALUES LESS THAN MAXVALUE)` 캐치올 파티션을 두고 `ALTER TABLE ... REORGANIZE PARTITION p_future INTO (...)`로 분할한다. Postgres 선언적 파티셔닝은 캐치올 없이 `CREATE TABLE ... PARTITION OF`로 다음 달 파티션을 미리 붙인다(미생성 구간 INSERT는 23514/무파티션 오류로 실패하므로 선제 생성이 관건).
+
+> §D.8: 선언적 RANGE 파티션, 월별 자동생성 배치 미구현(미생성 시 다음 달 INSERT 실패 위험). operability O3·§N.2: 월초 `CREATE TABLE ... PARTITION OF` 배치.
 
 **커버**: AUD-1 · RETN-1  ·  ⚠️ 구현 후 활성화
 
@@ -1519,22 +1522,25 @@ Scenario: 월초 배치가 audit_log에 다음 달 파티션을 추가
 
 ```gherkin
 Scenario: 보존기간 경과한 월 파티션을 WORM EXPORT 후 DROP하여 파기
-  Given audit_log에 보존기간(5년, ISMS-P)을 넘긴 p202601 파티션이 존재한다
+  Given audit_log에 보존기간(5년, ISMS-P)을 넘긴 audit_log_2026_01 파티션이 존재한다
   And 해당 파티션 데이터는 더 이상 컴플라이언스 보존 의무가 없다
-  And p202601 파티션 데이터가 외부 WORM 스토리지로 EXPORT 완료된 상태다 (§H.2)
+  And audit_log_2026_01 파티션 데이터가 외부 WORM 스토리지로 EXPORT 완료된 상태다 (§H.2)
 
   When 보존·파기 배치가 migrator 계정으로 실행된다:
-    ALTER TABLE audit_log DROP PARTITION p202601
+    ALTER TABLE audit_log DETACH PARTITION audit_log_2026_01;
+    DROP TABLE audit_log_2026_01;
 
-  Then p202601 파티션과 그 안의 audit row 전체가 platform_db에서 물리적으로 파기된다
-  And 파티션 DROP은 row 단위 DELETE가 아니므로 append-only/DELETE 0 원칙(§M)과 충돌하지 않는다 (DDL 권한, migrator 계정 전용)
+  Then audit_log_2026_01 파티션과 그 안의 audit row 전체가 platform_db에서 물리적으로 파기된다
+  And DETACH 후 DROP TABLE은 row 단위 DELETE가 아니므로 append-only/DELETE 0 원칙(§M)과 충돌하지 않는다 (DDL 권한, migrator 계정 전용)
   And 외부 WORM EXPORT 본은 별도 보존·파기 정책을 따른다 (§H.2)
   And 다른 월 파티션은 영향받지 않는다
 
-  Note: retention 배치 미구현(operability O3 🔴). §H.2 'EXPORT 후 DROP' 원칙 준수. DROP PARTITION은 migrator 계정(DDL)·CI/CD 내에서만.
+  Note: retention 배치 미구현(operability O3 🔴). §H.2 'EXPORT 후 DROP' 원칙 준수. 파티션 DETACH/DROP은 migrator 계정(DDL)·CI/CD 내에서만.
 ```
 
-> retention 배치 미구현(operability O3 🔴). §H.2: audit_log는 외부 WORM EXPORT 선행 후에만 파티션 DROP. DROP PARTITION은 migrator 계정(DDL)·CI/CD 내에서만(§M).
+> 🐬 **MySQL이라면**: `ALTER TABLE audit_log DROP PARTITION p202601` 한 문장으로 즉시 파기한다. Postgres 선언적 파티션은 `DETACH PARTITION`으로 부모에서 떼어낸 뒤 `DROP TABLE`로 자식 테이블을 제거한다(논블로킹 운영 시 `DETACH ... CONCURRENTLY` 사용 가능).
+
+> retention 배치 미구현(operability O3 🔴). §H.2: audit_log는 외부 WORM EXPORT 선행 후에만 파티션 파기. 파티션 DETACH + DROP TABLE은 migrator 계정(DDL)·CI/CD 내에서만(§M).
 
 **커버**: AUD-1 · RETN-1  ·  ⚠️ 구현 후 활성화
 
@@ -1574,7 +1580,7 @@ Scenario: 만 14세 미만 사용자가 법정대리인 동의 완료 후 가입
       "child_birth_year": 2013
     }
   And platform.terms_of_service·platform.privacy_policy·platform.third_party_firebase GRANTED row도 함께 INSERT
-  And 모든 row에 ip(VARBINARY), user_agent 기록
+  And 모든 row에 ip(INET), user_agent 기록
   And row는 이후 UPDATE·DELETE 불가 (append-only, consent_append 계정)
 ```
 
@@ -1626,7 +1632,7 @@ Scenario: 제3자 제공 동의 meta_json에 retention 누락 시 INSERT 차단
   Given consent_type='pg.stripe_third_party' 동의를 기록하려 한다
   And meta_json={"recipient":"Stripe Inc.","purpose":"해외 결제 처리","items":["email","card_last4"]} (retention 누락)
 
-  When user_consent_event INSERT 전 JSON Schema 검증이 실행된다 (MySQL JSON은 구조 강제 없음 — app-level 검증이 권위)
+  When user_consent_event INSERT 전 JSON Schema 검증이 실행된다 (Postgres JSONB도 구조 강제 없음 — app-level 검증이 권위)
 
   Then 제3자 제공 스키마(required: recipient, purpose, items, retention) 검증 실패
   And 422 Unprocessable Entity ("제3자 제공 동의는 보유기간(retention)이 필수입니다")
@@ -1650,7 +1656,7 @@ Scenario: platform.terms_of_service는 4요건 스키마 미적용
   And meta_json=NULL이어도 INSERT 성공 (meta_json 컬럼 nullable)
 ```
 
-> CON-4의 4요건(recipient/purpose/items/retention)을 CON-13의 JSON Schema 검증으로 강제. third_party/pg.* consent_type에 대해서만 4요건 필수 스키마를 적용. MySQL JSON 컬럼은 구조 강제가 없으므로 app-level 검증이 권위.
+> CON-4의 4요건(recipient/purpose/items/retention)을 CON-13의 JSON Schema 검증으로 강제. third_party/pg.* consent_type에 대해서만 4요건 필수 스키마를 적용. Postgres JSONB 컬럼은 구조 강제가 없으므로 app-level 검증이 권위.
 
 **커버**: CON-4 · CON-13  ·  ⚠️ 구현 후 활성화
 
@@ -1661,7 +1667,7 @@ Scenario: 키 순서가 뒤섞인 meta_json이 JCS canonical로 정규화되어 
   Given 입력 meta_json={"retention":"30일","recipient":"Google Firebase","items":["email","password_hash"],"purpose":"인증"} (키 비정렬)
   And consent_type='platform.third_party_firebase'
 
-  When user_consent_event INSERT 전 RFC 8785 JCS canonicalization이 적용된다 (앱 레이어 — MySQL 해시 내장 없음)
+  When user_consent_event INSERT 전 RFC 8785 JCS canonicalization이 적용된다 (앱 레이어 — DB 측 JCS 정규화 내장 없음)
 
   Then 저장된 meta_json은 키 사전순(items, purpose, recipient, retention) + 불필요 공백 제거된 canonical form이다
   And 같은 내용을 키 순서만 바꿔 다시 canonicalize하면 byte-identical 문자열이 나온다
@@ -1785,7 +1791,7 @@ Scenario: 유효한 api_key 제시 시 SERVICE 신원으로 인증
   Then key_prefix='ak_live_'로 api_key 행을 조회한다
   And bcrypt.compare(<secret평문>, secret_hash)=true로 인증 성공한다
   And 요청 principal은 user_pk=900 (type='SERVICE')으로 확정된다
-  And api_key.last_used_at=NOW() UPDATE
+  And api_key.last_used_at=now() UPDATE
 
 Scenario: secret_hash 불일치 시 인증 거부
   Given 동일 key_prefix='ak_live_' 행이 존재한다
@@ -1826,7 +1832,7 @@ Scenario: scopes 밖 action은 Gate C에서 거부 (deny-by-default)
   And audit_log에 INSERT: actor_type='API_KEY', api_key_pk=500, action='membership_write', result='DENY'
 ```
 
-> schema 정합 통과. §J '3-gate 동일 적용' 설계포인트와 일치. Gate A=membership.status(D.4), Gate B=org_entitlement(D.12, ACTIVE/GRACE+valid_until §E.2), Gate C=scopes(JSON, §J). audit_log actor_type='API_KEY'·result ENUM('ALLOW'|'DENY') 실재. 403 Forbidden(Gate C deny)도 E.6 deny-by-default와 일치. 수정 없음.
+> schema 정합 통과. §J '3-gate 동일 적용' 설계포인트와 일치. Gate A=membership.status(D.4), Gate B=org_entitlement(D.12, ACTIVE/GRACE+valid_until §E.2), Gate C=scopes(JSONB, §J). audit_log actor_type='API_KEY'·result CHECK 어휘('ALLOW'|'DENY') 실재. 403 Forbidden(Gate C deny)도 E.6 deny-by-default와 일치. 수정 없음.
 
 **커버**: AUTHN-5 · RBAC-4  ·  ⚠️ 구현 후 활성화
 
@@ -1845,7 +1851,7 @@ Scenario: org의 entitlement가 EXPIRED면 api_key도 402로 차단
   And audit_log에 INSERT: actor_type='API_KEY', api_key_pk=500, action='lecture_read', result='DENY'
 ```
 
-> schema 정합 통과. org_entitlement.status='EXPIRED'는 D.12 ENUM('ACTIVE','GRACE','SUSPENDED','EXPIRED')에 실재. Gate B 판정식 status NOT IN ('ACTIVE','GRACE')→402는 §E.2·F.3 표(EXPIRED→차단 402)와 정확히 일치. audit_log 필드 실재. 수정 없음.
+> schema 정합 통과. org_entitlement.status='EXPIRED'는 D.12 VARCHAR+CHECK('ACTIVE','GRACE','SUSPENDED','EXPIRED')에 실재. Gate B 판정식 status NOT IN ('ACTIVE','GRACE')→402는 §E.2·F.3 표(EXPIRED→차단 402)와 정확히 일치. audit_log 필드 실재. 수정 없음.
 
 **커버**: AUTHN-5 · RBAC-4  ·  ⚠️ 구현 후 활성화
 
@@ -1860,7 +1866,7 @@ Scenario: 허용 CIDR 밖 IP에서 온 요청 차단
 
   Then secret_hash 검증은 성공했더라도 IP가 203.0.113.0/24에 속하지 않아 403 Forbidden 반환
   And 비즈니스 로직이 실행되지 않는다
-  And audit_log에 INSERT: actor_type='API_KEY', api_key_pk=500, action='api_key_ip_denied', result='DENY', ip=<198.51.100.10 VARBINARY>
+  And audit_log에 INSERT: actor_type='API_KEY', api_key_pk=500, action='api_key_ip_denied', result='DENY', ip=<198.51.100.10 BYTEA>
 
 Scenario: 허용 CIDR 안 IP는 통과
   Given 동일 api_key (allowed_ip_cidr='203.0.113.0/24')
@@ -1879,7 +1885,7 @@ Scenario: allowed_ip_cidr=NULL이면 IP 제한 없음
   And Gate A/B/C 평가로 진행한다
 ```
 
-> schema 정합 통과. allowed_ip_cidr VARCHAR(50)(§J)·audit_log.ip VARBINARY(16)(D.8) 실재. §J 설계포인트 'Confused Deputy 방어(NIST SP 800-162 환경속성)'와 일치. NULL이면 제한 미설정으로 스킵하는 동작도 nullable 컬럼 의미와 정합. 인증≠인가 원칙(인증 성공 후에도 IP 환경속성 차단)도 모순 없음. 수정 없음.
+> schema 정합 통과. allowed_ip_cidr VARCHAR(50)(§J)·audit_log.ip INET(D.8) 실재. §J 설계포인트 'Confused Deputy 방어(NIST SP 800-162 환경속성)'와 일치. NULL이면 제한 미설정으로 스킵하는 동작도 nullable 컬럼 의미와 정합. 인증≠인가 원칙(인증 성공 후에도 IP 환경속성 차단)도 모순 없음. 수정 없음.
 
 **커버**: SEC-5 · SEC-2 · ABAC-6  ·  ⚠️ 구현 후 활성화
 
@@ -1901,7 +1907,7 @@ Scenario: allowed_services 내 서비스는 통과
   Then 'ACADEMY'가 allowed_services에 포함되어 Gate A/B/C 평가로 진행한다
 ```
 
-> schema 정합 통과. allowed_services JSON(§J)·org_entitlement.service VARCHAR+CHECK(D.12, 'ACADEMY'/'MARKET' 포함) 실재. 'entitlement ACTIVE여도 키 범위 밖이면 거부'는 키 스코프(인가)와 org 권한(Gate B)이 직교한다는 설계와 정합. 수정 없음.
+> schema 정합 통과. allowed_services JSONB(§J)·org_entitlement.service VARCHAR+CHECK(D.12, 'ACADEMY'/'MARKET' 포함) 실재. 'entitlement ACTIVE여도 키 범위 밖이면 거부'는 키 스코프(인가)와 org 권한(Gate B)이 직교한다는 설계와 정합. 수정 없음.
 
 **커버**: SEC-5 · AUTHN-5  ·  ⚠️ 구현 후 활성화
 
@@ -1909,7 +1915,7 @@ Scenario: allowed_services 내 서비스는 통과
 
 ```gherkin
 Scenario: revoke된 api_key 사용 시 즉시 차단
-  Given api_key (pk=500, org_pk=1)이 방금 revoked_at=NOW(), revoked_reason='leaked_in_repo'로 UPDATE됐다
+  Given api_key (pk=500, org_pk=1)이 방금 revoked_at=now(), revoked_reason='leaked_in_repo'로 UPDATE됐다
 
   When 이 api_key로 인증을 시도한다
 
@@ -1922,11 +1928,11 @@ Scenario: expires_at 지난 api_key 차단
 
   When 이 api_key로 인증을 시도한다
 
-  Then expires_at < NOW()이므로 401 Unauthorized 반환
+  Then expires_at < now()이므로 401 Unauthorized 반환
   And audit_log에 INSERT: actor_type='API_KEY', api_key_pk=501, action='api_key_auth', result='DENY', meta_json={reason:'expired'}
 ```
 
-> schema 정합 통과. revoked_at·revoked_reason VARCHAR(255)·expires_at(§J)·audit_log.meta_json JSON(D.8) 실재. 매 요청 DB 조회로 revoked_at/expires_at 즉시 평가하므로 JWT stale window 없음 — Gate A Icebox(§E.1) 한계가 api_key에는 적용되지 않는다는 설명도 정합. 현재일 2026-05-30 기준 expires_at=2026-05-29는 만료. 수정 없음.
+> schema 정합 통과. revoked_at·revoked_reason VARCHAR(255)·expires_at(§J)·audit_log.meta_json JSONB(D.8) 실재. 매 요청 DB 조회로 revoked_at/expires_at 즉시 평가하므로 JWT stale window 없음 — Gate A Icebox(§E.1) 한계가 api_key에는 적용되지 않는다는 설명도 정합. 현재일 2026-05-30 기준 expires_at=2026-05-29는 만료. 수정 없음.
 
 **커버**: AUTHN-5 · SEC-5 · AUTHN-6  ·  ⚠️ 구현 후 활성화
 
@@ -1937,11 +1943,11 @@ Scenario: rotation 중 구키와 신키가 모두 인증된다
   Given api_key (pk=500, org_pk=1, user_pk=900, key_prefix='ak_old_', rotated_at=NULL, revoked_at=NULL, expires_at=2026-06-06)  -- 구키
   When 운영자가 rotation을 실행한다
   Then 신규 행 api_key (pk=501, org_pk=1, user_pk=900, key_prefix='ak_new_', revoked_at=NULL) INSERT
-  And 구키(pk=500)의 rotated_at=NOW() UPDATE (교체됨 표시, 아직 revoke 아님)
+  And 구키(pk=500)의 rotated_at=now() UPDATE (교체됨 표시, 아직 revoke 아님)
   And 같은 org_pk=1/user_pk=900에 두 행이 동시 유효하다 (UNIQUE 제약 없음 — 다중 키 허용)
 
   When 클라이언트가 아직 구키 'ak_old_<secret>'를 제시한다
-  Then 구키의 revoked_at=NULL, expires_at>NOW()이므로 인증 성공한다 (overlap window 내)
+  Then 구키의 revoked_at=NULL, expires_at>now()이므로 인증 성공한다 (overlap window 내)
 
   When 동일 클라이언트가 신키 'ak_new_<secret>'를 제시한다
   Then 신키로도 인증 성공한다
@@ -1949,7 +1955,7 @@ Scenario: rotation 중 구키와 신키가 모두 인증된다
 Scenario: overlap grace 종료 후 구키 revoke
   Given 구키 api_key (pk=500, rotated_at=2026-05-30)이고 overlap grace 7일이 경과했다
   When 정리 배치가 실행된다
-  Then 구키(pk=500) revoked_at=NOW(), revoked_reason='rotation_grace_expired' UPDATE
+  Then 구키(pk=500) revoked_at=now(), revoked_reason='rotation_grace_expired' UPDATE
   And 이후 구키 'ak_old_<secret>' 인증은 401로 차단된다
   And 신키(pk=501)만 유효하게 남는다
 ```
@@ -1986,7 +1992,7 @@ Scenario: type 필터로 사람·머신 활동 통계 분리 (AUD-4)
   And SYSTEM·OPERATOR 이벤트는 포함되지 않는다
 ```
 
-> schema 정합 통과. audit_log.actor_type ENUM('HUMAN','API_KEY','SYSTEM','OPERATOR')(D.8) — 'API_KEY','HUMAN' 모두 실재. D.8 주석 "SERVICE 사용자(type='SERVICE')의 행위는 'API_KEY'로 기록(어휘 매핑)"과 정확히 일치. actor_pk·api_key_pk·org_pk·action·result 컬럼 실재. 두번째 시나리오의 actor_type='API_KEY' 필터 집계가 SYSTEM/OPERATOR 제외한다는 서술도 ENUM 4종 구조와 정합. 수정 없음.
+> schema 정합 통과. audit_log.actor_type VARCHAR+CHECK('HUMAN','API_KEY','SYSTEM','OPERATOR')(D.8) — 'API_KEY','HUMAN' 모두 실재. D.8 주석 "SERVICE 사용자(type='SERVICE')의 행위는 'API_KEY'로 기록(어휘 매핑)"과 정확히 일치. actor_pk·api_key_pk·org_pk·action·result 컬럼 실재. 두번째 시나리오의 actor_type='API_KEY' 필터 집계가 SYSTEM/OPERATOR 제외한다는 서술도 CHECK 어휘 4종 구조와 정합. 수정 없음.
 
 **커버**: AUD-4 · AUD-1 · SEC-7  ·  ⚠️ 구현 후 활성화
 
@@ -2105,7 +2111,7 @@ Scenario: "결제했는데 권한 안 열림" 복구 — FINANCE 운영자가 en
 
   When 운영자가 Support Action으로 org_pk=1에 entitlement를 강제 부여한다 (사유='webhook 유실 복구')
 
-  Then org_entitlement UPSERT(UNIQUE(org_pk, product_code) ON DUPLICATE KEY UPDATE): status='ACTIVE', source='MANUAL', valid_until 갱신
+  Then org_entitlement UPSERT(ON CONFLICT (org_pk, product_code) DO UPDATE SET status=EXCLUDED.status, source=EXCLUDED.source, valid_until=EXCLUDED.valid_until): status='ACTIVE', source='MANUAL', valid_until 갱신
   And organization.perm_version이 bump된다 (§F.1 패턴)
   And audit_log에 INSERT: actor_type='OPERATOR', action='support_action_grant_entitlement', result='ALLOW',
       meta_json={who:operator_pk, when:'2026-05-30T...', why:'webhook 유실 복구', target_org_pk:1, source:'MANUAL'}
@@ -2127,14 +2133,14 @@ Scenario: 사유(why) 누락 시 Support Action 거부
 
 ```gherkin
 Scenario: audit_log 5년 경과 파티션 DROP — 파기 트리거 (EXPORT 후 DROP, §H.2)
-  Given audit_log에 p202101(2021-01) 파티션이 존재하고 created_at이 5년 이상 경과했다
+  Given audit_log에 audit_log_2021_01(2021-01) 파티션이 존재하고 created_at이 5년 이상 경과했다
   And payment_ledger에는 7년 미만 경과한 결제 원장이 있다
 
   When 월별 retention 배치가 실행된다
 
-  Then audit_log p202101 파티션이 외부 WORM 스토리지로 EXPORT된 후 ALTER TABLE audit_log DROP PARTITION p202101으로 제거된다 (행 단위 DELETE 아님, §H.2 WORM-EXPORT 후 DROP 규칙)
+  Then audit_log_2021_01 파티션이 외부 WORM 스토리지로 EXPORT된 후 DETACH PARTITION + DROP TABLE로 제거된다 (행 단위 DELETE 아님, §H.2 WORM-EXPORT 후 DROP 규칙)
   And payment_ledger는 7년 보존 기준 미달이라 파기 대상이 아니다 (append-only, 행 보존)
-  And audit_log에 INSERT: (actor_type='SYSTEM', action='retention_drop_partition', result='ALLOW', meta_json={table:'audit_log', partition:'p202101'})
+  And audit_log에 INSERT: (actor_type='SYSTEM', action='retention_drop_partition', result='ALLOW', meta_json={table:'audit_log', partition:'audit_log_2021_01'})
 
 Scenario: pg_webhook_event 90일 경과 sweeper DELETE
   Given pg_webhook_event에 created_at이 91일 전, status='PROCESSED'인 행이 존재한다
@@ -2167,7 +2173,7 @@ Scenario: 장애로 갱신이 지연되면 valid_until 복합 체크가 2차 방
 
   When checkGateB(orgPk=1, service='ACADEMY')가 호출된다
 
-  Then false 반환 (status는 ACTIVE이나 valid_until < NOW())
+  Then false 반환 (status는 ACTIVE이나 valid_until < now())
   And 402 Payment Required 반환 (배치 실패 시 영구 무료 방지, 불변식 #9)
 ```
 
@@ -2180,7 +2186,7 @@ Scenario: 학생 수 498/500 가시화 — 백오피스가 현재 사용량을 �
   Given org_entitlement (org_pk=1, service='ACADEMY', feature_limits={"students":500})
   And 서비스(academy)가 주기적으로 집계를 push한다
 
-  When usage_snapshot에 (org_pk=1, service='ACADEMY', metric='students', period='2026-05', used=498, limit=500, source_ts=NOW()) UPSERT된다
+  When usage_snapshot에 (org_pk=1, service='ACADEMY', metric='students', period='2026-05', used=498, limit=500, source_ts=now()) UPSERT된다
 
   Then 백오피스가 usage_snapshot 조회로 used=498 / limit=500을 즉시 확인한다
   And limit=500은 org_entitlement.feature_limits.students와 일치한다 (feature_limits가 런타임 권위 SSOT, 불변식 #10 — usage_snapshot.limit은 가시성용 복사값)
@@ -2266,7 +2272,7 @@ Scenario Outline: 정규화 안 된 service 문자열은 fail-closed로 거부�
 
   When <테이블>에 service='<잘못된값>' 행을 INSERT한다
 
-  Then MySQL CHECK constraint <제약명> 위반으로 INSERT가 실패한다
+  Then CHECK constraint <제약명> 위반(SQLSTATE 23514)으로 INSERT가 실패한다
   And 해당 행은 생성되지 않는다 (Gate B 핫패스로 잘못된 service가 새지 않음)
 
   Examples:
@@ -2356,7 +2362,7 @@ Scenario: 사용자가 자기 자신에게 capability를 위임할 수 없다
   When delegation_grant에 grantor_pk=10, grantee_pk=10, org_pk=1,
        capability='ACADEMY.MANAGE_MEMBERS', status='ACTIVE' 행을 INSERT한다
 
-  Then MySQL CHECK constraint chk_no_self_delegation (grantor_pk <> grantee_pk) 위반으로 INSERT가 실패한다
+  Then CHECK constraint chk_no_self_delegation (grantor_pk <> grantee_pk) 위반(SQLSTATE 23514)으로 INSERT가 실패한다
   And delegation_grant 행이 생성되지 않는다
 
 Scenario: 서로 다른 사용자 간 위임은 허용된다
@@ -2368,7 +2374,7 @@ Scenario: 서로 다른 사용자 간 위임은 허용된다
         권한 자가확대(self-escalation)를 DB 레벨에서 구조적으로 거부.
 ```
 
-> D.6 chk_no_self_delegation CHECK (grantor_pk <> grantee_pk)·status ENUM('ACTIVE','REVOKED')·capability CHECK 목록에 'ACADEMY.MANAGE_MEMBERS' 포함 모두 실재. D.7 org_relation chk_no_self_ref 대칭도 정확. 환각 없음.
+> D.6 chk_no_self_delegation CHECK (grantor_pk <> grantee_pk)·status VARCHAR+CHECK('ACTIVE','REVOKED')·capability CHECK 목록에 'ACADEMY.MANAGE_MEMBERS' 포함 모두 실재. D.7 org_relation chk_no_self_ref 대칭도 정확. 환각 없음.
 
 **커버**: REBAC-1 · REBAC-6 · 불변식 #5
 
@@ -2381,7 +2387,7 @@ Scenario: outbox_event sweeper는 SENT 후 30일 경과 행만 삭제한다
 
   When 일 1회 sweeper 배치가 실행된다
 
-  Then pk=1만 DELETE된다 (SENT AND sent_at < NOW()-30일)
+  Then pk=1만 DELETE된다 (SENT AND sent_at < now()-interval '30 days')
   And pk=2(미경과)·pk=3(PENDING)·pk=4(FAILED)는 보존된다 (미전송·실패 이벤트 유실 방지)
 
 Scenario: pg_webhook_event sweeper는 PROCESSED 후 90일 경과 행만 삭제한다
@@ -2390,7 +2396,7 @@ Scenario: pg_webhook_event sweeper는 PROCESSED 후 90일 경과 행만 삭제�
 
   When 일 1회 sweeper 배치가 실행된다
 
-  Then pk=1만 DELETE된다 (PROCESSED AND processed_at < NOW()-90일)
+  Then pk=1만 DELETE된다 (PROCESSED AND processed_at < now()-interval '90 days')
   And pk=3(FAILED)은 보존된다 — Webhook Replay 복구 경로(O2)·reconciliation 근거로 살려둔다
 
   Note: 현재 sweeper 미구현(§N.2 갭) — 미구현 시 종료 이벤트 무한 누적. outbox 종료 상태는 DDL상 'SENT'
@@ -2398,7 +2404,7 @@ Scenario: pg_webhook_event sweeper는 PROCESSED 후 90일 경과 행만 삭제�
         append-only 4종(audit_log·payment_ledger·billing_event·user_consent_event)은 sweeper 대상이 아니라 보존 매트릭스(audit 5년 등) 소관.
 ```
 
-> outbox_event.status ENUM('PENDING','SENT','FAILED')·sent_at(D.19), pg_webhook_event.status ENUM('RECEIVED','PROCESSED','SKIPPED','FAILED')·processed_at(D.18) 모두 실재. outbox 종료상태가 SENT(PROCESSED 아님)임을 정확히 구분한 note가 §N.2/O3와 일치. sweeper 미구현(§N.2)·append-only 4종 보존 매트릭스 분리 모두 정합. implemented=false 적절. 환각 없음.
+> outbox_event.status VARCHAR+CHECK('PENDING','SENT','FAILED')·sent_at(D.19), pg_webhook_event.status VARCHAR+CHECK('RECEIVED','PROCESSED','SKIPPED','FAILED')·processed_at(D.18) 모두 실재. outbox 종료상태가 SENT(PROCESSED 아님)임을 정확히 구분한 note가 §N.2/O3와 일치. sweeper 미구현(§N.2)·append-only 4종 보존 매트릭스 분리 모두 정합. implemented=false 적절. 환각 없음.
 
 **커버**: ARCH-6 · RETN-1 · BILL-4  ·  ⚠️ 구현 후 활성화
 
@@ -2423,7 +2429,7 @@ Scenario: store_purchase의 org_pk는 NOT NULL이라 격리 키 누락 행이 �
         접근하며 platform_db·academy_db와 peer 접근 금지(A.1 cross-DB 방향 규칙). 본 시나리오는 store_db 미구현이라 implemented=false.
 ```
 
-> L.4 store_purchase 컬럼 org_pk NOT NULL·product_pk·buyer_user_pk 모두 실재(명칭 정확). audit_log.result ENUM('ALLOW','DENY','ERROR')·org_pk nullable·action 컬럼 실재. §M store_rw 전용 계정·A.1 peer 금지·불변식 #3 격리 키 모두 정합. 설계 확정(미구현)이므로 implemented=false 적절. 환각 없음.
+> L.4 store_purchase 컬럼 org_pk NOT NULL·product_pk·buyer_user_pk 모두 실재(명칭 정확). audit_log.result VARCHAR+CHECK('ALLOW','DENY','ERROR')·org_pk nullable·action 컬럼 실재. §M store_rw 전용 계정·A.1 peer 금지·불변식 #3 격리 키 모두 정합. 설계 확정(미구현)이므로 implemented=false 적절. 환각 없음.
 
 **커버**: TEN-1 · TEN-2 · 불변식 #3  ·  ⚠️ 구현 후 활성화
 
@@ -2462,13 +2468,13 @@ Scenario: append-only 4종 write는 전용 INSERT-only 계정으로만 가능하
 
 ```gherkin
 Scenario: MANUAL 결제는 webhook 없이 직접 entitlement 부여
-  Given org_subscription.pg_provider 옵션은 ENUM('TOSS','STRIPE','PAYPAL','MANUAL')이다
-  And pg_webhook_event.pg_provider는 ENUM('TOSS','STRIPE','PAYPAL') — MANUAL 미포함이다
+  Given org_subscription.pg_provider 옵션은 VARCHAR+CHECK(pg_provider IN ('TOSS','STRIPE','PAYPAL','MANUAL'))이다
+  And pg_webhook_event.pg_provider는 VARCHAR+CHECK(pg_provider IN ('TOSS','STRIPE','PAYPAL')) — MANUAL 미포함이다
 
   When 운영자가 pg_provider='MANUAL'로 결제를 기록한다
 
   Then payment_ledger에 (pg_provider='MANUAL', status='SUCCEEDED') INSERT
-  And pg_webhook_event에는 대응 row가 없다 (수동 결제는 webhook 부재 — 의도적 ENUM 제외)
+  And pg_webhook_event에는 대응 row가 없다 (수동 결제는 webhook 부재 — pg_provider CHECK 어휘에서 의도적 제외)
   And org_entitlement는 동일 트랜잭션으로 활성화된다 (provider 무관 동일 흐름)
 
 Scenario: TOSS·STRIPE 결제는 동일 payment_ledger 경로로 추상화
@@ -2489,7 +2495,7 @@ Scenario: 2번째 서비스 capability는 코어 CHECK에 막힘 — 의도적 �
 
   When 'MARKET.PUBLISH_ITEM' capability로 delegation_grant INSERT를 시도한다
 
-  Then MySQL CHECK constraint 위반으로 거부된다 (코어에 MARKET 어휘 미등록)
+  Then CHECK constraint 위반(SQLSTATE 23514)으로 거부된다 (코어에 MARKET 어휘 미등록)
   And 해결은 §K ALTER로 'MARKET.*' 추가(온라인 1줄, 테이블 락 없음)
   And role→action 매핑 자체는 ROLE_PERMISSION 코드 상수가 권위라 DB 스키마 무변경 (RBAC-3)
 
