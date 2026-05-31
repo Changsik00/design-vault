@@ -328,6 +328,62 @@ function isEntitlementValid(e: OrgEntitlement | null): boolean {
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+이 결정의 핵심 보장은 **status + validUntil 복합 체크의 경계**입니다. 특히 "배치 실패로 status는 ACTIVE인데 validUntil이 만료"된 케이스가 *차단*되어야 합니다(불변식 #9). `isEntitlementValid()`는 순수 함수라 단위 테스트로 4-매트릭스를 덮고, 만료 *경계*(validUntil 직전/직후)는 실제 `TIMESTAMPTZ` 비교가 중요하므로 Testcontainers로 DB 레벨도 확인합니다.
+
+### 단위 테스트 (vitest) — 4-케이스 매트릭스 (불변식 #9)
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { isEntitlementValid } from "../src/gates";
+
+const past   = new Date(Date.now() - 60_000);
+const future = new Date(Date.now() + 60_000);
+
+describe("isEntitlementValid — status + validUntil 복합 체크", () => {
+  it("ACTIVE + 과거 validUntil → 차단 (배치 실패 안전망)", () =>
+    expect(isEntitlementValid({ status: "ACTIVE",  validUntil: past   })).toBe(false));
+  it("ACTIVE + 미래 validUntil → 통과", () =>
+    expect(isEntitlementValid({ status: "ACTIVE",  validUntil: future })).toBe(true));
+  it("GRACE + 과거 validUntil → 차단", () =>
+    expect(isEntitlementValid({ status: "GRACE",   validUntil: past   })).toBe(false));
+  it("EXPIRED + 미래 validUntil → 차단", () =>
+    expect(isEntitlementValid({ status: "EXPIRED", validUntil: future })).toBe(false));
+  it("ACTIVE + validUntil=null(무기한) → 통과", () =>
+    expect(isEntitlementValid({ status: "ACTIVE",  validUntil: null   })).toBe(true));
+});
+```
+
+### 만료 경계 (vitest + Testcontainers + Drizzle) — TIMESTAMPTZ 비교
+
+```typescript
+// 만료 1초 전과 1초 후의 같은 row가 통과→차단으로 뒤집히는지 (DB의 NOW() 기준)
+it("validUntil 경계: 만료 직전 통과, 직후 차단", async () => {
+  await db.insert(orgEntitlement).values({
+    orgPk: 42n, service: "ACADEMY", status: "ACTIVE",
+    validUntil: new Date(Date.now() + 1_000), // 1초 뒤 만료
+  });
+  expect(await checkGateBPasses(db, 42n, "ACADEMY")).toBe(true);  // 직전: 통과
+  await sleepUntil(Date.now() + 1_500);                          // 만료 시점 통과
+  expect(await checkGateBPasses(db, 42n, "ACADEMY")).toBe(false); // 직후: 차단
+});
+```
+
+### "무엇을 단언하나" 체크리스트
+
+- [ ] **배치 실패 안전망**: `status=ACTIVE, validUntil=과거` → 차단 (이게 이 결정의 존재 이유)
+- [ ] **4-매트릭스 전부**: ACTIVE/GRACE/EXPIRED × 과거/미래 조합이 표와 일치
+- [ ] **validUntil=null**: 무기한 → 시간 체크 건너뛰고 통과
+- [ ] **경계 정밀도**: 만료 직전/직후가 통과→차단으로 뒤집힘 (`>` 비교, 등호 포함 여부 명확)
+- [ ] **GRACE는 통과**: 단, 차단 케이스(과거 validUntil)와 구분
+
+> ⚠️ **테스트 함정**: `validUntil`을 "오늘 날짜"로만 테스트하면 경계가 안 잡힙니다. *만료 직전/직후 수 초* 차이로 결과가 뒤집히는지를 봐야 "배치 실패 안전망"이 실제로 작동함을 증명합니다.
+
+---
+
 ## 마치며
 
 Gate B의 `status + validUntil` 복합 체크는 "왜 이렇게 복잡하게 짰지?"가 아니라 "배치가 실패해도 영구 무료가 되면 안 된다"는 비즈니스 요구사항에서 나온 결정입니다.

@@ -103,6 +103,21 @@ append-only 원칙:
   2024-06-01 11:45 | GRANTED | v2025-06  ← 약관 갱신 후 재동의
 ```
 
+이 흐름을 상태 다이어그램으로 보면 이렇습니다. **모든 전이는 기존 행을 고치지 않고 새 행을 INSERT**하며, "현재 상태"는 가장 최신 행으로 판정합니다:
+
+```mermaid
+stateDiagram-v2
+    [*] --> 미동의: 행 없음 (아직 동의 이력 없음)
+    미동의 --> GRANTED: INSERT (action='GRANTED')
+    GRANTED --> REVOKED: INSERT (action='REVOKED')<br/>+ perm_version bump
+    REVOKED --> GRANTED: INSERT (action='GRANTED')<br/>약관 갱신 후 재동의
+    note right of REVOKED
+        기존 GRANTED 행은
+        그대로 남음 (append-only)
+        — 변조/삭제 불가
+    end note
+```
+
 이 테이블은 DB 계정 권한 설계에서도 반영됩니다. 애플리케이션 계정(`platform_rw`)에는 INSERT 권한만 부여하고 UPDATE/DELETE 권한을 아예 없애는 것이 목표입니다. 설령 서버가 해킹당하더라도 과거 동의 이력을 조작할 수 없게 됩니다.
 
 미래에는 `prev_hash`/`row_hash` 컬럼으로 **[[audit-hash-chain|해시 체이닝]]**도 도입됩니다. 각 행이 이전 행의 해시를 포함하게 만들어, 중간 행을 삭제하거나 수정하면 해시 불일치로 조작을 감지할 수 있습니다. (현재는 P1 미구현 상태입니다.)
@@ -306,6 +321,93 @@ user_consent_event INSERT (action='REVOKED')
 ```
 
 > 💡 **한 줄 요약**: JWT stale 구간에도 perm_version bump + 발송 큐 즉시 차단 + 민감 쓰기 DB 재검증으로 동의 철회가 지연 없이 반영됩니다.
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+`user_consent_event`의 핵심 보장은 "동의 이력은 append-only로 쌓이고, 철회·재동의도 기존 행을 고치지 않고 새 행으로 INSERT된다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 검증합니다.
+
+```typescript
+// pipa-consent.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { and, desc, eq } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+let rwPool: Pool;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  const admin = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(admin);
+  await migrate(db); // user_consent_event 생성
+
+  // platform_rw는 INSERT/SELECT만 — UPDATE/DELETE 없음
+  await admin.query(`CREATE ROLE platform_rw LOGIN PASSWORD 'pw'`);
+  await admin.query(`GRANT SELECT, INSERT ON user_consent_event TO platform_rw`);
+  rwPool = new Pool({ connectionString: connUriAs(container, "platform_rw", "pw") });
+}, 60_000);
+
+afterAll(async () => {
+  await rwPool.end();
+  await container.stop();
+});
+
+describe("동의 이력 append-only", () => {
+  beforeEach(async () => {
+    await db.delete(userConsentEvent);
+  });
+
+  const grant = (action: "GRANTED" | "REVOKED", version: string) =>
+    db.insert(userConsentEvent).values({
+      userPk: 12345n, consentType: "platform.marketing_email", action, version,
+      ip: "127.0.0.1", userAgent: "test",
+    });
+
+  it("동의 → 철회 → 재동의가 각각 새 행으로 쌓인다 (3행, 수정 없음)", async () => {
+    await grant("GRANTED", "2024-01");
+    await grant("REVOKED", "2024-01");
+    await grant("GRANTED", "2025-06"); // 약관 갱신 후 재동의
+
+    const rows = await db.select().from(userConsentEvent)
+      .where(eq(userConsentEvent.userPk, 12345n))
+      .orderBy(userConsentEvent.createdAt);
+    expect(rows).toHaveLength(3); // ✅ 이력이 모두 보존
+    expect(rows.map((r) => r.action)).toEqual(["GRANTED", "REVOKED", "GRANTED"]);
+  });
+
+  it("현재 상태는 가장 최신 이벤트로 판정한다 (철회 후 신규 행 = REVOKED가 최신)", async () => {
+    await grant("GRANTED", "2024-01");
+    await grant("REVOKED", "2024-01");
+
+    const latest = await db.query.userConsentEvent.findFirst({
+      where: and(
+        eq(userConsentEvent.userPk, 12345n),
+        eq(userConsentEvent.consentType, "platform.marketing_email"),
+      ),
+      orderBy: [desc(userConsentEvent.createdAt)],
+    });
+    expect(latest?.action).toBe("REVOKED"); // ✅ 현재 철회 상태
+  });
+
+  it("append-only: platform_rw의 UPDATE/DELETE는 42501로 거부 (증거 불변)", async () => {
+    await grant("GRANTED", "2024-01");
+
+    await expect(
+      rwPool.query(`UPDATE user_consent_event SET action='REVOKED' WHERE user_pk=12345`),
+    ).rejects.toMatchObject({ code: "42501" });
+    await expect(
+      rwPool.query(`DELETE FROM user_consent_event WHERE user_pk=12345`),
+    ).rejects.toMatchObject({ code: "42501" });
+  });
+});
+```
 
 ---
 

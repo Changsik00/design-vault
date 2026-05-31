@@ -45,7 +45,23 @@ DELETE FROM membership WHERE user_pk = 10 AND org_pk = 1;
 
 ## Q2. 삭제에 어떤 방식들이 있나요?
 
-세 가지입니다.
+세 가지입니다. 어떤 걸 고를지는 아래 결정 트리로 정리됩니다.
+
+```mermaid
+flowchart TD
+  A["삭제 요청"] --> B{"이력 전체가<br/>법적/감사 증거인가?"}
+  B -- "예" --> C["append-only<br/>(새 row INSERT)"]
+  B -- "아니오" --> D{"삭제 시점이 중요하고<br/>복원 가능해야 하나?"}
+  D -- "예" --> E["deleted_at<br/>(TIMESTAMPTZ)"]
+  D -- "아니오" --> F{"상태가 다시<br/>돌아올 수 있나?"}
+  F -- "예" --> G["status ENUM 변경"]
+  F -- "아니오" --> H["status ENUM 변경<br/>(CLOSED 등 종료 상태)"]
+  C --> C1["user_consent_event<br/>audit_log / payment_ledger"]
+  E --> E1["identity_user<br/>organization"]
+  G --> G1["membership.status<br/>org_entitlement.status"]
+```
+
+각 패턴을 자세히 봅니다.
 
 **패턴 1 — `status` ENUM 변경**: 비즈니스 상태가 바뀌는 것. 복원 가능한 상태 전환.
 
@@ -144,6 +160,48 @@ GRANT INSERT ON audit_log TO audit_append;
 ```
 
 > 💡 **한 줄 요약**: 복원 가능한 상태 전환은 status, 숨김+복원은 deleted_at, 증거가 필요한 이력은 append-only.
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "삭제처럼 보이는" 세 패턴의 핵심 보장을 검증합니다.
+
+**① soft delete 후 활성 조회 필터 (deleted_at)** — 삭제 처리한 row가 "살아있는 것만" 쿼리에서 빠지는지.
+
+```ts
+await db.update(identityUser).set({ deletedAt: new Date() }).where(eq(identityUser.pk, 10n));
+const alive = await db.select().from(identityUser).where(isNull(identityUser.deletedAt));
+expect(alive.find(u => u.pk === 10n)).toBeUndefined(); // deleted_at IS NULL 필터에서 제외
+```
+
+**② append-only 불변 — UPDATE/DELETE 권한 차단** — `audit_append` 역할로 접속한 커넥션이 INSERT만 되고 UPDATE/DELETE는 막히는지. 기대: SQLSTATE `42501`(insufficient_privilege).
+
+```ts
+// GRANT INSERT ON audit_log TO audit_append; 로 세팅된 역할로 접속
+await expect(appendDb.update(auditLog).set({ action: 'X' }).where(eq(auditLog.pk, 1n)))
+  .rejects.toMatchObject({ code: '42501' });
+```
+
+**③ append-only 현재 상태 = 최신 row** — 동의→철회→재동의를 순차 INSERT한 뒤 `ORDER BY created_at DESC LIMIT 1`이 `GRANTED`인지.
+
+```ts
+// 3건 INSERT 후
+const [latest] = await db.select().from(userConsentEvent)
+  .where(eq(userConsentEvent.userPk, 10n))
+  .orderBy(desc(userConsentEvent.createdAt)).limit(1);
+expect(latest.action).toBe('GRANTED'); // 기존 row 수정 없이 누적된 최신값
+```
+
+**④ hard DELETE 부재 회귀 테스트** — 앱 DB 계정에 `DELETE` 권한이 없는지 `has_table_privilege`로 단언(스키마 가드).
+
+```ts
+const [{ ok }] = await appDb.execute(
+  sql`SELECT has_table_privilege('app_rw','membership','DELETE') AS ok`);
+expect(ok).toBe(false);
+```
 
 ---
 

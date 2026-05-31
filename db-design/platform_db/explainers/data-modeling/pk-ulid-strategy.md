@@ -301,6 +301,36 @@ Firebase ──[firebase_uid]──▶ identity_user.firebase_uid (조회 키)
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "pk는 IDENTITY로 자동 생성되고, public_id는 유일하며, 경계 변환이 올바른지"를 검증합니다.
+
+**① IDENTITY 자동 생성** — `pk`를 명시하지 않고 INSERT해도 BIGINT pk가 채워지고, 두 row가 서로 다른 값을 받는지.
+
+```ts
+const [a] = await db.insert(identityUser).values({ publicId: ulid(), email: 'a@x.io' }).returning();
+const [b] = await db.insert(identityUser).values({ publicId: ulid(), email: 'b@x.io' }).returning();
+expect(a.pk).toBeTypeOf('bigint');
+expect(a.pk).not.toBe(b.pk); // GENERATED ALWAYS AS IDENTITY
+```
+
+**② IDENTITY 수동 지정 거부** — `GENERATED ALWAYS`이므로 pk를 직접 넣으면 SQLSTATE `428C9`(generated_always)로 거부되는지(OVERRIDING 없이).
+
+**③ public_id 유일성** — 같은 `public_id`를 두 번 INSERT하면 SQLSTATE `23505`(unique_violation).
+
+```ts
+const id = ulid();
+await db.insert(organization).values({ publicId: id /* ... */ });
+await expect(db.insert(organization).values({ publicId: id /* ... */ }))
+  .rejects.toMatchObject({ code: '23505' }); // public_id UNIQUE 위반
+```
+
+**④ 경계 변환 왕복** — `public_id`로 조회해 pk를 얻고, 다시 그 pk row의 `public_id`가 입력과 같은지. ULID가 26자 `CHAR(26)`로 저장되는지도 함께 확인(열거 불가 식별자 보장).
+
+---
+
 ## 마치며
 
 `pk`/`public_id`/`firebase_uid` 세 필드의 역할 분리는 처음엔 번거로워 보이지만, 실제로는 각각 명확한 이유가 있는 설계입니다.

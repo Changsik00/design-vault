@@ -72,6 +72,32 @@ COMMIT;  ← 이게 성공하면 이메일도 반드시 보내야 함을 DB가 �
 
 별도 워커(poller)가 `outbox_event` 테이블을 주기적으로 읽어서 실제 이메일/알림을 보냅니다.
 
+전체 흐름을 시퀀스로 보면 이렇습니다. 비즈니스 변경과 `outbox_event` INSERT는 **같은 트랜잭션**이고, 발행은 그 뒤 폴링 워커가 `FOR UPDATE SKIP LOCKED`로 집어 처리합니다:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Caller as 결제 처리 핸들러
+    participant DB as platform_db (Postgres)
+    participant Worker as 폴링 워커
+    participant Ext as 외부 시스템 (Email/FCM)
+
+    Note over Caller,DB: 비즈니스 트랜잭션 (원자적)
+    Caller->>DB: BEGIN
+    Caller->>DB: INSERT payment_ledger / UPDATE org_entitlement
+    Caller->>DB: INSERT outbox_event (status='PENDING') — 동일 tx
+    Caller->>DB: COMMIT
+    Note over DB: 본 작업 + 이벤트 기록이 함께 확정
+
+    loop 주기적 폴링
+        Worker->>DB: SELECT ... WHERE status='PENDING'<br/>FOR UPDATE SKIP LOCKED
+        DB-->>Worker: 잠그지 않은 PENDING row만 반환
+        Worker->>Ext: 외부 발행 (이메일/알림)
+        Ext-->>Worker: 성공
+        Worker->>DB: UPDATE outbox_event SET status='SENT'
+    end
+```
+
 > 💡 **한 줄 요약**: Outbox 패턴은 "DB 변경"과 "외부 이벤트 발송"을 같은 트랜잭션에 넣어, 서버가 크래시해도 이벤트를 반드시 처리하도록 보장하는 패턴입니다.
 
 ---
@@ -444,6 +470,109 @@ COMMIT;
 ```
 
 > 💡 **한 줄 요약**: `billing_event`는 "무슨 일이 있었나"를 기록하는 불변 이력이고, `outbox_event`는 "앞으로 비동기로 처리해야 할 일"을 담는 작업 큐입니다. 이름이 비슷하지만 완전히 다른 용도입니다.
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+Outbox의 두 핵심 보장을 검증합니다. **(1)** 비즈니스 변경과 `outbox_event` INSERT가 *같은 트랜잭션*이라 함께 커밋되거나 함께 롤백된다(원자성). **(2)** 여러 워커가 동시에 폴링해도 `FOR UPDATE SKIP LOCKED` 덕에 한 row를 두 워커가 같이 집지 않는다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest를 씁니다.
+
+```typescript
+// outbox-pattern.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq, sql } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let pool: Pool;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool);
+  await migrate(db); // payment_ledger · org_entitlement · outbox_event 생성
+}, 60_000);
+
+afterAll(async () => {
+  await container.stop();
+});
+
+describe("outbox 원자성 & 동시 워커", () => {
+  beforeEach(async () => {
+    await db.delete(outboxEvent);
+    await db.delete(paymentLedger);
+  });
+
+  it("단일 트랜잭션: 본 작업과 outbox INSERT가 함께 커밋된다", async () => {
+    await db.transaction(async (tx) => {
+      await tx.insert(paymentLedger).values({
+        orgPk: 1, idempotencyKey: "k1", type: "CHARGE", amountMinor: 10000n, status: "SUCCEEDED",
+      });
+      await tx.insert(outboxEvent).values({
+        aggregateType: "subscription", aggregatePk: 1n,
+        eventType: "subscription.activated", payloadJson: {}, status: "PENDING",
+      });
+    });
+
+    const ledger = await db.select().from(paymentLedger);
+    const events = await db.select().from(outboxEvent);
+    expect(ledger).toHaveLength(1);
+    expect(events).toHaveLength(1); // ✅ 둘 다 확정
+  });
+
+  it("롤백: 본 작업이 실패하면 outbox INSERT도 함께 사라진다", async () => {
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.insert(outboxEvent).values({
+          aggregateType: "subscription", aggregatePk: 2n,
+          eventType: "subscription.activated", payloadJson: {}, status: "PENDING",
+        });
+        throw new Error("본 작업 실패 주입");
+      }),
+    ).rejects.toThrow();
+
+    const events = await db.select().from(outboxEvent);
+    expect(events).toHaveLength(0); // ✅ outbox도 롤백 → 유령 이벤트 없음
+  });
+
+  it("FOR UPDATE SKIP LOCKED: 동시 두 워커가 같은 PENDING row를 중복 처리하지 않는다", async () => {
+    await db.insert(outboxEvent).values([
+      { aggregateType: "subscription", aggregatePk: 1n, eventType: "e", payloadJson: {}, status: "PENDING" },
+      { aggregateType: "subscription", aggregatePk: 2n, eventType: "e", payloadJson: {}, status: "PENDING" },
+    ]);
+
+    // 두 워커가 각각 트랜잭션을 열고 동시에 한 건씩 집는다
+    const claim = async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        const r = await client.query(
+          `SELECT pk FROM outbox_event WHERE status='PENDING'
+           ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED`,
+        );
+        // 락을 잡은 채로 잠시 유지 → 다른 워커는 이 row를 건너뜀
+        await new Promise((res) => setTimeout(res, 50));
+        await client.query("COMMIT");
+        return r.rows[0]?.pk as number | undefined;
+      } finally {
+        client.release();
+      }
+    };
+
+    const [a, b] = await Promise.all([claim(), claim()]);
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a).not.toBe(b); // ✅ 서로 다른 row를 집음 (중복 처리 없음)
+  });
+});
+```
+
+> at-least-once 특성상 "정확히 한 번"은 보장되지 않으므로, 소비 측 멱등 처리는 [[idempotency-key|`idempotency_key`]] 테스트에서 별도로 검증합니다.
 
 ---
 

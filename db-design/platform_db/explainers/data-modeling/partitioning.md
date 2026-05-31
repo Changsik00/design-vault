@@ -109,7 +109,19 @@ CREATE TABLE audit_log_default PARTITION OF audit_log DEFAULT;
 
 > 🐬 **MySQL이라면**: 자식 테이블을 따로 만들지 않고 `PARTITION BY RANGE COLUMNS(created_at) ( PARTITION p202601 VALUES LESS THAN (...), ..., PARTITION p_future VALUES LESS THAN (MAXVALUE) )`처럼 한 DDL 안에 파티션을 열거하고, `MAXVALUE` 파티션이 PG의 `DEFAULT` 역할을 합니다.
 
-데이터가 INSERT될 때 PostgreSQL은 `created_at` 값을 보고 자동으로 올바른 파티션에 저장합니다. 개발자가 신경 쓸 게 없어요.
+데이터가 INSERT될 때 PostgreSQL은 `created_at` 값을 보고 자동으로 올바른 파티션에 저장합니다. 개발자가 신경 쓸 게 없어요. INSERT 한 건이 어디로 라우팅되는지 흐름으로 보면 이렇습니다.
+
+```mermaid
+flowchart TD
+  I["INSERT INTO audit_log<br/>(created_at = ?)"] --> P{"created_at 범위<br/>매칭되는 월 파티션?"}
+  P -- "2026-01-01 ~ 01-31" --> J["audit_log_202601"]
+  P -- "2026-02-01 ~ 02-28" --> F["audit_log_202602"]
+  P -- "2026-03-01 ~ 03-31" --> M["audit_log_202603"]
+  P -- "정의된 범위 밖<br/>(예: 미래 2026-07)" --> D["audit_log_default<br/>(안전망)"]
+  D -.->|"분기마다 새 월 파티션 추가 누락 시<br/>여기에 무한 적재"| W["비대화 → 프루닝 효과 상실"]
+```
+
+
 
 조회할 때도 마찬가지입니다. `WHERE created_at >= '2026-02-01' AND created_at < '2026-03-01'`처럼 날짜 조건이 있으면, PostgreSQL이 `audit_log_202602` 파티션만 스캔합니다. 나머지 파티션은 건드리지 않아요. 이걸 **파티션 프루닝(partition pruning)** 이라 합니다.
 
@@ -268,6 +280,43 @@ PostgreSQL 파티션 테이블 규칙:
 -- pk 단독 조회가 필요하다면 (각 파티션에 로컬 인덱스로 붙음):
 CREATE INDEX idx_audit_pk ON audit_log (pk);  -- 필요 시 추가
 ```
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "INSERT가 올바른 파티션으로 라우팅되고, 날짜 조건 쿼리가 프루닝되는지"를 검증합니다. 테스트 setup에서 부모 + 월별 자식 + `DEFAULT` 파티션을 미리 생성합니다.
+
+**① 파티션 라우팅** — `created_at`이 2월인 row를 INSERT한 뒤 자식 테이블을 직접 조회해 그 row가 `audit_log_202602`에 들어갔는지.
+
+```ts
+await db.insert(auditLog).values({ createdAt: new Date('2026-02-15T00:00:00Z') /* ... */ });
+const rows = await db.execute(sql`SELECT count(*)::int AS n FROM audit_log_202602`);
+expect(rows[0].n).toBe(1); // 2월 데이터가 2월 파티션으로 라우팅
+```
+
+**② DEFAULT 파티션 라우팅** — 정의된 범위 밖(예: `2026-07-10`) row가 `audit_log_default`로 가는지.
+
+```ts
+await db.insert(auditLog).values({ createdAt: new Date('2026-07-10T00:00:00Z') /* ... */ });
+const d = await db.execute(sql`SELECT count(*)::int AS n FROM audit_log_default`);
+expect(d[0].n).toBe(1); // 미정의 미래 데이터는 DEFAULT로
+```
+
+**③ 파티션 프루닝** — 단일 월 범위 쿼리의 `EXPLAIN`에 해당 파티션만 등장하고 나머지 자식은 플랜에서 빠지는지.
+
+```ts
+const plan = await db.execute(sql`
+  EXPLAIN SELECT * FROM audit_log
+  WHERE created_at >= '2026-02-01' AND created_at < '2026-03-01'`);
+const text = JSON.stringify(plan);
+expect(text).toMatch(/audit_log_202602/);
+expect(text).not.toMatch(/audit_log_202601/); // 프루닝되어 등장하지 않음
+```
+
+**④ 복합 PK 규칙** — 파티션 키를 뺀 `PRIMARY KEY (pk)`로 부모를 만들려 하면 DDL이 실패하는지(SQLSTATE `0A000` feature_not_supported 류). `(pk, created_at)`은 성공.
 
 ---
 

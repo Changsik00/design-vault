@@ -295,6 +295,83 @@ UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+구독 상태 머신의 핵심 보장은 "합법 전이만 허용하고 불법 전이는 거부한다"입니다(TRIALING → ACTIVE → PAST_DUE → … ). PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 DB에 상태를 적재하고 전이 함수를 돌려 검증합니다.
+
+```typescript
+// subscription-lifecycle.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  db = drizzle(new Pool({ connectionString: container.getConnectionUri() }));
+  await migrate(db); // org_subscription · org_entitlement 생성
+}, 60_000);
+
+afterAll(async () => {
+  await container.stop();
+});
+
+describe("구독 상태 전이 (합법/불법)", () => {
+  beforeEach(async () => {
+    await db.delete(orgSubscription);
+    await db.delete(orgEntitlement);
+  });
+
+  it("합법: TRIALING → ACTIVE (결제 성공 webhook)", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "TRIALING" }).returning();
+
+    await applyPaymentSuccess(sub.pk); // 단일 트랜잭션으로 ACTIVE 전이
+    const after = await db.query.orgSubscription.findFirst({ where: eq(orgSubscription.pk, sub.pk) });
+    expect(after?.status).toBe("ACTIVE");
+  });
+
+  it("합법: ACTIVE → PAST_DUE → ACTIVE (결제 실패 후 재결제 성공)", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "ACTIVE" }).returning();
+
+    await applyPaymentFailure(sub.pk);
+    expect((await getSub(sub.pk)).status).toBe("PAST_DUE");
+    await applyPaymentSuccess(sub.pk); // 재결제 성공 → 복구
+    expect((await getSub(sub.pk)).status).toBe("ACTIVE");
+  });
+
+  it("합법: ACTIVE → CANCELED 이후 기간 만료 배치로 EXPIRED", async () => {
+    const past = new Date(Date.now() - 86_400_000);
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "CANCELED", currentPeriodEnd: past }).returning();
+    await db.insert(orgEntitlement).values({
+      orgPk: 1, productCode: "ACADEMY_BASIC", service: "ACADEMY", status: "ACTIVE", validUntil: past,
+    });
+
+    await runExpiryBatch(); // valid_until < now() AND status IN ('ACTIVE','GRACE')
+    const ent = await getEntitlementByService(1, "ACADEMY");
+    expect(ent?.status).toBe("EXPIRED");
+  });
+
+  it("불법: EXPIRED → ACTIVE 직접 전이는 거부된다 (재구독 필요)", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "EXPIRED" }).returning();
+
+    await expect(transition(sub.pk, "ACTIVE")).rejects.toThrow(/illegal transition/i);
+    expect((await getSub(sub.pk)).status).toBe("EXPIRED"); // 변하지 않음
+  });
+});
+```
+
+---
+
 ## 마치며
 
 구독 상태 머신을 전체적으로 정리하면:
@@ -308,6 +385,26 @@ TRIALING (무료 체험)
     │       ├── 결제 실패 → PAST_DUE → GRACE → (재결제 성공: ACTIVE / 유예만료: EXPIRED)
     │       └── 취소 요청 → CANCELED → (기간 만료) → EXPIRED
     └── 체험 종료 + 결제 실패 → PAST_DUE → ...
+```
+
+같은 흐름을 상태 다이어그램으로 보면 다음과 같습니다. 화살표 라벨이 각 전이의 트리거(조건)입니다:
+
+```mermaid
+stateDiagram-v2
+    [*] --> TRIALING: 신규 가입
+    TRIALING --> ACTIVE: 체험 종료 + 결제 성공
+    TRIALING --> PAST_DUE: 체험 종료 + 결제 실패
+    ACTIVE --> ACTIVE: 다음 주기 결제 성공
+    ACTIVE --> PAST_DUE: 결제 실패
+    ACTIVE --> CANCELED: 사용자 취소 요청
+    PAST_DUE --> ACTIVE: 재시도/재결제 성공
+    PAST_DUE --> EXPIRED: 유예 기간 만료
+    CANCELED --> EXPIRED: current_period_end 도달
+    EXPIRED --> [*]
+    note right of EXPIRED
+        EXPIRED는 종료 상태.
+        ACTIVE 복귀는 재구독(신규 전이)으로만 가능
+    end note
 ```
 
 코드를 짤 때 기억할 핵심 규칙:

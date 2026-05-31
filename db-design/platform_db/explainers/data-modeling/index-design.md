@@ -255,6 +255,40 @@ CREATE INDEX idx_entitlement_expiry ON org_entitlement (valid_until, status);
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "인덱스가 실제로 타는지"를 `EXPLAIN`으로 검증합니다. 옵티마이저는 행이 적으면 Seq Scan을 고르므로, 의미 있는 테스트는 **수만 건을 seed한 뒤** 플랜을 봐야 합니다.
+
+**① Gate B 핫패스가 Index Scan을 타는지** — 충분한 행을 넣고 `EXPLAIN`에 `idx_org_service_status`가 등장하고 `Seq Scan`이 없는지.
+
+```ts
+// org_entitlement에 5만 건 seed 후
+const plan = await db.execute(sql`
+  EXPLAIN (FORMAT JSON)
+  SELECT status, valid_until FROM org_entitlement
+  WHERE org_pk = 1 AND service = 'ACADEMY' AND status IN ('ACTIVE','GRACE')`);
+const text = JSON.stringify(plan);
+expect(text).toMatch(/idx_org_service_status/);
+expect(text).not.toMatch(/Seq Scan/); // 풀스캔 회귀 방지
+```
+
+**② 커버링(Index Only Scan) 확인** — `valid_until`까지 인덱스에 포함했으므로 위 쿼리 플랜에 `Index Only Scan`이 나타나는지(`VACUUM ANALYZE` 후 visibility map 갱신 필요).
+
+**③ 복합 인덱스 선두 컬럼 규칙** — 선두 컬럼(`org_pk`) 없이 `WHERE service = 'ACADEMY'`만 주면 `idx_org_service_status`를 못 타고 Seq Scan으로 떨어지는지 확인(왼쪽-우선 동작 입증).
+
+**④ 만료 배치 인덱스** — `WHERE valid_until < now() AND status = 'ACTIVE'` 플랜에 `idx_entitlement_expiry` 기반 Index/Bitmap Scan이 나오는지.
+
+```ts
+const plan = await db.execute(sql`
+  EXPLAIN SELECT pk FROM org_entitlement
+  WHERE valid_until < now() AND status = 'ACTIVE'`);
+expect(JSON.stringify(plan)).toMatch(/idx_entitlement_expiry/);
+```
+
+---
+
 ## 마치며
 
 인덱스 설계는 **"어떤 쿼리가 얼마나 자주 실행되나"를 먼저 파악하는 것**에서 시작합니다.

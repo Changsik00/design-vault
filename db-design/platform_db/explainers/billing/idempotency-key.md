@@ -316,6 +316,90 @@ CREATE TABLE pg_webhook_event (
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+멱등성의 핵심 보장은 "같은 `idempotency_key`로 동시에 두 번 INSERT해도 하나만 성공하고, 두 번째는 UNIQUE 위반(SQLSTATE 23505)으로 잡혀 중복 결제가 안 된다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 UNIQUE 제약을 띄워 동시성까지 검증합니다.
+
+```typescript
+// idempotency-key.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  db = drizzle(new Pool({ connectionString: container.getConnectionUri() }));
+  await migrate(db); // payment_ledger (uq_idempotency_key UNIQUE) 생성
+}, 60_000);
+
+afterAll(async () => {
+  await container.stop();
+});
+
+describe("idempotency_key 중복 결제 방지", () => {
+  beforeEach(async () => {
+    await db.delete(paymentLedger);
+  });
+
+  it("같은 키로 두 번 INSERT하면 두 번째는 23505 (unique_violation)", async () => {
+    const key = "charge_42_sub7_2026-05";
+    await db.insert(paymentLedger).values({
+      orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 29000n, status: "PENDING",
+    });
+
+    // 두 번째 동일 키 → DB가 거부
+    await expect(
+      db.insert(paymentLedger).values({
+        orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 29000n, status: "PENDING",
+      }),
+    ).rejects.toMatchObject({ code: "23505" }); // unique_violation
+
+    const rows = await db.select().from(paymentLedger).where(eq(paymentLedger.idempotencyKey, key));
+    expect(rows).toHaveLength(1); // ✅ 한 건만 존재
+  });
+
+  it("동시 중복 INSERT: 둘 다 동시에 실행해도 정확히 하나만 성공", async () => {
+    const key = "charge_42_sub7_2026-06";
+    const insertOne = () =>
+      db.insert(paymentLedger).values({
+        orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 29000n, status: "PENDING",
+      });
+
+    const results = await Promise.allSettled([insertOne(), insertOne()]);
+    const ok = results.filter((r) => r.status === "fulfilled");
+    const failed = results.filter(
+      (r) => r.status === "rejected" && (r.reason as { code?: string }).code === "23505",
+    );
+    expect(ok).toHaveLength(1);     // 하나만 성공
+    expect(failed).toHaveLength(1); // 나머지는 23505
+  });
+
+  it("ON CONFLICT DO NOTHING: 재시도 시 에러 없이 기존 결과를 재사용한다", async () => {
+    const key = "onetime_42_PRO_sess-abc";
+    const first = await db.insert(paymentLedger)
+      .values({ orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 10000n, status: "PENDING" })
+      .onConflictDoNothing({ target: paymentLedger.idempotencyKey })
+      .returning();
+    const retry = await db.insert(paymentLedger)
+      .values({ orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 10000n, status: "PENDING" })
+      .onConflictDoNothing({ target: paymentLedger.idempotencyKey })
+      .returning();
+
+    expect(first).toHaveLength(1); // 첫 INSERT는 행 반환
+    expect(retry).toHaveLength(0); // 재시도는 충돌 → 아무 행 안 만들고 무시
+  });
+});
+```
+
+---
+
 ## 마치며
 
 멱등성은 처음에는 과한 것처럼 보이지만, 운영 환경에서는 필수입니다.

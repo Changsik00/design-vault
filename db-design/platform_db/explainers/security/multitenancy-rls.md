@@ -90,6 +90,24 @@ PostgreSQL의 RLS는 강력한 안전망이자 **1차 강제 메커니즘**입�
 
 여기서 핵심은 `app.org_pk`를 **누가 채우느냐**입니다. 클라이언트가 보낸 값을 그대로 넣으면 위조될 수 있으므로, 서버가 JWT를 검증한 뒤 그 안의 org를 `SET LOCAL app.org_pk = $orgPk`로 트랜잭션마다 주입합니다. 클라이언트 입력은 절대 이 값에 닿지 않습니다.
 
+요청 한 건이 RLS 안에서 어떻게 흐르는지 그림으로 보면 다음과 같습니다.
+
+```mermaid
+flowchart TD
+    REQ([요청 + JWT]) --> VERIFY[서버: JWT 검증<br/>org_pk 추출]
+    VERIFY --> TX[트랜잭션 시작<br/>BEGIN]
+    TX --> SETLOCAL["SET LOCAL app.org_pk = $orgPk<br/>(서버가 주입, 클라 입력 아님)"]
+    SETLOCAL --> QUERY[SELECT/UPDATE 실행]
+    QUERY --> POLICY{RLS USING<br/>org_pk = current_setting<br/>'app.org_pk'?}
+    POLICY -->|일치| ROWS[해당 org 행만 반환]
+    POLICY -->|불일치·세션변수 없음| EMPTY[0행 — 보이지 않음]
+
+    classDef empty fill:#fde8e8,stroke:#e02424,color:#9b1c1c;
+    class EMPTY empty;
+```
+
+`SET LOCAL`을 빠뜨린 경로가 있으면 `app.org_pk`가 비어 정책이 매칭 0행을 내므로(fail-closed), 데이터가 새기보다 *안 보이는* 쪽으로 닫힙니다.
+
 > 💡 **한 줄 요약**: RLS는 앱 코드 실수와 상관없이 DB 자체가 "당신은 이 행만 볼 수 있어요"를 강제하는 DB 레벨 보안 기능입니다.
 
 ---
@@ -319,6 +337,86 @@ T4: ISMS-P/GDPR 계약 체결
 지금의 Pool 모델은 "현재 규모에서 합리적인 선택"이고, 트리거에 도달하면 분리할 수 있도록 처음부터 `org_pk`를 모든 테이블에 박아둔 것입니다. 미래를 위한 복선이라고 생각하면 됩니다.
 
 > 💡 **한 줄 요약**: 지금은 비용·복잡도 대비 Pool 모델이 맞고, T1~T4 트리거에 도달하면 `org_pk` 단위로 무중단 분리할 수 있도록 설계되어 있습니다.
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+RLS는 **DB가 직접 강제하는 기능이라 모킹이 불가능**합니다 — 반드시 실제 PostgreSQL에서 정책이 도는지 봐야 합니다. **PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`)** 가 사실상 필수인 영역입니다. 핵심 보장은 ① `SET LOCAL app.org_pk`를 *설정하면* 해당 org 행만 보이고, ② *누락하면* 아무 행도 안 보이며(fail-closed), ③ 다른 org로 write를 시도하면 정책 위반으로 0행 영향이라는 것입니다.
+
+### RLS 강제 테스트 (vitest + Testcontainers) — 정책이 실제로 도는가
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { Pool } from "pg";
+
+let container: StartedPostgreSqlContainer;
+let pool: Pool;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  pool = new Pool({ connectionString: container.getConnectionUri() });
+  await migrate(pool);   // ENABLE ROW LEVEL SECURITY + CREATE POLICY 포함
+  // app.org_pk로 격리되는 비-superuser 역할로 연결해야 RLS가 적용됨
+  await seed(pool, [
+    { orgPk: 1, service: "ACADEMY" },
+    { orgPk: 2, service: "ACADEMY" },
+  ]);
+}, 60_000);
+
+afterAll(async () => { await pool.end(); await container.stop(); });
+
+// 트랜잭션 안에서 SET LOCAL → 그 안의 쿼리에만 적용
+async function asOrg<T>(orgPk: number | null, fn: (c) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (orgPk !== null) await client.query("SET LOCAL app.org_pk = $1", [String(orgPk)]);
+    return await fn(client);
+  } finally { await client.query("ROLLBACK"); client.release(); }
+}
+
+describe("RLS tenant_isolation 정책", () => {
+  it("SET LOCAL app.org_pk=1 → org 1 행만 보인다", async () => {
+    const rows = await asOrg(1, (c) =>
+      c.query("SELECT org_pk FROM org_entitlement").then((r) => r.rows));
+    expect(rows.every((r) => r.org_pk === 1)).toBe(true);
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it("app.org_pk 누락 시 0행 (fail-closed) — 정책이 false로 평가", async () => {
+    const rows = await asOrg(null, (c) =>
+      c.query("SELECT * FROM org_entitlement").then((r) => r.rows));
+    expect(rows.length).toBe(0);  // 세션 변수 없으면 USING이 매칭 0
+  });
+
+  it("다른 org로 write 시도 → 정책 위반으로 0행 영향", async () => {
+    const res = await asOrg(1, (c) =>
+      c.query("UPDATE org_entitlement SET status='EXPIRED' WHERE org_pk = 2"));
+    expect(res.rowCount).toBe(0);  // org 1 컨텍스트에선 org 2 행이 안 보임 → 수정 불가
+  });
+
+  it("교차 격리: org 1 컨텍스트에서 org 2 행 직접 조회해도 0행", async () => {
+    const rows = await asOrg(1, (c) =>
+      c.query("SELECT * FROM org_entitlement WHERE org_pk = 2").then((r) => r.rows));
+    expect(rows.length).toBe(0);  // WHERE를 줘도 정책이 먼저 잘라냄
+  });
+});
+```
+
+### "무엇을 단언하나" 체크리스트
+
+- [ ] **설정 시 가시성**: `SET LOCAL app.org_pk = N` → org N 행만 (`every(org_pk === N)`)
+- [ ] **누락 시 0행**: 세션 변수 없으면 아무 행도 안 보임 (fail-closed, 정책 false)
+- [ ] **정책 위반 0행**: 다른 org로 UPDATE/DELETE → `rowCount === 0` (오류가 아니라 *안 보여서* 안 됨)
+- [ ] **WHERE 우회 불가**: 명시적 `WHERE org_pk = 2`를 줘도 RLS가 먼저 필터
+- [ ] **비-superuser 연결**: superuser/BYPASSRLS 역할로 붙으면 RLS가 무시되므로, 테스트 연결 역할 확인
+- [ ] **앱 강제 병행**: gate 함수에 orgPk 미전달 시 타입 오류 (RLS와 별개로 컴파일 단계 방어)
+
+> ⚠️ **테스트 함정**: 마이그레이션을 *superuser*로 적용하고 같은 연결로 쿼리하면 RLS가 우회되어 "다 보이는데 통과"라는 거짓 통과가 납니다. 반드시 `app.org_pk`로 격리되는 일반 역할로 쿼리하고, *0행이 나와야 할 케이스가 실제로 0행*인지를 확인해야 정책이 산다는 걸 증명합니다.
 
 ---
 

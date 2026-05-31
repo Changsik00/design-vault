@@ -112,6 +112,39 @@ WHERE feature_limits @> '{"daily_uploads": 10}';
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "JSONB `@>` 포함 검색이 GIN 인덱스를 타고, 가변 구조를 손실 없이 저장"하는지 검증합니다.
+
+**① JSONB 라운드트립** — 제품마다 다른 구조의 `feature_limits`를 넣고 그대로 다시 읽히는지(키/값 보존).
+
+```ts
+const limits = { daily_uploads: 6, members: 50, storage_gb: 10 };
+const [row] = await db.insert(orgEntitlement)
+  .values({ orgPk: 1n, service: 'ACADEMY', featureLimits: limits /* ... */ }).returning();
+expect(row.featureLimits).toEqual(limits);
+```
+
+**② `@>` 포함 검색이 GIN 인덱스를 타는지** — 충분한 행을 seed하고 `EXPLAIN`에 GIN 인덱스(`idx_entitlement_limits`)와 `Bitmap Index Scan`이 나오는지.
+
+```ts
+// org_entitlement에 수천 건 seed + GIN 인덱스 생성 후
+const plan = await db.execute(sql`
+  EXPLAIN (FORMAT JSON)
+  SELECT pk FROM org_entitlement WHERE feature_limits @> '{"daily_uploads": 6}'`);
+const text = JSON.stringify(plan);
+expect(text).toMatch(/idx_entitlement_limits/);
+expect(text).toMatch(/Bitmap Index Scan|Index Scan/);
+```
+
+**③ `@>` 포함 검색 결과 정확성** — `@> '{"daily_uploads": 6}'`가 그 키/값을 가진 행만 돌려주고, 다른 값(`8`)을 가진 행은 제외하는지.
+
+**④ "JSON에 격리 키 금지" 회귀 가드** — `org_pk`가 JSONB 컬럼이 아니라 정규 컬럼으로 존재하는지 `information_schema.columns`로 단언(테넌트 경계가 JSON에 숨지 않도록).
+
+---
+
 ## 연결된 개념
 
 - [[feature-limits]] — org_entitlement.feature_limits JSON 우선순위 설계

@@ -385,6 +385,66 @@ const canDo = ability.can('approve', lecture);
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+이 2단 분리의 핵심 보장은 ① **`role_code` → capability 매핑이 정확**하고(코드 상수 `ROLE_PERMISSION`), ② **서비스 간 role이 격리**된다는 것(ACADEMY의 TEACHER가 MARKET 권한을 얻지 않음)입니다. 매핑은 순수 함수라 단위 테스트로, `service_membership` 조회는 **Testcontainers** 위에서 시드 후 검증합니다.
+
+### 단위 테스트 (vitest) — ROLE_PERMISSION 매핑
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { ROLE_PERMISSION, permissionsFor } from "../src/role-permission";
+
+describe("role_code → capability 매핑", () => {
+  it("ACADEMY TEACHER는 upload:video 가능, manage:members 불가", () => {
+    const perms = permissionsFor("ACADEMY", "TEACHER");
+    expect(perms).toContain("upload:video");
+    expect(perms).not.toContain("manage:members"); // DIRECTOR 이상만
+  });
+
+  it("타 서비스 role 격리: ACADEMY의 SELLER는 정의 없음 → 빈 권한", () => {
+    expect(permissionsFor("ACADEMY", "SELLER")).toEqual([]); // 교차 오염 없음
+  });
+
+  it("MARKET SELLER는 create:listing 가능, academy 동사는 없음", () => {
+    const perms = permissionsFor("MARKET", "SELLER");
+    expect(perms).toContain("create:listing");
+    expect(perms).not.toContain("upload:video"); // 서비스 경계
+  });
+});
+```
+
+### 통합 테스트 (vitest + Testcontainers + Drizzle) — 2단 조회
+
+```typescript
+it("같은 user가 service별로 다른 role_code를 가진다", async () => {
+  await db.insert(membership).values({ userPk: 5n, orgPk: 42n, platformRole: "MEMBER" });
+  await db.insert(serviceMembership).values([
+    { userPk: 5n, orgPk: 42n, service: "ACADEMY", roleCode: "TEACHER" },
+    { userPk: 5n, orgPk: 42n, service: "MARKET",  roleCode: "SELLER"  },
+  ]);
+
+  const academyRole = await getServiceRole(db, 5n, 42n, "ACADEMY");
+  const marketRole  = await getServiceRole(db, 5n, 42n, "MARKET");
+  expect(academyRole).toBe("TEACHER");
+  expect(marketRole).toBe("SELLER"); // platform_role(MEMBER)은 공통, service role은 분리
+});
+```
+
+### "무엇을 단언하나" 체크리스트
+
+- [ ] **매핑 정확성**: 역할별 허용 동사 목록이 `ROLE_PERMISSION`과 일치
+- [ ] **타 서비스 role 격리**: ACADEMY 컨텍스트에서 MARKET role_code는 빈 권한 (교차 오염 0)
+- [ ] **2단 분리**: `platform_role`(membership)과 `role_code`(service_membership)가 독립적으로 조회됨
+- [ ] **한 user, 다 service**: 같은 user가 service별로 다른 role_code를 가질 수 있음
+- [ ] **미정의 역할**: 정의되지 않은 (service, role) 조합은 deny (빈 배열)
+
+> ⚠️ **테스트 함정**: "TEACHER가 업로드 가능"만 보면 격리를 못 잡습니다. 핵심은 *ACADEMY의 role_code가 MARKET 권한으로 새지 않는지* — 서비스 키를 잘못 인덱싱하면 조용히 교차 오염이 생깁니다.
+
+---
+
 ## 마치며
 
 현재 코드베이스에는 `membership.role` ENUM이 academy 어휘를 담고 있고 `delegation_grant.capability`도 6종 CHECK로 고정되어 있습니다. 이 상태가 현재 academy MVP에서는 동작하지만, 새 서비스를 붙일 때는 바뀌어야 합니다. 코드에서 role과 capability를 다룰 때 "이게 platform-level인가, service-level인가"를 의식하는 습관을 지금부터 들여두면, 후속 마이그레이션 시 훨씬 적은 수정으로 전환을 완료할 수 있습니다.

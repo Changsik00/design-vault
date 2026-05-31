@@ -119,7 +119,31 @@ Drizzle 스키마 직접 참조 금지. 패키지 함수만 호출.
 
 ---
 
-# C. ERD (텍스트)
+# C. ERD
+
+## C.0 전체 관계도
+
+```mermaid
+erDiagram
+  identity_user ||--|| user_profile : "1:1"
+  identity_user ||--o{ membership : "가입"
+  organization  ||--o{ membership : "소속"
+  membership    ||--|| service_membership : "service 차원"
+  organization  ||--o{ membership_invite : "초대"
+  organization  ||--o{ delegation_grant : "범위"
+  identity_user ||--o{ delegation_grant : "위임자/수임자"
+  organization  ||--o{ org_relation : "자기참조"
+  organization  ||--o{ org_entitlement : "권한 투영"
+  product       ||--o{ org_entitlement : "부여"
+  organization  ||--|| org_subscription : "구독"
+  org_subscription ||--o{ subscription_item : "항목"
+  product_sku   ||--o{ subscription_item : "가격"
+  org_subscription ||--o{ payment_ledger : "append-only 원장"
+  product       ||--o{ product_feature : "기능 정의"
+  product       ||--o{ product_sku : "판매 단위"
+```
+
+> 아래 C.1~C.3은 영역별 텍스트 상세 + FK 목록.
 
 ## C.1 Identity 영역
 
