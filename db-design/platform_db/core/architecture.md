@@ -175,9 +175,9 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 9. **Gate B는 `status + valid_until` 복합 체크.** `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > NOW())`. status만 보면 배치 실패 시 영구 무료 위험.
 10. **`org_entitlement.feature_limits`가 런타임 한도의 최종 권위.** product_feature·plan_definition은 초기값 복사용. 런타임 직접 조회 금지.
 11. **구독은 N:M.** `subscription_item(subscription_pk, sku_pk)`이 진실 원천. `org_subscription`은 헤더만, sku_pk 단일 FK 금지.
-12. **상태 전환은 `SELECT … FOR UPDATE`로 잠그고 변경한다.** read-modify-write(구독/엔타이틀먼트 상태 전환 등)에서 락 없는 SELECT-then-UPDATE 금지 — 동시 전환 시 중복 전환·outbox 이중 발행. ([[consistency-model]])
+12. **상태 전환(read-modify-write)은 race를 막도록 직렬화·원자화한다.** **조건부 UPDATE**(`WHERE 기대상태` + 영향 행 수 검증 = compare-and-set, 1순위) 또는 `SELECT … FOR UPDATE` 중 하나를 쓴다. 락 없는 SELECT-then-UPDATE 금지 — 동시 전환 시 중복 전환·outbox 이중 발행. ([[concurrency-control]] · [[consistency-model]])
 13. **외부 부수효과가 있는 쓰기는 같은 트랜잭션에서 `outbox_event`를 발행한다.** 발행 의무 대상과 `aggregate_pk` 규칙(= 이벤트가 *관한 엔티티*의 pk: 구독→`org_subscription.pk`, 환불→`payment_ledger.pk`, entitlement→`org_entitlement.pk`; `org_pk`를 aggregate로 쓰지 말 것)은 [[outbox-pattern]] 발행 레지스트리에 등재. (#7의 구체화)
-14. **구독·엔타이틀먼트 조회·변경 API는 단일 행을 결정하는 키를 받는다.** `(org_pk, service)` 또는 `(org_pk, product_code)` 명시 — `findFirst(org_pk만)` 금지(N:M에서 비결정적). 특히 `org_entitlement` 변경은 unique 키 `(org_pk, product_code)`로 — `(org_pk, service)`만으로 UPDATE 시 동일 service 복수 상품이 전부 갱신된다.
+14. **구독·엔타이틀먼트 조회·변경 API는 단일 행을 결정하는 키를 받는다.** `org_entitlement`는 unique 키 `(org_pk, service)`로 조회·변경 — org는 **서비스당 entitlement 1개**(병합된 접근 투영). `findFirst(org_pk만)` 금지(비결정적). 구독 상세(번들)는 `subscription_item`이 N:M(#11)으로 보유하되, entitlement는 service당 1행으로 **병합**된다(상품 교체 시 `product_code` 컬럼 갱신).
 15. **조회 헬퍼는 결과 없을 때 `throw` 또는 `null`을 명시 반환한다.** 빈 문자열 `""` 등을 WHERE/필터에 흘려 0-row + 에러 없는 **silent 실패**를 만들지 않는다(예: `resolvePlanCode`).
 
 파생 표준: `public_id`는 외부 노출 테이블만 · soft-delete 3종(status/deleted_at/append-only, [[delete-patterns]]) · 금액은 정수 minor unit(float 금지).

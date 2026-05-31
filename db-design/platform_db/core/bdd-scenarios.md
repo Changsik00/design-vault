@@ -2111,7 +2111,7 @@ Scenario: "결제했는데 권한 안 열림" 복구 — FINANCE 운영자가 en
 
   When 운영자가 Support Action으로 org_pk=1에 entitlement를 강제 부여한다 (사유='webhook 유실 복구')
 
-  Then org_entitlement UPSERT(ON CONFLICT (org_pk, product_code) DO UPDATE SET status=EXCLUDED.status, source=EXCLUDED.source, valid_until=EXCLUDED.valid_until): status='ACTIVE', source='MANUAL', valid_until 갱신
+  Then org_entitlement UPSERT(ON CONFLICT (org_pk, service) DO UPDATE SET status=EXCLUDED.status, source=EXCLUDED.source, valid_until=EXCLUDED.valid_until): status='ACTIVE', source='MANUAL', valid_until 갱신
   And organization.perm_version이 bump된다 (§F.1 패턴)
   And audit_log에 INSERT: actor_type='OPERATOR', action='support_action_grant_entitlement', result='ALLOW',
       meta_json={who:operator_pk, when:'2026-05-30T...', why:'webhook 유실 복구', target_org_pk:1, source:'MANUAL'}

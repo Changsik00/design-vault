@@ -534,7 +534,7 @@ CREATE TABLE org_entitlement (
   CONSTRAINT chk_entitlement_service CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE')),
   CONSTRAINT chk_entitlement_status  CHECK (status IN ('ACTIVE','GRACE','SUSPENDED','EXPIRED')),
   CONSTRAINT chk_entitlement_source  CHECK (source IN ('SUBSCRIPTION','PROMO','MANUAL','FREE')),
-  CONSTRAINT uq_org_product UNIQUE (org_pk, product_code),
+  CONSTRAINT uq_org_service UNIQUE (org_pk, service),   -- org는 서비스당 entitlement 1개 (병합 접근 투영)
   CONSTRAINT fk_ent_org FOREIGN KEY (org_pk) REFERENCES organization(pk)
 );
 CREATE INDEX idx_org_service_status  ON org_entitlement (org_pk, service, status, valid_until);  -- Gate B 핫패스 (R8 자문 반영)
@@ -546,9 +546,9 @@ CREATE INDEX idx_entitlement_expiry  ON org_entitlement (valid_until, status);  
 - **feature_limits 우선순위**: `org_entitlement.feature_limits`(JSONB)가 최종 권위(SSOT). `product_feature`·`plan_definition.default_limits`는 entitlement 최초 생성 시 초기값 복사용으로만 사용. 런타임 한도 판단 시 이 두 테이블 직접 조회 금지(불변식 #10). JSONB는 GIN 인덱스로 `@>` 키 검색이 가능하나, 권한·격리 키(`org_pk`·`service`·`status`)는 여전히 정규 컬럼으로 유지 — GIN은 보조.
 - **Gate B 체크**: `status IN ('ACTIVE','GRACE') AND (valid_until IS NULL OR valid_until > now())`. status만 보면 배치 실패 시 영구 무료 위험(불변식 #9).
 - **grace_until**: Gate B 판정 기준. `org_subscription.grace_until`은 빌링 추적용, Gate B는 이 컬럼만 읽음.
-- UNIQUE(org_pk, product_code): 한 org가 같은 product를 두 번 entitlement 받을 수 없음
-- **변경 API 스코프**: entitlement UPDATE/UPSERT는 unique 키 `(org_pk, product_code)`로 단일 행을 변경한다(불변식 #14). `(org_pk, service)`만으로 UPDATE하면 동일 service에 복수 product가 있을 때 **전부 갱신**된다(예: ACADEMY Basic + ACADEMY Pro). 운영자 override(`adminForceEntitlementStatus`)도 동일 — [[operator-plane]] override 계약.
-- **product_code↔service 정합은 앱 불변식**: UNIQUE에 service 미포함(`product_code`가 전역 UNIQUE라 service 유도). §F.1 UPSERT가 `product.service`와 일치하는 service만 기록하도록 보장 — 어긋난 행이 들어가면 Gate B 핫패스 인덱스(`idx_org_service_status`) 오통과 위험.
+- **UNIQUE(org_pk, service): org는 서비스당 entitlement 1개.** entitlement는 그 org의 *그 서비스 접근 상태*를 나타내는 **병합된 권한 투영**이다. 구독 상세(번들·복수 SKU)는 `subscription_item`이 N:M으로 보유(불변식 #11)하되, 접근 투영은 service당 1행으로 병합한다.
+- **변경 API 스코프**: entitlement UPDATE/UPSERT는 unique 키 `(org_pk, service)`로 단일 행을 변경한다(불변식 #14). Gate B의 유일 진입점도 `(org_pk, service)` 조회라 DB UNIQUE와 일치 — 한 service에 복수 행이 없으므로 "어느 행?" 모호성이 원천 차단된다. 운영자 override(`adminForceEntitlementStatus`)도 `(org_pk, service)`로 — [[operator-plane]] override 계약.
+- **`product_code`는 컬럼으로 유지**: "현재 활성 상품"을 가리킨다. 같은 service 내 상품 교체(BASIC→PRO)는 새 행이 아니라 **같은 행의 `product_code`·`feature_limits` 갱신**(UPSERT가 `(org_pk, service)` 충돌로 기존 행 UPDATE). `product.service`와 일치하는 service만 기록(앱 불변식).
 - `GRACE`: 결제 실패 후 유예 기간 (grace_until까지 서비스 유지)
 
 ## D.13 org_subscription
@@ -880,11 +880,12 @@ BEGIN;
   -- 3. 권한 활성화 (upsert)
   INSERT INTO org_entitlement (org_pk, product_code, service, status, source, feature_limits, valid_until)
   VALUES (?orgPk, ?productCode, ?service, 'ACTIVE', 'SUBSCRIPTION', ?limits, ?validUntil)
-  ON CONFLICT (org_pk, product_code) DO UPDATE SET
+  ON CONFLICT (org_pk, service) DO UPDATE SET
+    product_code=EXCLUDED.product_code,   -- 같은 service 내 상품 교체 시 현재 활성 상품 갱신
     status='ACTIVE',
     feature_limits=EXCLUDED.feature_limits,
     valid_until=EXCLUDED.valid_until;
-    -- 충돌 타깃: 유니크 제약 uq_org_product (org_pk, product_code)
+    -- 충돌 타깃: 유니크 제약 uq_org_service (org_pk, service) — org는 서비스당 entitlement 1개
 
   -- 4. perm_version 갱신 → 클라이언트 캐시 invalidation
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;

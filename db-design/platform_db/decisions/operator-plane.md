@@ -83,8 +83,8 @@ tags:
 운영자/관리자 override 연산(`adminForceSubscriptionStatus`·`adminForceEntitlementStatus`·`adminSuspendUser`·`adminReactivateUser`·`adminRevokeApiKey`·`grantAdminAccess` 등)은 테넌트 우회로 상태를 강제하므로 **아래 계약을 모두 지킨다**:
 
 1. **신원**: operator-plane 신원(`actor_type='OPERATOR'`)으로만 — 테넌트 `platform_role` 아님. 호출 가능 역할은 역할 매트릭스를 따른다(예: entitlement 강제=FINANCE, api_key revoke=SECURITY).
-2. **잠금**: 대상 행을 `SELECT … FOR UPDATE`로 잠그고 변경(불변식 #12) — 동시 override·사용자 작업과의 race 방지.
-3. **스코프**: 단일 행을 결정하는 키로만 변경(불변식 #14). 특히 `adminForceEntitlementStatus`는 `(org_pk, product_code)`로 — `(org_pk, service)`만 쓰면 동일 service 복수 상품이 전부 갱신된다(이슈 H4).
+2. **race 방지**: 조건부 UPDATE(`WHERE 기대상태` + 영향행 검증) 또는 `SELECT … FOR UPDATE` 중 하나로 동시 override·사용자 작업과의 race를 막는다(불변식 #12, [[concurrency-control]]). *단, override는 "현재 상태 무시 강제"가 의도라 상태 전제 가드는 생략할 수 있다 — 대신 존재 확인 + 같은 행만 잠그면 충분.*
+3. **스코프**: 단일 행을 결정하는 키로만 변경(불변식 #14). `adminForceEntitlementStatus`는 unique 키 `(org_pk, service)`로 — org는 서비스당 entitlement 1개라 한 행만 갱신된다(이슈 H4: 이전 `(org_pk, product_code)` 가정에서 발생하던 over-update가 키 정합으로 해소).
 4. **outbox**: 같은 트랜잭션에서 `outbox_event` 발행(불변식 #13, [[outbox-pattern]] 레지스트리) — admin override도 검색 색인·캐시 무효화·알림 등 부수효과가 billing 경로와 동일하다(이슈 H1: admin 함수군 누락).
 5. **감사**: `audit_log`에 `support_action=TRUE` + who(operator)/when/why(`meta_json`) 기록 — 컴플라이언스 필수([[audit-two-lane]] · [[break-glass]] 원칙). silent override 금지.
 6. **멱등/재실행 안전**: 같은 override 재시도가 중복 부수효과를 만들지 않도록(이벤트 멱등키).
@@ -92,13 +92,15 @@ tags:
 | 의무 | 근거 |
 |---|---|
 | operator-plane 신원으로만 호출 | actor_type='OPERATOR', 역할 매트릭스 |
-| `SELECT … FOR UPDATE` 잠금 | 불변식 #12 (race 방지) |
-| 단일행 결정 키로만 변경 | 불변식 #14 (entitlement=(org_pk, product_code), 이슈 H4) |
+| 조건부 UPDATE 또는 `FOR UPDATE` | 불변식 #12 · [[concurrency-control]] (race 방지) |
+| 단일행 결정 키로만 변경 | 불변식 #14 (entitlement=`(org_pk, service)`, 이슈 H4) |
 | 같은 트랜잭션 `outbox_event` 발행 | 불변식 #13, [[outbox-pattern]] (이슈 H1) |
 | `audit_log` who/when/why 기록 | [[audit-two-lane]] · [[break-glass]], silent override 금지 |
 | 멱등키로 재실행 안전 | 중복 부수효과 방지 |
 
 **grantAdminAccess regrant 의미**(이슈 M4): 만료·취소된 접근을 재부여할 때 `updated_at`을 갱신하고 `created_at`은 최초 부여 시점으로 보존한다(또는 append-only 이력 모델이면 새 행 추가) — "언제 처음/다시 부여됐나"가 감사에서 추적되도록 한다. 빈 갱신(no-op) 금지.
+
+**테스트 요지**: override 함수마다 ① 같은 트랜잭션 `outbox_event` INSERT 검증 ② 대상 부재 시 `NOT_FOUND` ③ `support_action=TRUE` 감사 row 기록을 확인한다. **🟡 알려진 갭**: override **멱등성(같은 상태로 두 번 force → outbox 1회)**은 아직 미검증 — consumer 멱등성으로 보강 필요. (실제 DB 검증법: [[testing-strategy]] · [[orm-testing-drizzle]])
 
 ---
 
