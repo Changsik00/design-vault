@@ -1,5 +1,5 @@
 ---
-difficulty: 중급
+difficulty: 중
 tags:
   - platform-db
   - explainer
@@ -19,7 +19,7 @@ aliases:
 
 # 비밀·암호화 경계 (KMS·bcrypt) 설명 — 무엇을 어디서 어떻게 보호하나
 
-> **대상**: 암호화를 깊게 안 다뤄본 개발자 (공부용 · 사수 모드)
+> **대상**: 암호화를 깊게 안 다뤄본 개발자 (공부용)
 > **연관 문서**: [[schema-reference|schema-reference.md §H.3·§H.4·§J]] · [[requirements|requirements.md SEC-4·SEC-6·SEC-8·OPS-4]]
 
 "비밀번호는 암호화해서 저장하면 되는 거 아냐?" — 흔하지만 **틀린** 직관입니다. 비밀번호는 사실 *암호화*하면 안 되고 *해시*해야 합니다. 반대로 OAuth refresh_token은 해시하면 안 되고 *암호화*해야 합니다. 둘은 정반대 도구이고, 무엇을 언제 쓰는지 헷갈리면 보안이 무너집니다. 이 문서는 `platform_db`의 **암호화 경계**(§H.3) — 어떤 데이터를 어디서 누가 어떻게 보호하는지 — 를 그 둘의 차이부터 설명합니다.

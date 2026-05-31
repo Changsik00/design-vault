@@ -1,5 +1,5 @@
 ---
-difficulty: 중급
+difficulty: 중
 tags:
   - platform-db
   - explainer
@@ -17,7 +17,7 @@ aliases:
 
 # Permission Debugger 설명 — "왜 막혔나"를 1초에 답하는 계약 (DBG-1)
 
-> **대상**: 인가·운영을 공부하는 개발자 (공부용 · 사수 모드)
+> **대상**: 인가·운영을 공부하는 개발자 (공부용)
 > **연관 문서**: [[operability|operability.md O2]] · [[gate-abc-flow|Gate A/B/C 흐름]] · [[requirements|requirements.md DBG-1]]
 
 "왜 403이 떴어요?"는 SaaS 운영에서 가장 자주, 가장 답하기 어려운 질문입니다. 사용자는 막혔는데 이유를 모르고, CS는 개발자에게 묻고, 개발자는 `membership`·`org_entitlement`·`service_membership`·`delegation_grant` **네 테이블을 직접 뒤지며** 원인을 추적합니다. 이게 매번 반복되면 운영이 마비됩니다. **Permission Debugger**는 "이 거부가 *어느 게이트에서, 왜* 발생했는지"를 **1초에 trace로 반환**하는 계약입니다. 이 문서는 그게 왜 UI가 아니라 *계약*이고, 왜 platform_db의 책임인지 설명합니다.

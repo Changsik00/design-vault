@@ -1,5 +1,5 @@
 ---
-difficulty: 고급
+difficulty: 고
 tags:
   - platform-db
   - explainer

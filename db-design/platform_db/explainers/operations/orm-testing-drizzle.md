@@ -1,12 +1,12 @@
 ---
-difficulty: 중급
+difficulty: 중
 tags: [platform-db, explainer, operations, testing, orm, drizzle]
 aliases: [ORM 테스트, Drizzle 테스트, orm-testing-drizzle]
 ---
 
 # ORM(Drizzle) 테스트 전략 — "타입은 통과하는데 진짜 DB에선 터지는" 갭을 메우는 법
 
-> **대상**: ORM은 써봤지만 ORM 코드를 *어떻게 테스트하는지*는 막막한 개발자 (공부용 — 사수와 함께 읽는 노트)
+> **대상**: ORM은 써봤지만 ORM 코드를 *어떻게 테스트하는지*는 막막한 개발자 (공부용)
 > **연관 문서**: [[testing-strategy|테스트 전략]] · [[architecture|architecture.md §1 토폴로지]] · [[schema-reference|schema-reference.md §A.2 접근 계층]] · [[bola-object-authz|BOLA 객체 인가]] · [[multitenancy-rls|멀티테넌시 격리]]
 
 이 프로젝트는 **MySQL 8 + Drizzle ORM** 스택입니다. 그리고 DB 접근은 오직 `@aiagent/db-platform` 패키지 함수로만 합니다 — Drizzle 스키마를 직접 참조하는 것은 금지입니다([[schema-reference|§A.2]]). ORM은 SQL을 손으로 안 써도 되게 해주는 편한 도구지만, 바로 그 "편함" 때문에 **테스트에서 잘못된 안도감**을 주기 쉽습니다. 타입 체크는 초록불인데 운영에서 터지는 일이 ORM 코드에서 자주 납니다. 이 문서는 Drizzle 코드를 어디까지 mock하고 어디부터 진짜 DB로 검증해야 하는지, 그리고 그걸 실제로 어떻게 짜는지 공부하는 노트입니다.

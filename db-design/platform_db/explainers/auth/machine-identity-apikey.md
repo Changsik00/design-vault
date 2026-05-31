@@ -1,5 +1,5 @@
 ---
-difficulty: 고급
+difficulty: 고
 tags:
   - platform-db
   - explainer
@@ -19,7 +19,7 @@ aliases:
 
 # 머신·B2B 신원 (api_key) 설명 — 사람만 사용자가 아니다
 
-> **대상**: 인증/인가를 깊게 안 다뤄본 개발자 (공부용 · 사수 모드)
+> **대상**: 인증/인가를 깊게 안 다뤄본 개발자 (공부용)
 > **연관 문서**: [[schema-reference|schema-reference.md §J·§B·§H.3·§H.4]] · [[requirements|requirements.md P6 · AUTHN-5·RBAC-4·SEC-5·SEC-7·ABAC-6]] · [[e2e-journeys|e2e-journeys.md C-07]]
 
 "우리 시스템의 사용자는 사람이다." — 대부분의 개발자가 무의식적으로 가진 전제입니다. 그런데 agent가 우리 API를 호출하거나, B2B 파트너 회사의 서버가 자동으로 강의 데이터를 긁어가야 한다면? 거기엔 로그인 화면 앞에 앉은 사람이 없습니다. **머신도 신원이 필요합니다.** 이 문서는 `platform_db`가 머신 신원을 어떻게 모델링하고, 핵심 원칙인 "머신도 사람과 똑같은 게이트를 통과한다"를 어떻게 강제하는지 설명합니다.
