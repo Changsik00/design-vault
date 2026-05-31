@@ -125,7 +125,7 @@ D - Durability (지속성)  : COMMIT되면 서버가 죽어도 데이터 유지 
 BEGIN;
   INSERT INTO payment_ledger (...) VALUES (..., 'SUCCEEDED');  -- 결제 기록
   UPDATE org_subscription SET status='ACTIVE' WHERE pk=?;       -- 구독 활성
-  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, product_code) DO UPDATE SET ...; -- 권한 활성
+  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, service) DO UPDATE SET ...; -- 권한 활성
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?; -- 전파
 COMMIT;
 -- COMMIT 성공 = 네 줄 모두 확정. 중간 크래시 = 네 줄 모두 rollback
@@ -150,7 +150,17 @@ await db.insert(orgEntitlement)...;          // 영영 실행 안 됨 → 결제
 
 > 💡 **한 줄 요약**: ACID의 원자성(Atomicity)은 결제+권한을 "전부 또는 전무"의 한 덩어리로 묶어, 계좌이체처럼 중간 크래시에도 불일치 상태가 생기지 않게 합니다.
 
-> 🔒 **상태 전환엔 행 잠금이 필수**: 원자성(전부/전무)과 별개로, **read-modify-write**(구독·entitlement 상태를 읽고→판단→갱신)는 동시에 두 트랜잭션이 같은 행을 읽으면 둘 다 "전환해도 됨"으로 판단해 **중복 전환·outbox 이중 발행**이 납니다(lost update). 그래서 상태 전환 함수는 대상 행을 `SELECT … FOR UPDATE`로 **잠근 뒤** 변경합니다(architecture 불변식 #12). 락 없는 `SELECT`-then-`UPDATE`는 금지. (outbox 워커의 `FOR UPDATE SKIP LOCKED`와는 목적이 다름 — 그건 워커 간 작업 분배, 이건 상태 전환 직렬화.)
+> 🔒 **상태 전환은 직렬화가 필수**: 원자성(전부/전무)과 별개로, **read-modify-write**(구독·entitlement 상태를 읽고→판단→갱신)는 동시에 두 트랜잭션이 같은 행을 읽으면 둘 다 "전환해도 됨"으로 판단해 **중복 전환·outbox 이중 발행**이 납니다(lost update). 그래서 상태 전환은 `SELECT … FOR UPDATE`로 대상 행을 **잠근 뒤** 변경하거나, **조건부 UPDATE(compare-and-set)** 중 하나로 직렬화합니다(architecture 불변식 #12). 락 없는 `SELECT`-then-`UPDATE`는 금지. (outbox 워커의 `FOR UPDATE SKIP LOCKED`와는 목적이 다름 — 그건 워커 간 작업 분배, 이건 상태 전환 직렬화.)
+>
+> 구현이 실제 택한 방식은 **조건부 UPDATE**입니다 — 기대 상태를 `WHERE`에 박아, 전제가 깨진 동시 전환은 영향 행 0으로 떨어집니다:
+>
+> ```sql
+> UPDATE org_subscription SET status='PAST_DUE'
+>  WHERE pk=$1 AND status='ACTIVE';   -- 기대 상태를 WHERE에
+> -- 영향 행 수 0 → 전제 위반(PRECONDITION_FAILED, 409)
+> ```
+>
+> 영향 행 수는 Drizzle의 `.returning({ pk })` 길이 또는 node-postgres `result.rowCount`로 검증합니다. (🐬 MySQL의 `affectedRows`/`as unknown as` 캐스트는 MySQL 한정입니다.)
 
 ---
 
@@ -214,7 +224,7 @@ BEGIN;
   -- 강한 일관성 영역: 사용자가 즉시 봐야 하는 것
   INSERT INTO payment_ledger (...) VALUES (..., 'SUCCEEDED');
   UPDATE org_subscription SET status='ACTIVE' WHERE pk=?;
-  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, product_code) DO UPDATE SET status='ACTIVE', ...;
+  INSERT INTO org_entitlement (...) ON CONFLICT (org_pk, service) DO UPDATE SET status='ACTIVE', ...;
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;
 
   -- "부수효과를 해야 함"이라는 기록도 강하게 남김 (발송은 나중)
@@ -429,6 +439,59 @@ describe("결제↔권한 강한 일관성 (단일 트랜잭션)", () => {
       where: eq(outboxEvent.pk, evt!.pk),
     });
     expect(after?.status).toBe("SENT");
+  });
+});
+```
+
+상태 전환 직렬화(조건부 UPDATE, 불변식 #12)는 별도로 검증합니다. **①** 정상 전환(전제 충족) **②** 잘못된 전제상태 → 0행 → `PRECONDITION_FAILED` throw **③** 동시 2 트랜잭션이 같은 행을 전환 시도 → 하나만 성공. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest를 씁니다.
+
+```typescript
+// subscription-transition.test.ts
+import { describe, it, expect, beforeEach } from "vitest";
+import { eq, and, sql } from "drizzle-orm";
+
+// 조건부 UPDATE: 기대 상태를 WHERE에 — 영향 행 0이면 전제 위반
+async function transition(tx, pk: number, from: string, to: string) {
+  const rows = await tx
+    .update(orgSubscription)
+    .set({ status: to })
+    .where(and(eq(orgSubscription.pk, pk), eq(orgSubscription.status, from)))
+    .returning({ pk: orgSubscription.pk });
+  if (rows.length === 0) {
+    throw new PreconditionFailedError(`expected ${from}`); // → 409
+  }
+}
+
+describe("상태 전환 직렬화 (조건부 UPDATE, 불변식 #12)", () => {
+  beforeEach(async () => {
+    await db.delete(orgSubscription);
+    await db.insert(orgSubscription).values({ pk: 1, status: "ACTIVE" });
+  });
+
+  it("① 정상: 전제(ACTIVE)가 맞으면 PAST_DUE로 전환된다", async () => {
+    await db.transaction((tx) => transition(tx, 1, "ACTIVE", "PAST_DUE"));
+    const sub = await db.query.orgSubscription.findFirst({ where: eq(orgSubscription.pk, 1) });
+    expect(sub?.status).toBe("PAST_DUE");
+  });
+
+  it("② 잘못된 전제상태: 0행 → PRECONDITION_FAILED를 던진다", async () => {
+    // 이미 ACTIVE가 아닌 상태로 전제를 어긋나게 함
+    await db.update(orgSubscription).set({ status: "CANCELED" }).where(eq(orgSubscription.pk, 1));
+    await expect(
+      db.transaction((tx) => transition(tx, 1, "ACTIVE", "PAST_DUE")),
+    ).rejects.toThrow(PreconditionFailedError); // 영향 행 0 → 전제 위반
+  });
+
+  it("③ 동시 전환: 두 트랜잭션이 같은 행을 전환하면 하나만 성공한다", async () => {
+    const attempt = () =>
+      db.transaction((tx) => transition(tx, 1, "ACTIVE", "PAST_DUE")).then(
+        () => "ok" as const,
+        () => "fail" as const,
+      );
+    const results = await Promise.all([attempt(), attempt()]);
+    // 같은 ACTIVE→PAST_DUE를 둘이 시도해도 한 쪽만 1행을 잡고, 나머지는 0행
+    expect(results.filter((r) => r === "ok")).toHaveLength(1);
+    expect(results.filter((r) => r === "fail")).toHaveLength(1);
   });
 });
 ```

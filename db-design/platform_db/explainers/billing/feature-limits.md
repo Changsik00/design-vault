@@ -233,7 +233,7 @@ org가 BASIC → PRO로 플랜을 업그레이드하면 결제 성공 webhook �
 -- 결제 단일 트랜잭션 내에서
 INSERT INTO org_entitlement (org_pk, product_code, service, status, feature_limits, plan_code, valid_until)
 VALUES (?, ?, 'ACADEMY', 'ACTIVE', ?, 'PRO', ?)
-ON CONFLICT (org_pk, product_code) DO UPDATE SET
+ON CONFLICT (org_pk, service) DO UPDATE SET
   status = 'ACTIVE',
   feature_limits = EXCLUDED.feature_limits,  -- PRO 플랜 한도로 교체
   plan_code = EXCLUDED.plan_code,
@@ -317,7 +317,7 @@ const limits = AcademyFeatureLimitsSchema.parse(entitlement.featureLimits);
 
 > 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
 
-핵심 보장은 "런타임 한도는 항상 `org_entitlement.feature_limits`(SSOT)에서만 읽힌다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 DB를 띄워 3중 SSOT 우선순위와 JSONB 한도 조회를 검증합니다.
+핵심 보장은 "런타임 한도는 항상 `org_entitlement.feature_limits`(SSOT)에서만 읽힌다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 DB를 띄워 3중 SSOT 우선순위와 JSONB 한도 조회를 검증합니다. 추가로 entitlement UPSERT가 `(org_pk, service)` 충돌 키를 쓰므로 **상품 교체(BASIC→PRO) 시 새 행을 만들지 않고 같은 행을 갱신**하는지도 검증합니다(org는 서비스당 entitlement 1개).
 
 ```typescript
 // feature-limits.test.ts
@@ -385,6 +385,33 @@ describe("feature_limits 3중 SSOT 우선순위", () => {
 
     const limit = await getFeatureLimit(99, "ACADEMY", "daily_uploads");
     expect(limit).toBe(5); // ✅ 명시적 마이그레이션 없이는 그대로
+  });
+
+  it("entitlement UPSERT는 (org_pk, service) 충돌로 상품 교체 시 같은 행을 갱신한다 (BASIC→PRO)", async () => {
+    // org는 서비스당 entitlement 1개. ON CONFLICT (org_pk, service)로 UPSERT.
+    function upsertEntitlement(productCode: string, planCode: string, limits: Record<string, number>) {
+      return db.insert(orgEntitlement)
+        .values({
+          orgPk: 7, productCode, service: "ACADEMY", status: "ACTIVE",
+          planCode, featureLimits: limits,
+        })
+        .onConflictDoUpdate({
+          target: [orgEntitlement.orgPk, orgEntitlement.service], // (org_pk, service)
+          set: {
+            productCode, planCode,
+            featureLimits: limits, // PRO 한도로 교체
+          },
+        });
+    }
+
+    await upsertEntitlement("ACADEMY_BASIC", "BASIC", { daily_uploads: 5 });
+    await upsertEntitlement("ACADEMY_PRO", "PRO", { daily_uploads: 50 }); // 업그레이드
+
+    const rows = await db.select().from(orgEntitlement)
+      .where(and(eq(orgEntitlement.orgPk, 7), eq(orgEntitlement.service, "ACADEMY")));
+    expect(rows).toHaveLength(1);                              // ✅ 새 행 안 생기고 1개 유지
+    expect(rows[0].productCode).toBe("ACADEMY_PRO");           // product_code 갱신됨
+    expect((rows[0].featureLimits as Record<string, number>).daily_uploads).toBe(50); // 한도 갱신됨
   });
 });
 ```

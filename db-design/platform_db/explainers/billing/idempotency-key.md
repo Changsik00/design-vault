@@ -322,6 +322,11 @@ CREATE TABLE pg_webhook_event (
 
 멱등성의 핵심 보장은 "같은 `idempotency_key`로 동시에 두 번 INSERT해도 하나만 성공하고, 두 번째는 UNIQUE 위반(SQLSTATE 23505)으로 잡혀 중복 결제가 안 된다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 UNIQUE 제약을 띄워 동시성까지 검증합니다.
 
+검증된 테스트 패턴 3가지:
+- **`recordRefund` 동일 키 재시도**: DB UNIQUE 위반(23505)으로 거부되거나, app-level 사전조회로 `DUPLICATE`(409)를 반환합니다(이중 보호 — DB 제약 + 앱 사전조회 둘 중 하나가 항상 막음).
+- **동시 중복 INSERT**: `Promise.allSettled`로 동시에 던져도 정확히 1건만 성공.
+- **`pg_webhook_event` 재수신**: 같은 `(pg_provider, event_id)`가 다시 와도 두 번째는 skip(처리 로직 재실행 없음).
+
 ```typescript
 // idempotency-key.test.ts
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
@@ -381,19 +386,57 @@ describe("idempotency_key 중복 결제 방지", () => {
     expect(failed).toHaveLength(1); // 나머지는 23505
   });
 
-  it("ON CONFLICT DO NOTHING: 재시도 시 에러 없이 기존 결과를 재사용한다", async () => {
-    const key = "onetime_42_PRO_sess-abc";
-    const first = await db.insert(paymentLedger)
-      .values({ orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 10000n, status: "PENDING" })
-      .onConflictDoNothing({ target: paymentLedger.idempotencyKey })
+  it("recordRefund 동일 키 재시도: DB 23505 또는 app-level DUPLICATE(409) — 이중 보호", async () => {
+    const key = "refund_42_pay9_2026-05";
+
+    // recordRefund: app-level 사전조회 → 있으면 409 throw, 없으면 INSERT(REFUND, 음수 금액)
+    async function recordRefund(orgPk: number, amountMinor: bigint, k: string) {
+      const existing = await db.select().from(paymentLedger)
+        .where(eq(paymentLedger.idempotencyKey, k));
+      if (existing.length > 0) {
+        throw new DuplicateError("DUPLICATE", 409); // 사전조회로 먼저 차단
+      }
+      // 사전조회를 통과해도 동시성 틈에서 INSERT가 23505로 거부될 수 있음
+      await db.insert(paymentLedger).values({
+        orgPk, idempotencyKey: k, type: "REFUND", amountMinor, status: "SUCCEEDED",
+      });
+    }
+
+    await recordRefund(42, -5000n, key); // 첫 환불 성공
+
+    // 재시도 → app-level에서 DUPLICATE(409)
+    await expect(recordRefund(42, -5000n, key))
+      .rejects.toMatchObject({ message: "DUPLICATE", status: 409 });
+
+    // 사전조회를 우회한 직접 INSERT는 DB UNIQUE(23505)가 막는다 (이중 보호)
+    await expect(
+      db.insert(paymentLedger).values({
+        orgPk: 42, idempotencyKey: key, type: "REFUND", amountMinor: -5000n, status: "SUCCEEDED",
+      }),
+    ).rejects.toMatchObject({ code: "23505" });
+
+    const rows = await db.select().from(paymentLedger).where(eq(paymentLedger.idempotencyKey, key));
+    expect(rows).toHaveLength(1); // ✅ 환불 한 건만
+  });
+
+  it("pg_webhook_event 재수신: 같은 (pg_provider, event_id)는 두 번째 skip", async () => {
+    const evt = { pgProvider: "TOSS" as const, eventId: "evt_toss_abc123" };
+
+    // 인바운드 멱등성: (pg_provider, event_id) UNIQUE → ON CONFLICT DO NOTHING
+    const first = await db.insert(pgWebhookEvent)
+      .values({ ...evt, status: "RECEIVED" })
+      .onConflictDoNothing({ target: [pgWebhookEvent.pgProvider, pgWebhookEvent.eventId] })
       .returning();
-    const retry = await db.insert(paymentLedger)
-      .values({ orgPk: 42, idempotencyKey: key, type: "CHARGE", amountMinor: 10000n, status: "PENDING" })
-      .onConflictDoNothing({ target: paymentLedger.idempotencyKey })
+    const second = await db.insert(pgWebhookEvent)
+      .values({ ...evt, status: "RECEIVED" })
+      .onConflictDoNothing({ target: [pgWebhookEvent.pgProvider, pgWebhookEvent.eventId] })
       .returning();
 
-    expect(first).toHaveLength(1); // 첫 INSERT는 행 반환
-    expect(retry).toHaveLength(0); // 재시도는 충돌 → 아무 행 안 만들고 무시
+    expect(first).toHaveLength(1);  // 처음 수신 → 처리 진행
+    expect(second).toHaveLength(0); // 재수신 → skip (처리 로직 재실행 없이 200 OK)
+
+    const rows = await db.select().from(pgWebhookEvent);
+    expect(rows).toHaveLength(1); // ✅ 이벤트 한 건만
   });
 });
 ```
