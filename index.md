@@ -13,7 +13,7 @@ tags:
 
 이 vault의 **단일 카탈로그**다. 무엇이 어디 있는지 여기서 다 찾는다.
 
-> 🧭 사람용 소개·배포 랜딩 → [README](./README.md) · 위키 운영 규약(Ingest/Query/Lint) → [WIKI](./WIKI.md) · 변경 이력 → [log](./log.md) · 작성 규약 → [[CONVENTIONS]]
+> 🧭 사람용 소개·배포 랜딩 → [README](./README.md) · 위키 운영 규약(Ingest/Query/Lint) → [WIKI](./WIKI.md) · 변경 이력 → [log](./log.md) · 작성 규약 → [[CONVENTIONS]] · 📖 용어·약어 → [[glossary]]
 > 📄 **설계 문서(코드 없음).** 상태 표기 = *설계 성숙도*(✅ 확정 · 🟡 부분 · 🔴 미설계 · ⛔ 보류 · ❓ 미결정).
 > 🐘 DDL·정책은 **PostgreSQL 1순위**, MySQL은 `🐬 MySQL이라면` 콜아웃.
 
@@ -44,6 +44,7 @@ tags:
 | [[bdd-scenarios]] | BDD(화이트박스) + 요구 추적 매트릭스 |
 | [[e2e-journeys]] | E2E(블랙박스) 가치 여정 + 예외·생명주기 |
 | [[CONVENTIONS]] | 파일명·frontmatter·wikilink·ID 규약·DB 엔진·다이어그램 |
+| [[glossary]] | 📖 용어집 — 약어 A–Z 빠른 찾기 + 카테고리별 용어(정본 링크) |
 
 ## 🧭 decisions — 왜 이렇게 했나 · 13편
 
