@@ -22,6 +22,7 @@
 | `core/` | architecture · requirements · schema-reference · operability · bdd-scenarios · e2e-journeys |
 | `decisions/` | 설계 의사결정 13편 (audit-two-lane, auth-projection, service-extensibility …) |
 | `explainers/` | 학습 문서 37편 — auth · billing · data-modeling · security · compliance · operations ([인덱스](./explainers/README.md)) |
+| [CONVENTIONS.md](./CONVENTIONS.md) | 📐 문서 작성 규약 (파일명·frontmatter·wikilink·다이어그램·DB 엔진 표기) |
 
 ## 🧩 핵심 한 장 요약
 
