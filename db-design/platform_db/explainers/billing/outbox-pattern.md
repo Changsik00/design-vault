@@ -252,7 +252,7 @@ BEGIN;
   -- 3. 권한 활성화
   INSERT INTO org_entitlement (org_pk, service, status, valid_until, feature_limits)
   VALUES (?, 'ACADEMY', 'ACTIVE', ?, ?)
-  ON CONFLICT (org_pk, product_code) DO UPDATE SET status = 'ACTIVE', ...;
+  ON CONFLICT (org_pk, service) DO UPDATE SET status = 'ACTIVE', ...;
 
   -- 4. perm_version 갱신
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
@@ -608,8 +608,62 @@ describe("outbox 원자성 & 동시 워커", () => {
     expect(b).toBeDefined();
     expect(a).not.toBe(b); // ✅ 서로 다른 row를 집음 (중복 처리 없음)
   });
+
+  it("상태 전환 후 같은 트랜잭션에서 outbox_event 1건이 함께 기록된다 (롤백 시 함께 롤백)", async () => {
+    // 상태 전환 + outbox INSERT가 한 트랜잭션 → 함께 커밋
+    await db.transaction(async (tx) => {
+      await tx.update(orgSubscription).set({ status: "ACTIVE" }).where(eq(orgSubscription.pk, 1));
+      await tx.insert(outboxEvent).values({
+        aggregateType: "subscription", aggregatePk: 1n,
+        eventType: "subscription.activated", payloadJson: {}, status: "PENDING",
+      });
+    });
+    expect(await db.select().from(outboxEvent)).toHaveLength(1);
+
+    // 본 작업이 throw하면 outbox INSERT도 함께 사라짐
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update(orgSubscription).set({ status: "PAST_DUE" }).where(eq(orgSubscription.pk, 1));
+        await tx.insert(outboxEvent).values({
+          aggregateType: "subscription", aggregatePk: 1n,
+          eventType: "subscription.grace", payloadJson: {}, status: "PENDING",
+        });
+        throw new Error("본 작업 실패 주입");
+      }),
+    ).rejects.toThrow();
+    expect(await db.select().from(outboxEvent)).toHaveLength(1); // ✅ 두 번째는 롤백
+  });
+
+  it("recordRefund: outbox aggregate_pk가 payment_ledger.pk이다 (orgPk가 아님)", async () => {
+    const [ledger] = await db.insert(paymentLedger).values({
+      orgPk: 7, idempotencyKey: "rf1", type: "REFUND", amountMinor: 10000n, status: "SUCCEEDED",
+    }).returning({ pk: paymentLedger.pk });
+
+    await recordRefund({ orgPk: 7, paymentLedgerPk: ledger.pk, amountMinor: 10000n });
+
+    const evt = await db.query.outboxEvent.findFirst({
+      where: eq(outboxEvent.eventType, "payment.refunded"),
+    });
+    // ✅ 이벤트가 *관한* 엔티티 = 결제 원장. orgPk(7)가 아니라 ledger.pk
+    expect(evt?.aggregatePk).toBe(BigInt(ledger.pk));
+    expect(evt?.aggregatePk).not.toBe(7n);
+  });
+
+  it("webhook 멱등: 같은 event_id를 두 번 처리하면 두 번째는 PROCESSED skip, 부수효과 1회", async () => {
+    const evt = { eventId: "evt_dup", orgPk: 1, amount: 10000, status: "PAID" } as const;
+
+    await processWebhookEvent(evt);
+    await processWebhookEvent(evt); // 같은 event_id 재처리
+
+    // 두 번째는 이미 PROCESSED → handler skip
+    const events = await db.select().from(outboxEvent)
+      .where(eq(outboxEvent.eventType, "subscription.activated"));
+    expect(events).toHaveLength(1); // ✅ 부수효과 기록은 1회만
+  });
 });
 ```
+
+> 🟡 **알려진 갭 (at-least-once)**: `processWebhookEvent`는 handler 실행과 webhook status `UPDATE`가 **서로 다른 트랜잭션**입니다. handler 성공 직후 status UPDATE 전에 죽으면 다음 처리에서 handler가 한 번 더 실행될 수 있습니다(at-least-once). 따라서 **handler 멱등성은 caller 책임**입니다 — 예컨대 `activateSubscription`의 `ON CONFLICT (org_pk, service)` UPSERT가 그 멱등 장치라, 재실행돼도 entitlement는 한 번 활성화된 상태로 수렴합니다.
 
 > at-least-once 특성상 "정확히 한 번"은 보장되지 않으므로, 소비 측 멱등 처리는 [[idempotency-key|`idempotency_key`]] 테스트에서 별도로 검증합니다.
 

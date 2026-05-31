@@ -96,7 +96,7 @@ BEGIN;
   -- 권한 활성화 (upsert)
   INSERT INTO org_entitlement (org_pk, product_code, service, status, valid_until, feature_limits)
   VALUES (?, ?, 'ACADEMY', 'ACTIVE', ?, ?)
-  ON CONFLICT (org_pk, product_code) DO UPDATE SET
+  ON CONFLICT (org_pk, service) DO UPDATE SET
     status = 'ACTIVE',
     valid_until = EXCLUDED.valid_until,
     feature_limits = EXCLUDED.feature_limits;
@@ -301,13 +301,19 @@ UPDATE organization SET perm_version = perm_version + 1 WHERE pk = ?;
 
 구독 상태 머신의 핵심 보장은 "합법 전이만 허용하고 불법 전이는 거부한다"입니다(TRIALING → ACTIVE → PAST_DUE → … ). PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 DB에 상태를 적재하고 전이 함수를 돌려 검증합니다.
 
+검증된 테스트 패턴:
+- **합법 전환**: TRIALING→ACTIVE, ACTIVE→PAST_DUE, PAST_DUE→ACTIVE(재결제), PAST_DUE→EXPIRED 모두 성공.
+- **종단 상태 거부**: EXPIRED/CANCELED에서의 전환 시도는 거부(재구독은 신규 전이).
+- **조건부 UPDATE 전제 위반**: `WHERE status = 기대상태`로 UPDATE 후 영향 행이 0이면(잘못된 현재상태로 호출) `PRECONDITION_FAILED`(409)를 throw합니다. Postgres에서는 `rowCount`(또는 `.returning()` 길이)로 영향 행을 검증합니다. 🐬 MySQL이라면 `affectedRows`로 같은 판정.
+- **`resolvePlanCode` 불변식 #15**: billing_event가 없는 구독에서 상태 전환을 호출하면 throw합니다(silent 진행 금지 — plan_code를 추정해서 넘어가지 않음).
+
 ```typescript
 // subscription-lifecycle.test.ts
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 let container: StartedPostgreSqlContainer;
 let db: ReturnType<typeof drizzle>;
@@ -360,12 +366,61 @@ describe("구독 상태 전이 (합법/불법)", () => {
     expect(ent?.status).toBe("EXPIRED");
   });
 
-  it("불법: EXPIRED → ACTIVE 직접 전이는 거부된다 (재구독 필요)", async () => {
+  it("합법: PAST_DUE → EXPIRED (유예 기간 만료)", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "PAST_DUE" }).returning();
+
+    await transition(sub.pk, "EXPIRED");
+    expect((await getSub(sub.pk)).status).toBe("EXPIRED");
+  });
+
+  it("불법: EXPIRED(종단) → ACTIVE 직접 전이는 거부된다 (재구독 필요)", async () => {
     const [sub] = await db.insert(orgSubscription)
       .values({ orgPk: 1, status: "EXPIRED" }).returning();
 
     await expect(transition(sub.pk, "ACTIVE")).rejects.toThrow(/illegal transition/i);
     expect((await getSub(sub.pk)).status).toBe("EXPIRED"); // 변하지 않음
+  });
+
+  it("불법: CANCELED(종단) → ACTIVE 직접 전이는 거부된다", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "CANCELED" }).returning();
+
+    await expect(transition(sub.pk, "ACTIVE")).rejects.toThrow(/illegal transition/i);
+    expect((await getSub(sub.pk)).status).toBe("CANCELED");
+  });
+
+  it("조건부 UPDATE 전제 위반: 잘못된 현재상태로 전환 호출 → 0행 영향 → PRECONDITION_FAILED(409)", async () => {
+    // 실제 상태는 ACTIVE인데, PAST_DUE에서만 가능한 전환을 호출
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "ACTIVE" }).returning();
+
+    // WHERE status = 기대상태(PAST_DUE) → 실제는 ACTIVE라 0행 매칭
+    async function renewFromPastDue(pk: number) {
+      const updated = await db.update(orgSubscription)
+        .set({ status: "ACTIVE" })
+        .where(and(eq(orgSubscription.pk, pk), eq(orgSubscription.status, "PAST_DUE")))
+        .returning(); // Postgres: 영향 행을 .returning()(또는 result.rowCount)로 검증
+      if (updated.length === 0) {
+        throw new PreconditionFailedError("PRECONDITION_FAILED", 409); // 🐬 MySQL이면 affectedRows === 0
+      }
+      return updated[0];
+    }
+
+    await expect(renewFromPastDue(sub.pk))
+      .rejects.toMatchObject({ message: "PRECONDITION_FAILED", status: 409 });
+    expect((await getSub(sub.pk)).status).toBe("ACTIVE"); // 그대로
+  });
+
+  it("resolvePlanCode 불변식 #15: billing_event 없는 구독 전환은 throw (silent 진행 금지)", async () => {
+    const [sub] = await db.insert(orgSubscription)
+      .values({ orgPk: 1, status: "ACTIVE" }).returning();
+    // billing_event를 일부러 적재하지 않음
+
+    // resolvePlanCode가 plan_code를 못 찾으면 추정해서 넘어가지 않고 throw해야 한다
+    await expect(applyPaymentSuccess(sub.pk))
+      .rejects.toThrow(/resolvePlanCode|billing_event|invariant #15/i);
+    expect((await getSub(sub.pk)).status).toBe("ACTIVE"); // 전환 안 됨
   });
 });
 ```
