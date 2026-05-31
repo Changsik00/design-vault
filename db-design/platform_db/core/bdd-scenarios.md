@@ -2548,7 +2548,7 @@ Scenario: service 미전달 시 ACADEMY 기본값 — 잔여 편향(중립화 �
 |---|---|---|
 | C-1 `user_consent_event` 미구현 | PIPA P0 법적 | 후속 구현 |
 | C-2 `api_key` 미구현 | B2B 머신 인증 P1 | 후속 구현 |
-| C-5 youtube_channel의 `org_pk` 컬럼 확인 필요 | 멀티테넌시 불변식 | spec-16-xx 확인 |
+| C-5 youtube_channel의 `org_pk` 컬럼 확인 필요 | 멀티테넌시 불변식 | 서비스 스키마 설계 시 `org_pk NOT NULL` 보강 |
 
 ---
 

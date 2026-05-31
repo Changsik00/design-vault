@@ -1,5 +1,5 @@
 ---
-difficulty: 고급
+difficulty: 고
 tags:
   - platform-db
   - explainer
@@ -17,7 +17,7 @@ aliases:
 
 # ReBAC와 위임(delegation_grant) — 관계 기반 권한
 
-> **대상**: DB 지식이 많지 않은 개발자 (사수와 함께 공부하는 모드)  
+> **대상**: DB 지식이 많지 않은 개발자 (공부용)  
 > **연관 문서**: [[architecture|architecture.md]] §1.2 RBAC/ABAC/ReBAC · [[schema-reference|schema-reference.md]] §D.6 delegation_grant, §D.7 org_relation, §E.4 위임 흐름 · [[requirements|requirements.md]] REBAC-1~8
 
 권한 모델을 공부하다 보면 RBAC(역할), ABAC(속성)는 자주 보이는데 **ReBAC**는 낯섭니다. `platform_db`의 `delegation_grant` 테이블이 바로 이 ReBAC를 구현한 것입니다. role/capability의 *기본 개념*은 [[role-capability]]에서 다뤘으니, 이 문서는 **"관계로 권한을 정한다는 게 뭔지"**, 그리고 **위임(delegation)이 왜 임퍼소네이션과 다른지**에 집중합니다.

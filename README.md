@@ -43,9 +43,9 @@
 상세 커리큘럼은 [explainers 학습 인덱스](./db-design/platform_db/explainers/README.md)(주제별·난이도순)를 따라가면 됩니다.
 
 1. **큰 그림** — `architecture` → `requirements`
-2. **🟢 기초** — multitenancy-rls · gate-abc-flow · pk-ulid-strategy · delete-patterns
-3. **🟡 중급** — role-capability · casl-ability · bola-object-authz · fail-closed · webhook-processing
-4. **🔴 고급** — perm-version-propagation · rebac-delegation · consistency-model · api_key · audit-hash-chain
+2. **🟢 초** — multitenancy-rls · gate-abc-flow · pk-ulid-strategy · delete-patterns
+3. **🟡 중** — role-capability · casl-ability · bola-object-authz · fail-closed · webhook-processing
+4. **🔴 고** — perm-version-propagation · rebac-delegation · consistency-model · api_key · audit-hash-chain
 5. **검증** — bdd-scenarios → e2e-journeys
 
 ## 🛠️ 활용

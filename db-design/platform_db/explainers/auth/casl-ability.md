@@ -1,5 +1,5 @@
 ---
-difficulty: 중급
+difficulty: 중
 tags:
   - platform-db
   - explainer
@@ -19,7 +19,7 @@ aliases:
 
 # CASL ability 설명 — RBAC·ABAC·ReBAC을 하나의 can()으로 합치기 (Gate C 내부)
 
-> **대상**: 인가(authorization) 로직을 처음 다루는 개발자 (공부용 · 사수 모드)
+> **대상**: 인가(authorization) 로직을 처음 다루는 개발자 (공부용)
 > **연관 문서**: [[schema-reference|schema-reference.md §E.2 Gate C]] · [[architecture|architecture.md §1.2]] · [[role-as-code]]
 
 3-gate의 마지막 관문 **Gate C(정책)**는 "이 사람이 *이 행동*을 *이 리소스*에 해도 되나?"를 판단합니다. 그런데 그 판단은 한 종류가 아닙니다 — 역할(RBAC)도 보고, 위임(ReBAC)도 보고, 소유권(ABAC)도 봅니다. 이 세 가지를 *매번 if문으로* 흩어 쓰면 코드가 누더기가 됩니다. **CASL**은 이 셋을 하나의 `ability` 객체로 합쳐, `ability.can(action, resource)` 한 줄로 묻게 해주는 라이브러리입니다. 이 문서는 그 ability가 무엇으로 조립되고 왜 매 요청 새로 만드는지 설명합니다.

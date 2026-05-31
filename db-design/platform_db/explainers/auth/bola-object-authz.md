@@ -1,5 +1,5 @@
 ---
-difficulty: 중급
+difficulty: 중
 tags:
   - platform-db
   - explainer
@@ -17,7 +17,7 @@ aliases:
 
 # BOLA (객체 수준 인가) 설명 — "로그인은 됐는데 남의 데이터가 보이는" 취약점
 
-> **대상**: API 보안이 처음인 개발자 (공부용 — 사수와 함께 읽는 노트)
+> **대상**: API 보안이 처음인 개발자 (공부용)
 > **연관 문서**: [[architecture|architecture.md §2.2 보안]] · [[schema-reference|schema-reference.md §H.1]] · [[multitenancy-rls|멀티테넌시 격리]]
 
 멀티테넌트 SaaS에서 **가장 흔하고, 가장 크게 터지는** API 취약점이 BOLA입니다. RBAC(역할 권한)을 아무리 잘 만들어도 BOLA가 뚫려 있으면 다른 학원 데이터가 그대로 새 나갑니다. 이 문서는 BOLA가 뭔지, 왜 위험한지, `platform_db`가 어떻게 막는지, 그리고 **어떻게 테스트로 잡는지**까지 공부하는 노트입니다.
