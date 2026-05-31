@@ -290,6 +290,22 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 | NIST SP 800-162 ABAC | 🟡 | 🟡 Subject×Object ✅, Environment P1 |
 | OWASP API #1 BOLA | ✅ | ✅ org_pk 질의 강제 |
 | ISMS-P/SOC2 | 🟡 | 🟡 append-only ✅, 해시 P1, WORM P2, break-glass P1 |
+| ISO/IEC 27001:2022 Annex A (기술 통제) | 🟡 통제 근거 다수 ✅ | 🟡 ISMS 경영시스템·인증은 조직 트랙(위험평가·정책·내부심사 등 DB 밖) |
+
+**ISO 27001 Annex A 매핑** — 이 설계가 받치는 *기술 통제 근거*:
+
+| Annex A 통제 | 설계 근거 |
+|---|---|
+| A.5.15 · A.8.3 접근통제 | 3-gate · RBAC/ABAC/ReBAC ([[gate-abc-flow]]) |
+| A.8.2 · A.8.18 특권 접근 | operator-plane · break-glass ([[break-glass]] · [[operator-plane]]) |
+| A.8.15 로깅 | `audit_log` append-only + 해시 체인 ([[audit-hash-chain]]) |
+| A.8.16 모니터링 | observability·SLO ([[observability-slo]]) |
+| A.8.24 암호화 | KMS + 선별 app-level 암호화 ([[secret-encryption]]) |
+| A.8.12 격리 | `org_pk` · RLS · BOLA ([[multitenancy-rls]] · [[bola-object-authz]]) |
+| A.8.10 · A.8.11 삭제·보존 | 보존·파기 매트릭스 ([[data-lifecycle-retention]]) |
+| A.5.34 PII 보호 | PIPA consent 모델 ([[pipa-consent]]) |
+
+> ⚠️ 위는 **기술 통제 근거**일 뿐이다. ISO 27001 *인증*은 위험평가·SoA·정책·내부심사·사고대응 같은 **조직 ISMS 운영**을 별도로 요구한다 — DB 설계만으로 "준수"가 성립하지 않는다.
 
 ### 5.3 열린 결정
 
