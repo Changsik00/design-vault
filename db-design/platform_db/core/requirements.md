@@ -75,56 +75,56 @@ platform_db는 특정 서비스를 위한 DB가 아니다. **N개 서비스가 �
 
 ### P1 — Identity SSOT
 
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| USR-1 | 1 firebase_uid = 전 서비스 동일 사용자(SSOT) | R0 | identity_user 중앙화 | ✅ |
-| USR-2 | 내부 PK BIGINT, 외부 노출 ULID(`public_id`) | R0 | 불변식 #2 | ✅ |
-| USR-3 | HUMAN/SERVICE/SYSTEM 동일 모델 + type 구분 | R0 | identity_user.type | ✅ |
-| USR-4 | 표시이름 SSOT는 `user_profile`, 서비스별 프로필은 서비스 DB | R0 | §2.1 | ✅ |
-| USR-5 | email은 ACTIVE 중 unique(탈퇴 후 재사용 허용) | R2 | unique index (DDL 규약) | 🟡 P0 |
-| USR-6 | 상태 ACTIVE/SUSPENDED/DELETED, soft→hard delete, anonymize | R0 | identity_user.status + deleted_at | ✅ |
-| USR-7 | 1 user = N org (멀티 워크스페이스) | R0 | membership 복합 PK | ✅ |
-| USR-8 | 소셜(Kakao/Naver) custom token + 다중 provider 계정연결 | R2 | custom token ✅ / 연결 모델 | 🟡 v1.0 |
-| USR-10 | `email_verified` — Firebase JWT 동기화. 필수 기능(결제·초대) 차단 근거 | 신규 | identity_user.email_verified | 🟡 P1 |
-| USR-11 | `phone_verified` — SMS OTP/Firebase Phone. 전화 수집 시 인증 추적 | 신규 | identity_user.phone_verified | 🟡 P1 |
-| USR-12 | 데이터 이식성 — 본인 데이터 admin 이전(동의 기반), org 소유 데이터는 이전 불가 | 신규 | user_consent_event(content_ownership·data_transfer) | 🟡 P1 |
-| AUTHN-1 | Firebase Auth = 인증 SSOT, firebase_uid는 조회 키(PK/FK 아님) | R0 | 불변식 #1 | ✅ |
-| AUTHN-2 | 비밀번호 강도·이메일 인증·재설정·토큰 TTL 1h | R0 | Firebase 정책 | ✅ |
-| AUTHN-3 | 만료/위조 토큰 Guard 401 빠른 차단 | R2 | FirebaseJwtGuard | ✅ |
-| AUTHN-4 | MFA (OWNER/관리자, v0.5) | R0 | Firebase MFA + platform_role | 🟡 |
-| AUTHN-6 | 계정 정지/삭제 시 전 서비스 즉시 차단 | R0 | identity_user.status | ✅ |
-| AUTHN-7 | 다중 디바이스 허용, 이상 로그인 감지 | R0 | Firebase | ✅ |
-| AUTHN-8 | JWT claim 신뢰 경계 — 필수 claim 누락 fail-closed + DB fallback | R6 | FirebaseJwtGuard 규약 | 🟡 |
+| ID      | 요구사항                                                     | 출처  | 적용 설계                                               | 상태      |
+| ------- | -------------------------------------------------------- | --- | --------------------------------------------------- | ------- |
+| USR-1   | 1 firebase_uid = 전 서비스 동일 사용자(SSOT)                      | R0  | identity_user 중앙화                                   | ✅       |
+| USR-2   | 내부 PK BIGINT, 외부 노출 ULID(`public_id`)                    | R0  | 불변식 #2                                              | ✅       |
+| USR-3   | HUMAN/SERVICE/SYSTEM 동일 모델 + type 구분                     | R0  | identity_user.type                                  | ✅       |
+| USR-4   | 표시이름 SSOT는 `user_profile`, 서비스별 프로필은 서비스 DB              | R0  | §2.1                                                | ✅       |
+| USR-5   | email은 ACTIVE 중 unique(탈퇴 후 재사용 허용)                      | R2  | unique index (DDL 규약)                               | 🟡 P0   |
+| USR-6   | 상태 ACTIVE/SUSPENDED/DELETED, soft→hard delete, anonymize | R0  | identity_user.status + deleted_at                   | ✅       |
+| USR-7   | 1 user = N org (멀티 워크스페이스)                               | R0  | membership 복합 PK                                    | ✅       |
+| USR-8   | 소셜(Kakao/Naver) custom token + 다중 provider 계정연결          | R2  | custom token ✅ / 연결 모델                              | 🟡 v1.0 |
+| USR-10  | `email_verified` — Firebase JWT 동기화. 필수 기능(결제·초대) 차단 근거  | 신규  | identity_user.email_verified                        | 🟡 P1   |
+| USR-11  | `phone_verified` — SMS OTP/Firebase Phone. 전화 수집 시 인증 추적 | 신규  | identity_user.phone_verified                        | 🟡 P1   |
+| USR-12  | 데이터 이식성 — 본인 데이터 admin 이전(동의 기반), org 소유 데이터는 이전 불가      | 신규  | user_consent_event(content_ownership·data_transfer) | 🟡 P1   |
+| AUTHN-1 | Firebase Auth = 인증 SSOT, firebase_uid는 조회 키(PK/FK 아님)    | R0  | 불변식 #1                                              | ✅       |
+| AUTHN-2 | 비밀번호 강도·이메일 인증·재설정·토큰 TTL 1h                             | R0  | Firebase 정책                                         | ✅       |
+| AUTHN-3 | 만료/위조 토큰 Guard 401 빠른 차단                                 | R2  | FirebaseJwtGuard                                    | ✅       |
+| AUTHN-4 | MFA (OWNER/관리자, v0.5)                                    | R0  | Firebase MFA + platform_role                        | 🟡      |
+| AUTHN-6 | 계정 정지/삭제 시 전 서비스 즉시 차단                                   | R0  | identity_user.status                                | ✅       |
+| AUTHN-7 | 다중 디바이스 허용, 이상 로그인 감지                                    | R0  | Firebase                                            | ✅       |
+| AUTHN-8 | JWT claim 신뢰 경계 — 필수 claim 누락 fail-closed + DB fallback  | R6  | FirebaseJwtGuard 규약                                 | 🟡      |
 
 ### P2 — Service-agnostic 인가 (RBAC / ABAC / ReBAC)
 
 > ⚠️ **목적 정렬**: RBAC-2·REBAC-2는 *기능적으로 ✅*지만 **EXT-2(§1)** 관점에선 **service 결합 부채**다. "academy 어휘 격리"를 넘어 "코어에 어휘 없음"까지 가야 완성.
 
-| ID | 요구사항 | 출처 | 적용 설계 | 상태 |
-|---|---|---|---|---|
-| RBAC-1 | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3 | D1 | ✅ |
-| RBAC-2 | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…) | R3 | service_membership | ✅ (단 EXT-4 충족, EXT-2는 별개) |
-| RBAC-3 | role→action 매핑은 코드 상수(DB 저장 금지) | R0 | ROLE_PERMISSION | ✅ |
-| RBAC-4 | 서비스 계정 = `platform_role='SERVICE'` + api_key | R3 | D4 | 🟡 SERVICE 확정 / api_key 코드 트랙 별도 |
-| RBAC-5 | 역할 변경 즉시 반영(perm_version) | R0 | bumpPermVersion() | ✅ |
-| RBAC-6 | 마지막 OWNER lockout 방지 | R2 | 앱 트랜잭션 가드 | 🟡 |
-| RBAC-7 | DB role 레지스트리는 테넌트 커스텀롤 트리거 시 | R3 | P2 보류 | ⛔ |
-| RBAC-8 | ROLE_PERMISSION 변경 배포 SLA 명시 — hot-fix vs weekly | R6 | §5.3 열린 결정 | ❓ |
-| ABAC-1 | 소유권(`owner_pk == principal`) 기반 통제 | R0 | CASL ability | ✅ |
-| ABAC-2 | 테넌트 속성(`org_pk` 일치) 모든 도메인 강제 | R0 | 불변식 #3 | ✅ |
-| ABAC-3 | feature_limit 한도 평가(entitlement), 카운터는 서비스측 | R2 | org_entitlement.feature_limits | ✅ |
-| ABAC-4 | entitlement 상태 게이트(ACTIVE/GRACE/SUSPENDED/EXPIRED) | R0 | Gate B, 불변식 #4 | ✅ |
-| ABAC-5 | 리소스 visibility 속성 필터 | R0 | CASL | ✅ |
-| ABAC-6 | NIST 환경속성 — api_key `allowed_ip_cidr` + Gateway/WAF IP | R4 | D8 (P1) | 🟡 |
-| ABAC-7 | 최종 `can()` 결정 캐싱 금지, 입력 블록만 TTL 60s | R0 | Redis 전략 | ✅ |
-| REBAC-1 | capability 위임(grantor→grantee, scoped, expiry, revoke) | R0 | delegation_grant | ✅ |
-| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`) | R3 | D2 | ✅ (🟡 EXT-2: CHECK 하드코딩은 의도적 트레이드오프 → [[service-extensibility]]) |
-| REBAC-3 | 임퍼소네이션 금지, 위임 행사를 감사 기록 | R0 | audit_log | ✅ |
-| REBAC-4 | org 계층(HQ_BRANCH/HOLDING) | R0 | org_relation | ✅ |
-| REBAC-5 | 계층은 권한 근거 아님, 명시적 membership만 | R2 | 불변식 | ✅ |
-| REBAC-6 | 자기참조 차단(DB CHECK constraint) | R2 | chk_no_self_ref | ✅ |
-| REBAC-7 | Zanzibar full relation_tuple은 보류 | R0 | ⛔ 트리거 시 | ⛔ |
-| REBAC-8 | `delegation_grant`(platform) ↔ 서비스 `trust_relationship`(도메인) 경계 규칙 | R6 | 아키텍처 규약 | ✅(규칙)/🟡(구현) |
+| ID      | 요구사항                                                                            | 출처  | 적용 설계                          | 상태                                                               |
+| ------- | ------------------------------------------------------------------------------- | --- | ------------------------------ | ---------------------------------------------------------------- |
+| RBAC-1  | role 2단: `platform_role`(OWNER/MEMBER/SERVICE) + `service_membership.role_code` | R3  | D1                             | ✅                                                                |
+| RBAC-2  | 서비스별 role 어휘 격리 (`academy.director`, `market.seller`…)                          | R3  | service_membership             | ✅ (단 EXT-4 충족, EXT-2는 별개)                                        |
+| RBAC-3  | role→action 매핑은 코드 상수(DB 저장 금지)                                                 | R0  | ROLE_PERMISSION                | ✅                                                                |
+| RBAC-4  | 서비스 계정 = `platform_role='SERVICE'` + api_key                                    | R3  | D4                             | 🟡 SERVICE 확정 / api_key 코드 트랙 별도                                 |
+| RBAC-5  | 역할 변경 즉시 반영(perm_version)                                                       | R0  | bumpPermVersion()              | ✅                                                                |
+| RBAC-6  | 마지막 OWNER lockout 방지                                                            | R2  | 앱 트랜잭션 가드                      | 🟡                                                               |
+| RBAC-7  | DB role 레지스트리는 테넌트 커스텀롤 트리거 시                                                   | R3  | P2 보류                          | ⛔                                                                |
+| RBAC-8  | ROLE_PERMISSION 변경 배포 SLA 명시 — hot-fix vs weekly                                | R6  | §5.3 열린 결정                     | ❓                                                                |
+| ABAC-1  | 소유권(`owner_pk == principal`) 기반 통제                                              | R0  | CASL ability                   | ✅                                                                |
+| ABAC-2  | 테넌트 속성(`org_pk` 일치) 모든 도메인 강제                                                   | R0  | 불변식 #3                         | ✅                                                                |
+| ABAC-3  | feature_limit 한도 평가(entitlement), 카운터는 서비스측                                     | R2  | org_entitlement.feature_limits | ✅                                                                |
+| ABAC-4  | entitlement 상태 게이트(ACTIVE/GRACE/SUSPENDED/EXPIRED)                              | R0  | Gate B, 불변식 #4                 | ✅                                                                |
+| ABAC-5  | 리소스 visibility 속성 필터                                                            | R0  | CASL                           | ✅                                                                |
+| ABAC-6  | NIST 환경속성 — api_key `allowed_ip_cidr` + Gateway/WAF IP                          | R4  | D8 (P1)                        | 🟡                                                               |
+| ABAC-7  | 최종 `can()` 결정 캐싱 금지, 입력 블록만 TTL 60s                                             | R0  | Redis 전략                       | ✅                                                                |
+| REBAC-1 | capability 위임(grantor→grantee, scoped, expiry, revoke)                          | R0  | delegation_grant               | ✅                                                                |
+| REBAC-2 | `capability` 서비스 네임스페이스 `<service>.<action>`(`ACADEMY.*`)                       | R3  | D2                             | ✅ (🟡 EXT-2: CHECK 하드코딩은 의도적 트레이드오프 → [[service-extensibility]]) |
+| REBAC-3 | 임퍼소네이션 금지, 위임 행사를 감사 기록                                                         | R0  | audit_log                      | ✅                                                                |
+| REBAC-4 | org 계층(HQ_BRANCH/HOLDING)                                                       | R0  | org_relation                   | ✅                                                                |
+| REBAC-5 | 계층은 권한 근거 아님, 명시적 membership만                                                   | R2  | 불변식                            | ✅                                                                |
+| REBAC-6 | 자기참조 차단(DB CHECK constraint)                                                    | R2  | chk_no_self_ref                | ✅                                                                |
+| REBAC-7 | Zanzibar full relation_tuple은 보류                                                | R0  | ⛔ 트리거 시                        | ⛔                                                                |
+| REBAC-8 | `delegation_grant`(platform) ↔ 서비스 `trust_relationship`(도메인) 경계 규칙              | R6  | 아키텍처 규약                        | ✅(규칙)/🟡(구현)                                                     |
 
 ### P3 — Billing↔Auth 원자성 & Entitlement 게이트
 
