@@ -63,6 +63,27 @@ aliases:
 ❌ "quota와 rate limit은 둘 다 한도니까 같은 곳에서 같은 방식으로 막으면 된다"  
 ✅ "quota는 누적 총량을 앱이 평가하고, rate limit은 빈도를 엣지(Gateway)가 막는다 — 개념도 위치도 다르다"
 
+하나의 요청이 통과하며 거치는 제한 계층을 그림으로 보면 이렇습니다. 빈도(rate limit)는 엣지에서 IP·org 버킷으로 먼저 거르고, 누적 총량(quota=feature 버킷)은 앱이 마지막에 평가합니다. 어느 단계든 막히면 거부됩니다:
+
+```mermaid
+flowchart TD
+    Req([요청]) --> IP{IP 버킷<br/>초당 빈도?}
+    IP -->|초과| Deny429a[429 Too Many Requests]
+    IP -->|통과| Org{org/api_key 버킷<br/>tier별 빈도?}
+    Org -->|초과| Deny429b[429 Too Many Requests]
+    Org -->|통과| Feat{feature 버킷<br/>feature_limits 누적 총량?}
+    Feat -->|초과| Deny403[403/422 Quota 초과]
+    Feat -->|통과| Allow[허용 → 핸들러 실행]
+
+    subgraph Edge["엣지 (Gateway/WAF + Redis) — 빈도(rate limit)"]
+        IP
+        Org
+    end
+    subgraph App["앱 레이어 (ABAC-3) — 누적 총량(quota)"]
+        Feat
+    end
+```
+
 > 💡 **한 줄 요약**: quota는 *얼마나 많이*(누적 총량), rate limit은 *얼마나 빨리*(단위 시간당 빈도)를 제한합니다. 다른 개념이라 강제하는 위치도 다릅니다.
 
 ---

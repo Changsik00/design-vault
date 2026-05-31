@@ -304,6 +304,58 @@ if (entitlement.status === 'GRACE') {
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+Gate B/entitlement의 핵심 보장은 **entitlement가 없거나 무효인 org는 402로 차단**되고, **canXXX는 `org_entitlement`만 읽는다**(불변식 #4)는 것입니다. entitlement row의 존재·status가 실제 DB 조회 결과에 달려 있으므로 **PostgreSQL 16 + Testcontainers** 위에서 시드 후 검증합니다.
+
+### 통합 테스트 (vitest + Testcontainers + Drizzle)
+
+```typescript
+import { describe, it, expect, beforeAll } from "vitest";
+import { eq, and } from "drizzle-orm";
+import { canAccessService } from "../src/gates";
+
+describe("Gate B — org_entitlement 기반 접근 판단", () => {
+  it("entitlement 없는 org → 차단 (row 자체가 없음)", async () => {
+    // org 77: membership은 있지만 org_entitlement row를 시드하지 않음
+    expect(await canAccessService(db, 77n, "ACADEMY")).toBe(false);
+  });
+
+  it("ACTIVE entitlement 있는 org → 통과", async () => {
+    await db.insert(orgEntitlement).values({
+      orgPk: 42n, service: "ACADEMY", status: "ACTIVE",
+      validUntil: new Date(Date.now() + 86_400_000),
+    });
+    expect(await canAccessService(db, 42n, "ACADEMY")).toBe(true);
+  });
+
+  it("EXPIRED entitlement → 차단", async () => {
+    await db.update(orgEntitlement)
+      .set({ status: "EXPIRED" })
+      .where(and(eq(orgEntitlement.orgPk, 42n), eq(orgEntitlement.service, "ACADEMY")));
+    expect(await canAccessService(db, 42n, "ACADEMY")).toBe(false);
+  });
+
+  it("다른 service의 entitlement는 격리 (ACADEMY ACTIVE여도 MARKET은 차단)", async () => {
+    expect(await canAccessService(db, 42n, "MARKET")).toBe(false);
+  });
+});
+```
+
+### "무엇을 단언하나" 체크리스트
+
+- [ ] **entitlement 없는 org → 차단** (null → false, fail-closed)
+- [ ] **ACTIVE → 통과**, **EXPIRED/SUSPENDED → 차단**
+- [ ] **service별 격리**: `(org_pk, service)` 단위 — ACADEMY가 ACTIVE여도 MARKET은 별도
+- [ ] **불변식 #4**: canXXX 경로가 `org_subscription`/`payment_ledger`를 조회하지 않음 (쿼리 스파이/모킹으로 확인)
+- [ ] **실패 코드**: API 경계에서 402 (401/403과 구분)
+
+> ⚠️ **테스트 함정**: "ACTIVE면 통과"만 보면 절반입니다. *entitlement row가 아예 없는 org*가 fail-closed로 차단되는지가 핵심 — null 처리 누락이 가장 흔한 보안 구멍입니다.
+
+---
+
 ## 마치며
 
 `org_entitlement`는 billing의 복잡함을 한 곳에서 흡수하고 "지금 쓸 수 있나?"라는 단순한 질문에만 답합니다. Gate B 코드를 짤 때는 반드시 `org_entitlement`만 읽어야 한다는 불변식을 기억하세요. `org_subscription`이나 `payment_ledger`를 Gate B 로직에서 직접 참조하는 PR은 코드 리뷰에서 반려됩니다.

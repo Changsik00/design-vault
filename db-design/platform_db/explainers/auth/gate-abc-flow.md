@@ -100,6 +100,25 @@ HTTP 요청 하나가 실제로 허용되거나 거부되기까지, `platform_db
               audit_log INSERT (결과 기록)
 ```
 
+위 흐름을 한눈에 보면 다음과 같습니다. 각 단계는 **fail-closed** — 통과해야만 다음 단계로 내려갑니다.
+
+```mermaid
+flowchart TD
+    REQ([클라이언트 요청<br/>Bearer JWT + X-Org-Pk]) --> AUTH{FirebaseAuthGuard<br/>JWT 검증}
+    AUTH -->|실패| E401[/"401 Unauthorized"/]
+    AUTH -->|성공| GA{Gate A<br/>membership ACTIVE?}
+    GA -->|소속 없음·정지| E403A[/"403 Forbidden"/]
+    GA -->|통과| GB{Gate B<br/>entitlement<br/>status + validUntil?}
+    GB -->|만료·미결제| E402[/"402 Payment Required"/]
+    GB -->|통과| GC{Gate C<br/>ability.can?<br/>RBAC·ABAC·ReBAC}
+    GC -->|권한 없음| E403C[/"403 Forbidden"/]
+    GC -->|통과| BIZ[비즈니스 로직 실행]
+    BIZ --> AUDIT[(audit_log INSERT)]
+
+    classDef deny fill:#fde8e8,stroke:#e02424,color:#9b1c1c;
+    class E401,E403A,E402,E403C deny;
+```
+
 **핵심 원칙**: 앞 단계가 실패하면 뒤 단계는 실행되지 않습니다. Gate A에서 막히면 Gate B, C는 아예 돌지 않아요. 이게 중요한 이유는 쿼리 비용 때문입니다. 소속도 없는 사람이 들어왔을 때 결제 테이블까지 조회할 필요가 없으니까요.
 
 > 💡 **한 줄 요약**: 요청은 인증(Firebase) → Gate A(소속) → Gate B(이용권) → Gate C(정책) → 비즈니스 로직 순으로 순차 통과합니다.
@@ -266,6 +285,82 @@ DB의 org.perm_version:    6  ← 변경됨!
 ```
 
 > 💡 **한 줄 요약**: 최종 권한 판단 결과가 아닌 "입력 재료"만 TTL 60초로 캐싱하고, perm_version으로 즉시 무효화합니다.
+
+---
+
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+3-gate의 핵심 보장은 **순차 fail-closed** — 앞 Gate에서 막히면 뒤 Gate는 돌지 않고, 각 Gate가 *자기 책임의 차단*(소속·결제·정책)을 정확한 HTTP 코드로 낸다는 것입니다. DB 의존(membership/entitlement/delegation)이 핵심이라 **PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`)** 위에서 시드 → API 호출(`supertest`)로 경계를 검증합니다.
+
+### 통합 테스트 (vitest + Testcontainers + Drizzle + supertest)
+
+```typescript
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import request from "supertest";
+import { app } from "../src/main";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  db = drizzle(new Pool({ connectionString: container.getConnectionUri() }));
+  await migrate(db);          // 스키마 적용
+  await seedBaseFixtures(db); // org 42, user 5(TEACHER), entitlement ACTIVE 등
+}, 60_000);
+
+afterAll(async () => { await container.stop(); });
+
+describe("Gate A/B/C 순차 fail-closed", () => {
+  it("Gate A 차단: 소속 없는 user → 403, B·C는 실행 안 됨", async () => {
+    const token = await issueToken({ userPk: 999 }); // org 42 멤버 아님
+    const res = await request(app)
+      .get("/v1/lectures").set("Authorization", token).set("x-org-pk", "42");
+    expect(res.status).toBe(403);           // Gate A 소속 차단
+  });
+
+  it("Gate B 차단: 멤버지만 entitlement 만료 → 402", async () => {
+    await db.update(orgEntitlement)
+      .set({ status: "EXPIRED" }).where(eq(orgEntitlement.orgPk, 42));
+    const token = await issueToken({ userPk: 5, orgPk: 42 }); // ACTIVE 멤버
+    const res = await request(app)
+      .get("/v1/lectures").set("Authorization", token).set("x-org-pk", "42");
+    expect(res.status).toBe(402);           // Gate B 결제 차단 (A는 통과)
+    await db.update(orgEntitlement)
+      .set({ status: "ACTIVE" }).where(eq(orgEntitlement.orgPk, 42)); // 복구
+  });
+
+  it("Gate C 차단: A·B 통과해도 역할에 없는 action → 403", async () => {
+    const token = await issueToken({ userPk: 5, orgPk: 42, role: "STUDENT" });
+    const res = await request(app)
+      .post("/v1/lectures").set("Authorization", token).set("x-org-pk", "42")
+      .send({ title: "x" });
+    expect(res.status).toBe(403);           // Gate C 정책 차단 (A·B는 통과)
+  });
+
+  it("전부 통과: ACTIVE 멤버 + 유효 entitlement + 허용 역할 → 200", async () => {
+    const token = await issueToken({ userPk: 5, orgPk: 42, role: "TEACHER" });
+    const res = await request(app)
+      .get("/v1/lectures").set("Authorization", token).set("x-org-pk", "42");
+    expect(res.status).toBe(200);
+  });
+});
+```
+
+### "무엇을 단언하나" 체크리스트
+
+- [ ] **Gate A 차단**: 소속 없는/SUSPENDED user → 403 (membership)
+- [ ] **Gate B 차단**: 멤버지만 만료 entitlement → 402 (A는 통과해야 의미 있음)
+- [ ] **Gate C 차단**: A·B 통과 + 역할에 없는 action → 403
+- [ ] **순서 보장**: A 실패면 402가 아니라 403이 먼저 나옴 (fail-closed 순차)
+- [ ] **전부 통과 시에만** 200
+
+> ⚠️ **테스트 함정**: "거부됨"만 보지 말고 *어느 Gate가* 거부했는지(403 vs 402)와 *순서*를 봐야 합니다. Gate A 차단 케이스에서 402가 나온다면 순서가 깨진 것입니다.
 
 ---
 

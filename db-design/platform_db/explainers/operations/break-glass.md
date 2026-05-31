@@ -283,6 +283,27 @@ ORDER BY action_count DESC;
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+break-glass의 핵심 보장은 "접근은 가능하되 *반드시 흔적이 남는다*"입니다. 실제 PostgreSQL(`PostgreSqlContainer("postgres:16")` + vitest)로 검증합니다.
+
+- **흔적 강제**: break-glass 경로로 수행한 쓰기가 `audit_log`에 `break_glass=TRUE` + `actor_pk`(운영자) row를 남기는지. row가 없으면 테스트 실패 — "조용한 접근"이 불가능함을 보장.
+- **append-only 불변**: break-glass 이력 자체를 지우지 못하도록, `platform_rw` 롤 커넥션으로 `audit_log` UPDATE/DELETE 시 `permission denied`(SQLSTATE `42501`).
+- **임퍼소네이션과 구분**: 같은 시나리오에서 `actor_type='OPERATOR'`(운영자 평면, [[operator-plane]])로 기록되고 일반 사용자 `actor_pk`로 위장되지 않는지.
+- **이상 감지 쿼리**: 시드한 break-glass 이벤트에 대해 월간 리뷰 집계 쿼리(`WHERE break_glass AND created_at >= now() - INTERVAL '1 month'`)가 건수를 정확히 반환하는지.
+
+```ts
+// 예: break-glass 쓰기는 흔적을 남긴다
+await runAsBreakGlass(operator, () => db.update(organization)...);
+const rows = await db.select().from(auditLog)
+  .where(and(eq(auditLog.breakGlass, true), eq(auditLog.actorPk, operator.pk)));
+expect(rows).toHaveLength(1);            // 흔적 없으면 실패
+```
+
+---
+
 ## 마치며
 
 Break-glass는 "통제된 비상구"입니다. 없으면 장애 대응이 불가능하고, 있어도 통제 없이 쓰면 더 큰 보안 사고가 됩니다.

@@ -121,6 +121,33 @@ identity_user.perm_version BIGINT NOT NULL DEFAULT 1
    → 새 토큰엔 최신 claims (perm_version: 6, 변경된 역할)
 ```
 
+시퀀스로 보면 "권한 변경 → bump → 기존 토큰 stale → 재발급/재검증"이 이렇게 이어집니다.
+
+```mermaid
+sequenceDiagram
+    actor Owner as 학원장
+    participant API
+    participant DB as platform_db
+    actor Park as 박씨(클라)
+    participant FB as Firebase
+
+    Owner->>API: 박씨 역할 변경 요청
+    API->>DB: UPDATE serviceMembership + bumpPermVersion (5→6)
+    Note over DB: perm_version = 6
+
+    Park->>API: GET /v1/lectures (토큰 perm_version=5)
+    API-->>Park: 200 + 헤더 X-Perm-Version: 6
+    Note over Park: 내 토큰=5 ≠ 서버=6 → stale 감지
+
+    Park->>FB: getIdToken(forceRefresh=true)
+    FB-->>Park: 새 토큰 (perm_version=6, 변경된 역할)
+
+    Park->>API: 민감 쓰기 (stale 토큰이면)
+    API->>DB: @VerifyOnDb 재검증
+    DB-->>API: 회수됨
+    API-->>Park: 403 DELEGATION_REVOKED
+```
+
 코드로 보면:
 
 ```typescript

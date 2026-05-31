@@ -176,6 +176,35 @@ await db.insert(orgEntitlement)...;          // 영영 실행 안 됨 → 결제
           이메일 발송 · 푸시 알림 · 영수증 · 분석
 ```
 
+두 경로를 그림으로 대비하면 이렇습니다. 왼쪽(강한 일관성)은 단일 Postgres 트랜잭션으로 *즉시* 일치하고, 오른쪽(결과적 일관성)은 같은 트랜잭션에 기록만 남긴 뒤 워커가 *나중에* 발송합니다:
+
+```mermaid
+flowchart TD
+    Evt([결제 이벤트 수신]) --> Tx
+
+    subgraph Tx["단일 Postgres 트랜잭션 (BEGIN ... COMMIT) — 원자적"]
+        direction TB
+        L[payment_ledger INSERT]
+        S[org_subscription UPDATE → ACTIVE]
+        E[org_entitlement UPSERT → 권한 활성]
+        P[perm_version + 1]
+        OB[outbox_event INSERT status=PENDING]
+    end
+
+    E -.->|강한 일관성: 불일치 창 0| Read[사용자 즉시 새로고침 → ACTIVE 보장]
+
+    Tx --> Commit{COMMIT}
+    Commit -->|성공| Worker[폴링 워커]
+    Commit -->|실패| RB[전부 ROLLBACK<br/>권한도 outbox도 없음]
+
+    Worker -.->|결과적 일관성: 잠깐 늦어도 결국 발송| Ext[이메일 · 푸시 · 영수증 · 분석]
+
+    classDef strong fill:#e8f5e9,stroke:#2e7d32;
+    classDef eventual fill:#fff3e0,stroke:#ef6c00;
+    class L,S,E,P,Read strong;
+    class OB,Worker,Ext eventual;
+```
+
 여기서 영리한 점은, **outbox_event INSERT도 같은 트랜잭션 안에 넣는다**는 것입니다. "이메일을 보내야 한다"는 *기록*은 강하게(원자적으로) 남기되, 실제 *발송*은 결과적으로(나중에) 합니다.
 
 ```sql

@@ -101,6 +101,36 @@ async function createLecture(teacherPk: bigint, orgPk: bigint) {
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "같은 스키마는 FK로 고아를 막고, cross-schema는 FK가 없음"을 검증합니다.
+
+**① 같은 스키마 FK 위반 거부** — 존재하지 않는 부모를 참조하는 INSERT는 SQLSTATE `23503`(foreign_key_violation).
+
+```ts
+await expect(
+  db.insert(membership).values({ userPk: 999n, orgPk: 1n /* ... */ })
+).rejects.toMatchObject({ code: '23503' }); // fk_mbr_user 위반 (identity_user에 999 없음)
+```
+
+**② cross-schema FK 부재 단언** — `academy_db.lecture`(또는 별도 스키마)에는 `platform_db`를 향한 FK 제약이 없어야 함. `information_schema`로 검사.
+
+```ts
+const rows = await db.execute(sql`
+  SELECT 1 FROM information_schema.table_constraints
+  WHERE table_name = 'lecture' AND constraint_type = 'FOREIGN KEY'
+    AND constraint_name LIKE '%identity_user%'`);
+expect(rows.length).toBe(0); // cross-schema FK 없음 (독립 백업/배포 보장)
+```
+
+**③ FK 부재 상태에서 "고아" INSERT 허용** — `lecture.teacher_pk = 999`처럼 존재하지 않는 사용자를 가리켜도 DB는 막지 않음(정합성은 앱 Gate A 책임). INSERT가 성공하는지 확인해, 검증 책임이 코드로 이동했음을 입증.
+
+**④ FK 컬럼 자동 인덱스 확인(JOIN 성능)** — 같은 스키마 FK 컬럼에 대응하는 인덱스가 `pg_indexes`에 존재하는지 단언.
+
+---
+
 ## 연결된 개념
 
 - [[multitenancy-rls]] — org_pk 행 격리와 cross-DB 방향 규칙

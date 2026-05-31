@@ -321,6 +321,39 @@ rewrite가 불가피한 작업(예: 테이블 팽창 정리, 일부 타입 변�
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "어떤 DDL이 비차단인지, 트랜잭셔널 DDL이 실제로 롤백되는지"를 검증합니다.
+
+**① 트랜잭셔널 DDL 롤백** — `BEGIN; ALTER TABLE … ADD COLUMN; ROLLBACK;` 후 컬럼이 남지 않는지(PostgreSQL DDL 트랜잭셔널 입증).
+
+```ts
+await db.transaction(async (tx) => {
+  await tx.execute(sql`ALTER TABLE membership ADD COLUMN tmp_col INT`);
+  tx.rollback(); // Drizzle: 트랜잭션 강제 롤백
+}).catch(() => {});
+const cols = await db.execute(sql`
+  SELECT 1 FROM information_schema.columns
+  WHERE table_name='membership' AND column_name='tmp_col'`);
+expect(cols.length).toBe(0); // 롤백되어 컬럼 없음
+```
+
+**② `CREATE INDEX CONCURRENTLY`가 트랜잭션 블록 안에서 거부** — 트랜잭션 내 실행 시 SQLSTATE `25001`(active_sql_transaction) 류로 실패하는지. 단독(autocommit) 실행은 성공.
+
+```ts
+await expect(db.transaction(async (tx) =>
+  tx.execute(sql`CREATE INDEX CONCURRENTLY idx_x ON membership(display_order)`)
+)).rejects.toThrow(); // 트랜잭션 블록 내 CONCURRENTLY 불가
+```
+
+**③ `CREATE INDEX CONCURRENTLY` 비차단 입증** — 별도 커넥션에서 인덱스를 빌드하는 동안, 메인 커넥션의 `INSERT`가 막히지 않고 성공하는지(동시 실행으로 확인). 빌드 후 `pg_indexes`에 인덱스 존재 단언.
+
+**④ 비휘발성 default `ADD COLUMN`이 즉시·무 rewrite** — 큰 테이블에 `ADD COLUMN ... DEFAULT 0`을 걸어도 짧은 시간 안에 끝나는지(메타데이터만 변경), 그리고 다른 트랜잭션이 차단되지 않는지.
+
+---
+
 ## 마치며
 
 운영 DB 마이그레이션은 개발 DB에서 잘 되더라도 프로덕션에서 위험할 수 있습니다. 행 수가 10만 건인 개발 DB와 5000만 건인 운영 DB는 같은 SQL에도 실행 시간이 수백 배 차이가 날 수 있거든요.

@@ -256,6 +256,42 @@ ALTER TABLE billing_event
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 "CHECK가 ENUM과 같은 보장을 주면서 변경은 테이블 로컬"임을 검증합니다.
+
+**① CHECK 위반 거부** — 허용 목록 밖 값을 INSERT하면 SQLSTATE `23514`(check_violation).
+
+```ts
+await expect(
+  db.insert(product).values({ service: 'INVALID', /* ... */ })
+).rejects.toMatchObject({ code: '23514' }); // chk_product_service 위반
+```
+
+**② 허용 값은 통과** — `'ACADEMY'` 등 목록 안 값은 정상 INSERT.
+
+```ts
+const [row] = await db.insert(product).values({ service: 'ACADEMY' /* ... */ }).returning();
+expect(row.service).toBe('ACADEMY');
+```
+
+**③ `ALTER TABLE … ADD CHECK`로 무중단 서비스 추가** — 제약을 교체해 새 서비스(`FITNESS`)를 추가하면, 교체 직후 새 값이 통과하고 rewrite 없이 끝나는지. raw SQL로 DDL을 돌린 뒤 새 값 INSERT를 확인.
+
+```ts
+await db.execute(sql`
+  ALTER TABLE product DROP CONSTRAINT chk_product_service,
+  ADD CONSTRAINT chk_product_service
+    CHECK (service IN ('ACADEMY','MARKET','AGENT','YOUTUBE','STORE','FITNESS'))`);
+const [row] = await db.insert(product).values({ service: 'FITNESS' /* ... */ }).returning();
+expect(row.service).toBe('FITNESS'); // 교체 후 즉시 허용
+```
+
+**④ 기존 위반 행이 있을 때 `NOT VALID`/`VALIDATE` 분리** — 위반 행을 미리 넣어두고 `ADD CONSTRAINT … NOT VALID`는 성공, 이후 `VALIDATE CONSTRAINT`는 SQLSTATE `23514`로 실패하는지 확인(검증 락 분리 동작 입증).
+
+---
+
 ## 마치며
 
 D6 원칙을 한 문장으로 요약하면: **"값 목록이 나중에 늘어날 컬럼은 ENUM 대신 VARCHAR+CHECK를 써라."**

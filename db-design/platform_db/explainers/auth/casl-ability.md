@@ -75,6 +75,26 @@ TEACHER 역할(RBAC) → '강의 게시' 가능
    = 이 사람의 ability (세 입력의 합)
 ```
 
+세 입력이 어떻게 하나의 ability로 합쳐지고 `can()`이 평가되는지 그림으로 보면:
+
+```mermaid
+flowchart LR
+    RC["role_code<br/>(service_membership)"] --> RBAC["RBAC 규칙<br/>ROLE_PERMISSION[service][role]"]
+    DG["delegation_grant<br/>(ACTIVE·미만료)"] --> REBAC["ReBAC 규칙<br/>위임받은 capability"]
+    ENT["entitlement·소유권<br/>owner_pk·feature_limits"] --> ABAC["ABAC 규칙<br/>속성·테넌트 제약"]
+
+    RBAC --> BUILD{{buildAbility<br/>세 축 합성}}
+    REBAC --> BUILD
+    ABAC --> BUILD
+    BUILD --> ABILITY[ability 객체]
+    ABILITY --> CAN{"can(action, resource)"}
+    CAN -->|"역할·위임·소유 중 하나라도 allow<br/>AND 테넌트·소유권 제약 통과"| ALLOW([true · 통과])
+    CAN -->|"명시 allow 없음<br/>or 제약 위반"| DENY([false · 403])
+
+    classDef deny fill:#fde8e8,stroke:#e02424,color:#9b1c1c;
+    class DENY deny;
+```
+
 > 💡 **한 줄 요약**: ability는 RBAC(역할→코드 상수 권한), ReBAC(위임받은 capability), ABAC(소유권·속성)를 합쳐 빌드됩니다. 세 축 중 하나라도 허용하면 통과하되, 테넌트·소유권 제약은 막는 쪽으로 작동합니다.
 
 ---

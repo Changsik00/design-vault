@@ -384,6 +384,88 @@ SOC2나 ISMS-P 심사 시 "비상 접근이 얼마나 있었고, 어떤 행위�
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+해시 체인의 핵심 보장은 세 가지입니다. **(1)** 정상 체인은 각 row의 `prev_hash`가 직전 row의 `row_hash`와 연결된다. **(2)** 중간 row를 변조/삭제하면 검증 배치가 불일치를 탐지한다. **(3)** append-only 권한이 적용되면 `platform_rw`의 UPDATE/DELETE가 권한 부족(SQLSTATE 42501)으로 거부된다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 GRANT까지 띄워 검증합니다.
+
+```typescript
+// audit-hash-chain.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq, sql } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+let rwPool: Pool; // 최소 권한 롤(platform_rw)로 연결한 풀
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  const admin = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(admin);
+  await migrate(db); // audit_log (prev_hash/row_hash CHAR(64)) 생성
+
+  // append-only 권한 부여: INSERT/SELECT만, UPDATE/DELETE 없음
+  await admin.query(`CREATE ROLE platform_rw LOGIN PASSWORD 'pw'`);
+  await admin.query(`GRANT SELECT, INSERT ON audit_log TO platform_rw`);
+  rwPool = new Pool({ connectionString: connUriAs(container, "platform_rw", "pw") });
+}, 60_000);
+
+afterAll(async () => {
+  await rwPool.end();
+  await container.stop();
+});
+
+describe("audit_log 해시 체인 & append-only", () => {
+  beforeEach(async () => {
+    await db.delete(auditLog);
+  });
+
+  async function appendLog(row: AuditInput, prevHash: string | null) {
+    const rowHash = computeSHA256({ ...row, prevHash });
+    await db.insert(auditLog).values({ ...row, prevHash, rowHash });
+    return rowHash;
+  }
+
+  it("정상 체인: 각 row.prev_hash가 직전 row.row_hash와 연결된다", async () => {
+    const h1 = await appendLog({ pk: 1n, action: "LOGIN", result: "ALLOW" }, null);
+    const h2 = await appendLog({ pk: 2n, action: "USER_DATA_VIEW", result: "ALLOW" }, h1);
+    await appendLog({ pk: 3n, action: "LOGOUT", result: "ALLOW" }, h2);
+
+    expect(await verifyAuditHashChain()).toEqual({ ok: true });
+  });
+
+  it("변조 탐지: 중간 row의 action을 바꾸면 체인 불일치가 검출된다", async () => {
+    const h1 = await appendLog({ pk: 1n, action: "LOGIN", result: "ALLOW" }, null);
+    await appendLog({ pk: 2n, action: "USER_DATA_VIEW", result: "ALLOW" }, h1);
+
+    // admin 권한으로 강제 변조 (운영에선 막혀 있음)
+    await db.update(auditLog).set({ action: "APPROVED_PAYOUT" }).where(eq(auditLog.pk, 2n));
+
+    const result = await verifyAuditHashChain();
+    expect(result.ok).toBe(false);          // ✅ row_hash 재계산 불일치
+    expect(result.tamperedPk).toBe(2n);
+  });
+
+  it("append-only: platform_rw의 UPDATE는 42501 (insufficient_privilege)로 거부", async () => {
+    await appendLog({ pk: 1n, action: "LOGIN", result: "ALLOW" }, null);
+
+    await expect(
+      rwPool.query(`UPDATE audit_log SET action='X' WHERE pk=1`),
+    ).rejects.toMatchObject({ code: "42501" });
+
+    await expect(
+      rwPool.query(`DELETE FROM audit_log WHERE pk=1`),
+    ).rejects.toMatchObject({ code: "42501" }); // ✅ 삭제도 거부
+  });
+});
+```
+
+---
+
 ## 마치며
 
 보안 감사 로그의 무결성은 "로그가 있다"에서 "로그가 변조되지 않았음을 증명할 수 있다"로 발전해야 합니다. platform_db의 방어 계획을 요약하면 다음과 같습니다.

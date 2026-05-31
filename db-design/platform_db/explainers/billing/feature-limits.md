@@ -313,6 +313,84 @@ const limits = AcademyFeatureLimitsSchema.parse(entitlement.featureLimits);
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+핵심 보장은 "런타임 한도는 항상 `org_entitlement.feature_limits`(SSOT)에서만 읽힌다"입니다. PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 실제 DB를 띄워 3중 SSOT 우선순위와 JSONB 한도 조회를 검증합니다.
+
+```typescript
+// feature-limits.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { and, eq } from "drizzle-orm";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  const pool = new Pool({ connectionString: container.getConnectionUri() });
+  db = drizzle(pool);
+  await migrate(db); // product_feature · plan_definition · org_entitlement 생성
+}, 60_000);
+
+afterAll(async () => {
+  await container.stop();
+});
+
+describe("feature_limits 3중 SSOT 우선순위", () => {
+  beforeEach(async () => {
+    await db.delete(orgEntitlement);
+    await db.delete(planDefinition);
+    await db.delete(productFeature);
+  });
+
+  it("런타임 한도는 org_entitlement.feature_limits만 읽는다 (불변식 #10)", async () => {
+    // product_feature=5, plan_definition=5 인데 org만 20으로 개별 조정
+    await db.insert(productFeature).values({ productPk: 1, featureKey: "daily_uploads", limitValue: 5 });
+    await db.insert(planDefinition).values({ planCode: "BASIC", defaultLimits: { daily_uploads: 5 } });
+    await db.insert(orgEntitlement).values({
+      orgPk: 42, productCode: "ACADEMY_BASIC", service: "ACADEMY", status: "ACTIVE",
+      planCode: "BASIC", featureLimits: { daily_uploads: 20 }, // VIP 개별 상향
+    });
+
+    const limit = await getFeatureLimit(42, "ACADEMY", "daily_uploads");
+    expect(limit).toBe(20); // ✅ org_entitlement 값 (5가 아님)
+  });
+
+  it("JSONB 한도 조회: org별 단건 row를 읽어 JSON에서 키를 꺼낸다", async () => {
+    await db.insert(orgEntitlement).values({
+      orgPk: 7, productCode: "ACADEMY_PRO", service: "ACADEMY", status: "ACTIVE",
+      featureLimits: { daily_uploads: 10, members: 50, storage_gb: 100 },
+    });
+
+    const ent = await db.query.orgEntitlement.findFirst({
+      where: and(eq(orgEntitlement.orgPk, 7), eq(orgEntitlement.service, "ACADEMY")),
+    });
+    const limits = ent!.featureLimits as Record<string, number>;
+    expect(limits["members"]).toBe(50);
+    expect(limits["ai_queries_per_day"] ?? Infinity).toBe(Infinity); // 미정의 키 = 무제한
+  });
+
+  it("plan_definition을 바꿔도 기존 org의 feature_limits는 자동으로 안 바뀐다", async () => {
+    await db.insert(orgEntitlement).values({
+      orgPk: 99, productCode: "ACADEMY_BASIC", service: "ACADEMY", status: "ACTIVE",
+      planCode: "BASIC", featureLimits: { daily_uploads: 5 },
+    });
+    // 플랜 템플릿만 상향
+    await db.insert(planDefinition).values({ planCode: "BASIC", defaultLimits: { daily_uploads: 8 } });
+
+    const limit = await getFeatureLimit(99, "ACADEMY", "daily_uploads");
+    expect(limit).toBe(5); // ✅ 명시적 마이그레이션 없이는 그대로
+  });
+});
+```
+
+---
+
 ## 마치며
 
 feature_limits의 3중 구조를 다시 정리하면:

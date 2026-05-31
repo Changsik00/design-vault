@@ -269,6 +269,92 @@ GROUP BY status;
 
 ---
 
+## 테스트 방법
+
+> 🧪 *실제 DB·ORM·운영에서 돌리는 법*: [[testing-strategy]] · [[orm-testing-drizzle]]
+
+웹훅 처리의 세 가지 보장을 검증합니다. **(1)** 같은 `(pg_provider, event_id)` 웹훅이 두 번 와도 한 번만 처리된다(멱등). **(2)** 서명이 틀리면 비즈니스 처리 없이 `SKIPPED`로 기록된다. **(3)** 처리 실패는 `FAILED`로 남아 재시도해도 `idempotency_key` 덕에 이중 결제가 안 된다. HTTP 엔드포인트까지 태우므로 **supertest**를 더해 PostgreSQL 16 + Testcontainers(`PostgreSqlContainer`) + Drizzle(node-postgres) + vitest로 돌립니다. (여기서 PG는 *Payment Gateway*(Toss/Stripe)이고, 테스트 DB는 PostgreSQL입니다.)
+
+```typescript
+// webhook-processing.test.ts
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import request from "supertest";
+import { PostgreSqlContainer, StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { and, eq } from "drizzle-orm";
+import { app } from "../src/app";
+
+let container: StartedPostgreSqlContainer;
+let db: ReturnType<typeof drizzle>;
+
+beforeAll(async () => {
+  container = await new PostgreSqlContainer("postgres:16").start();
+  db = drizzle(new Pool({ connectionString: container.getConnectionUri() }));
+  await migrate(db); // pg_webhook_event (uq_provider_event UNIQUE) · payment_ledger 생성
+}, 60_000);
+
+afterAll(async () => {
+  await container.stop();
+});
+
+describe("PG 웹훅 수신·처리", () => {
+  beforeEach(async () => {
+    await db.delete(pgWebhookEvent);
+    await db.delete(paymentLedger);
+  });
+
+  function signedRequest(body: object) {
+    const payload = JSON.stringify(body);
+    const sig = "hmac-sha256=" + hmacSha256(payload, TEST_SECRET);
+    return request(app).post("/webhook/pg").set("Toss-Signature", sig).send(body);
+  }
+
+  it("중복 웹훅 멱등: 같은 event_id 재전송은 한 번만 처리하고 200을 돌려준다", async () => {
+    const body = { eventId: "evt_toss_abc123", amount: 49000, type: "payment.completed", orgPk: 1 };
+
+    await signedRequest(body).expect(200);
+    await signedRequest(body).expect(200); // PG 재전송 → 200으로 재전송 중단 유도
+
+    const events = await db.select().from(pgWebhookEvent)
+      .where(and(eq(pgWebhookEvent.pgProvider, "TOSS"), eq(pgWebhookEvent.eventId, "evt_toss_abc123")));
+    expect(events).toHaveLength(1);              // UNIQUE로 한 행만
+    const charges = await db.select().from(paymentLedger);
+    expect(charges).toHaveLength(1);             // ✅ 결제도 한 번만
+  });
+
+  it("서명 검증 실패: 비즈니스 처리 없이 SKIPPED로 기록만 남는다", async () => {
+    const body = { eventId: "evt_forged_001", amount: 1_000_000, type: "payment.completed" };
+    await request(app).post("/webhook/pg")
+      .set("Toss-Signature", "hmac-sha256=deadbeef") // 위조 서명
+      .send(body)
+      .expect(200); // 200이지만 처리는 안 함
+
+    const evt = await db.query.pgWebhookEvent.findFirst({ where: eq(pgWebhookEvent.eventId, "evt_forged_001") });
+    expect(evt?.signatureOk).toBe(false);
+    expect(evt?.status).toBe("SKIPPED");
+    expect(await db.select().from(paymentLedger)).toHaveLength(0); // 결제 미생성
+  });
+
+  it("처리 실패 후 재시도: FAILED → 재처리해도 idempotency_key로 이중 결제 없음", async () => {
+    const body = { eventId: "evt_retry_777", amount: 29000, type: "payment.completed", orgPk: 1 };
+    // 1차: 비즈니스 처리 중 일시 장애 주입 → FAILED
+    vi.spyOn(entitlementRepo, "upsert").mockRejectedValueOnce(new Error("일시 DB 장애"));
+    await signedRequest(body).expect(200);
+    let evt = await db.query.pgWebhookEvent.findFirst({ where: eq(pgWebhookEvent.eventId, "evt_retry_777") });
+    expect(evt?.status).toBe("FAILED");
+
+    // 재처리 워커
+    await retryFailedWebhooks();
+    evt = await db.query.pgWebhookEvent.findFirst({ where: eq(pgWebhookEvent.eventId, "evt_retry_777") });
+    expect(evt?.status).toBe("PROCESSED");
+    expect(await db.select().from(paymentLedger)).toHaveLength(1); // ✅ 재시도해도 결제 1건
+  });
+});
+```
+
+---
+
 ## 마치며
 
 웹훅 처리의 핵심은 세 가지입니다.
