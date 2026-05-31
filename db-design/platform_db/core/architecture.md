@@ -162,7 +162,11 @@ cross-tenant 집계는 **아키텍처 분리**(`internal/`·`*-admin`) — Admin
 
 1. **Firebase = 인증, 인가 = 우리 DB.** `firebase_uid`는 조회 키일 뿐 PK/FK 아님.
 2. **내부 PK는 BIGINT, 외부 노출은 ULID(`public_id`).** 시퀀셜 PK를 URL·API에 노출 금지.
-3. **테넌트 데이터를 담는 모든 도메인 테이블은 `org_pk NOT NULL`.** 예외는 3부류뿐 — ① 전역 카탈로그(`product`·`product_sku`·`plan_definition`) ② 플랫폼 이벤트 버스(`pg_webhook_event`·`outbox_event`) ③ `audit_log`(SYSTEM actor 이벤트는 org 무관, nullable). `user_consent_event`는 user-scoped, `subscription_item`은 부모로 격리. 그 외 누락 = PR 반려([[schema-reference]] §G.1).
+3. **테넌트 데이터를 담는 모든 도메인 테이블은 `org_pk NOT NULL`.** 누락 = PR 반려([[schema-reference]] §G.1). 아래 예외만 허용:
+   - **전역 카탈로그** — `product` · `product_sku` · `plan_definition` (테넌트 무관 공용 데이터)
+   - **플랫폼 이벤트 버스** — `pg_webhook_event` · `outbox_event`
+   - **`audit_log`** — SYSTEM actor 이벤트는 org 무관이라 nullable
+   - **`user_consent_event`** — user-scoped(개인 귀속) · **`subscription_item`** — 부모(`org_subscription`)로 격리
 4. **`canXXX()`는 `org_entitlement`만 읽는다.** `payment_ledger` 직접 조회 금지. entitlement는 billing의 authorization projection이며 Gate B의 유일 진실 원천.
 5. **`service`는 `VARCHAR(50)` + `CHECK`.** ENUM 아님. 새 서비스 = CHECK 1줄 추가([[service-extensibility]]). 현재: `ACADEMY`·`MARKET`·`AGENT`·`YOUTUBE`·`STORE`.
 6. **cross-DB는 아래로만.** `service_db → platform_db` 읽기 OK. 옆으로(`academy_db → store_db`) 금지. cross-schema FK 금지([[fk-strategy]]).
