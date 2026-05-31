@@ -56,10 +56,10 @@ UPDATE membership SET status = 'SUSPENDED' WHERE user_pk = 10 AND org_pk = 1;
 
 우리 사용처: `membership.status`(ACTIVE↔SUSPENDED), `organization.status`(ACTIVE/SUSPENDED/CLOSED), `org_entitlement.status`(ACTIVE/GRACE/SUSPENDED/EXPIRED).
 
-**패턴 2 — `deleted_at` TIMESTAMP**: "삭제됐지만 복원·참조할 수 있어야 하는 것". 삭제 *시점*이 중요.
+**패턴 2 — `deleted_at` TIMESTAMPTZ**: "삭제됐지만 복원·참조할 수 있어야 하는 것". 삭제 *시점*이 중요.
 
 ```sql
-UPDATE identity_user SET deleted_at = NOW() WHERE pk = 10;
+UPDATE identity_user SET deleted_at = now() WHERE pk = 10;
 SELECT * FROM identity_user WHERE deleted_at IS NULL;  -- 살아있는 것만
 ```
 
@@ -124,8 +124,8 @@ ORDER BY created_at DESC LIMIT 1;
 DB 계정 권한으로 강제합니다. 관례만으로는 누군가 실수로 UPDATE/DELETE를 칠 수 있으니까요.
 
 ```sql
--- audit_append 계정에는 INSERT만 부여
-GRANT INSERT ON platform_db.audit_log TO 'audit_append'@'%';
+-- audit_append 역할에는 INSERT만 부여
+GRANT INSERT ON audit_log TO audit_append;
 -- UPDATE, DELETE 권한 없음 → 앱 코드가 실수해도 DB가 차단
 ```
 

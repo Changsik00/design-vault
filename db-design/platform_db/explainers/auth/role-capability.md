@@ -31,10 +31,12 @@ aliases:
 
 ```sql
 CREATE TABLE membership (
-  user_pk  BIGINT UNSIGNED NOT NULL,
-  org_pk   BIGINT UNSIGNED NOT NULL,
-  role     ENUM('OWNER','DIRECTOR','TEACHER','MEMBER','STUDENT','PARENT') NOT NULL,
-  status   ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  user_pk  BIGINT NOT NULL,
+  org_pk   BIGINT NOT NULL,
+  role     VARCHAR(20) NOT NULL
+             CHECK (role IN ('OWNER','DIRECTOR','TEACHER','MEMBER','STUDENT','PARENT')),
+  status   VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+             CHECK (status IN ('ACTIVE','SUSPENDED')),
   PRIMARY KEY (user_pk, org_pk)
 );
 ```
@@ -60,7 +62,7 @@ role ENUM(
 )
 ```
 
-게다가 ENUM을 변경하려면 `ALTER TABLE MODIFY COLUMN`을 실행해야 하는데, 수백만 건이 쌓인 대형 테이블에서는 이게 **테이블 전체 잠금**을 유발합니다.
+게다가 네이티브 ENUM을 변경하려면 전역 타입을 손대야 하는데, 값 제거·재정렬이 필요해지면 타입을 교체하고 `ALTER COLUMN ... TYPE`으로 컬럼을 갈아끼워야 하고, 이는 수백만 건이 쌓인 대형 테이블에서 **전체 행 rewrite + 테이블 잠금**을 유발합니다([[enum-vs-varchar-check]]).
 
 **문제 3: "platform-level 권한"과 "서비스 도메인 역할"이 섞여 있다.**
 
@@ -195,13 +197,14 @@ DB에 rule이 있으면 "왜 이 사람이 이 버튼을 못 누르나?" 디버�
 ```sql
 -- delegation_grant: "grantor_pk가 grantee_pk에게 capability를 준다"
 CREATE TABLE delegation_grant (
-  pk          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  grantor_pk  BIGINT UNSIGNED NOT NULL, -- 권한 주는 사람
-  grantee_pk  BIGINT UNSIGNED NOT NULL, -- 권한 받는 사람
-  org_pk      BIGINT UNSIGNED NOT NULL,
+  pk          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  grantor_pk  BIGINT NOT NULL, -- 권한 주는 사람
+  grantee_pk  BIGINT NOT NULL, -- 권한 받는 사람
+  org_pk      BIGINT NOT NULL,
   capability  VARCHAR(50) NOT NULL,
-  status      ENUM('ACTIVE','REVOKED') NOT NULL DEFAULT 'ACTIVE',
-  expires_at  TIMESTAMP,
+  status      VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
+                CHECK (status IN ('ACTIVE','REVOKED')),
+  expires_at  TIMESTAMPTZ,
   ...
 );
 ```
@@ -253,9 +256,9 @@ CONSTRAINT chk_capability CHECK (capability IN (
 
 예를 들어 market 서비스가 "상품 리스팅 승인" 위임 기능을 만들고 싶다면 `APPROVE_LISTING` 같은 capability가 필요합니다. 그런데 현재 CHECK constraint에 없으니 쓸 수가 없습니다. 그렇다고 `APPROVE_LISTING`을 추가하면, `APPROVE_VIDEO`와 `APPROVE_LISTING`이 같은 테이블에 섞여 있어서 "이 capability가 어느 서비스 것인지" 알 방법이 없습니다.
 
-**문제 2: CHECK constraint 변경이 잠금을 유발.**
+**문제 2: capability 목록이 스키마에 묶여 있다.**
 
-capability 종류를 늘리려면 `ALTER TABLE` DDL을 실행해야 합니다. 이게 대형 테이블에서는 위험합니다.
+capability 종류를 늘릴 때마다 `ALTER TABLE`로 CHECK를 교체하는 배포가 필요합니다. PostgreSQL에서 CHECK 교체 자체는 `NOT VALID` 후 `VALIDATE`로 락을 거의 안 잡고 처리할 수 있지만, 서비스마다 추가될 때마다 코어 `platform_db` 스키마를 건드려야 한다는 결합이 문제입니다.
 
 **목표 구조 (D2)**: `<service>.<action>` 네임스페이스 패턴으로 전환합니다.
 

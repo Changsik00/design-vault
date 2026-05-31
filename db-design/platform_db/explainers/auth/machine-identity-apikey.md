@@ -45,7 +45,8 @@ aliases:
 
 ```sql
 -- identity_user.type 으로 사람/머신 구분 (테이블은 하나)
-type ENUM('HUMAN','SERVICE','SYSTEM') NOT NULL DEFAULT 'HUMAN'
+-- 전역 타입: CREATE TYPE identity_type_enum AS ENUM ('HUMAN','SERVICE','SYSTEM');
+type identity_type_enum NOT NULL DEFAULT 'HUMAN'
 ```
 
 머신 신원은 `type='SERVICE'`이고, 테넌트 권위는 `membership.platform_role='SERVICE'`로 표현합니다(§D.4). 즉 머신도 *어느 org에 소속된 멤버*입니다 — 떠다니는 슈퍼유저가 아닙니다.
@@ -161,23 +162,23 @@ Authorization: Bearer ak_live_3f8a9b...     ← 발급된 api_key
 
 ```sql
 CREATE TABLE api_key (
-  pk               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  org_pk           BIGINT UNSIGNED NOT NULL,     -- 어느 테넌트 소속 키인가 (격리 기준)
-  user_pk          BIGINT UNSIGNED NOT NULL,     -- 소유자 identity_user(type='SERVICE')
+  pk               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  org_pk           BIGINT NOT NULL,              -- 어느 테넌트 소속 키인가 (격리 기준)
+  user_pk          BIGINT NOT NULL,              -- 소유자 identity_user(type='SERVICE')
   key_prefix       VARCHAR(10) NOT NULL,         -- 평문 prefix (예: 'ak_live_') — 식별/조회용
   secret_hash      VARCHAR(255) NOT NULL,        -- bcrypt hash. 평문은 발급 시 1회만 노출
-  scopes           JSON NOT NULL,                -- ["lecture:read","membership:write"]
+  scopes           JSONB NOT NULL,               -- ["lecture:read","membership:write"]
   allowed_ip_cidr  VARCHAR(50),                  -- 허용 IP 범위 (NIST 환경속성)
-  allowed_services JSON,                         -- ["ACADEMY","MARKET"]
-  rotated_at       TIMESTAMP,                    -- 마지막 rotation 시각
-  last_used_at     TIMESTAMP,                    -- 최근 사용 (유휴 키 탐지)
-  expires_at       TIMESTAMP,                    -- 만료 시각
-  revoked_at       TIMESTAMP,                    -- 즉시 폐기 시각 (NULL이면 유효)
+  allowed_services JSONB,                        -- ["ACADEMY","MARKET"]
+  rotated_at       TIMESTAMPTZ,                  -- 마지막 rotation 시각
+  last_used_at     TIMESTAMPTZ,                  -- 최근 사용 (유휴 키 탐지)
+  expires_at       TIMESTAMPTZ,                  -- 만료 시각
+  revoked_at       TIMESTAMPTZ,                  -- 즉시 폐기 시각 (NULL이면 유효)
   revoked_reason   VARCHAR(255),                 -- 폐기 사유 (감사)
-  created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
-  INDEX idx_api_key_org (org_pk),
-  INDEX idx_api_key_user (user_pk)
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX idx_api_key_org  ON api_key (org_pk);
+CREATE INDEX idx_api_key_user ON api_key (user_pk);
 ```
 
 **`key_prefix` + `secret_hash` — 열쇠를 둘로 나누는 이유**
@@ -319,7 +320,7 @@ C-07 시나리오 #3이 이를 검증합니다: 허용 대역 밖 IP에서 같�
 ```sql
 -- revoke = 삭제가 아니라 폐기 마킹 (감사 추적 보존)
 UPDATE api_key
-SET revoked_at = NOW(), revoked_reason = 'leaked in public repo'
+SET revoked_at = now(), revoked_reason = 'leaked in public repo'
 WHERE pk = ?;
 ```
 
