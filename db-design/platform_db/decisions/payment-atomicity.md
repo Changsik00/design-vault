@@ -54,7 +54,7 @@ PG webhook → Kafka topic → 결제 워커 → org_subscription 갱신
 
 ---
 
-## 우리 결정 — 단일 InnoDB 트랜잭션
+## 우리 결정 — 단일 Postgres 트랜잭션
 
 결제와 권한 갱신을 **하나의 트랜잭션**으로 묶는다.
 
@@ -73,8 +73,8 @@ BEGIN;
   -- 3. 권한 활성화 (upsert)
   INSERT INTO org_entitlement (org_pk, service, status, feature_limits, valid_until)
   VALUES (?, ?, 'ACTIVE', ?, ?)
-  ON DUPLICATE KEY UPDATE
-    status='ACTIVE', feature_limits=VALUES(feature_limits), valid_until=VALUES(valid_until);
+  ON CONFLICT (org_pk, service) DO UPDATE SET
+    status='ACTIVE', feature_limits=EXCLUDED.feature_limits, valid_until=EXCLUDED.valid_until;
 
   -- 4. 권한 변경 전파 (클라이언트 캐시 무효화)
   UPDATE organization SET perm_version = perm_version + 1 WHERE pk=?;
@@ -86,9 +86,11 @@ COMMIT;
 -- 여기서 commit이 성공하면 결제+권한이 동시에 반영됨이 보장됨
 ```
 
+> 🐬 **MySQL이라면**: 단일 InnoDB 트랜잭션으로 동일하게 구현된다. UPSERT는 `ON CONFLICT … DO UPDATE` 대신 `ON DUPLICATE KEY UPDATE c=VALUES(c)` 구문을 쓴다.
+
 **채택 근거**:
 1. **"결제됐는데 권한 미반영" 창이 0**: BEGIN~COMMIT 사이에 서버가 죽으면 전체 rollback → 일관된 상태 유지
-2. **같은 MySQL 인스턴스**: 분산 트랜잭션(2PC), Kafka 없이 단순 트랜잭션 가능
+2. **같은 Postgres 인스턴스**: 분산 트랜잭션(2PC), Kafka 없이 단순 트랜잭션 가능
 3. **멱등성 구현 위치 단순화**: `idempotency_key UNIQUE` + `UNIQUE(pg_provider, event_id)` 두 곳만
 4. **async 부수효과는 outbox**: 이메일·알림·검색 인덱싱만 eventual consistency — 권한은 동기
 
@@ -99,7 +101,7 @@ COMMIT;
 | 항목 | Kafka + eventual | 단일 트랜잭션 (우리) |
 |---|---|---|
 | 결제↔권한 일관성 | 보장 안 됨 (워커 지연) | **항상 보장** |
-| 인프라 복잡도 | 높음 (Kafka 브로커) | 낮음 (MySQL만) |
+| 인프라 복잡도 | 높음 (Kafka 브로커) | 낮음 (Postgres만) |
 | 워커 독립 확장 | 가능 | 불가 (platform_db 중심) |
 | 현 규모 적합성 | 과도 | 적합 |
 | MQ 장애 전파 | 있음 | **없음** |
